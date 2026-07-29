@@ -4,7 +4,15 @@
    "components": {
     "Bus": {
      "count": 9,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "x",
+      "y",
+      "carrier",
+      "country"
+     ],
+     "in_memory_columns": [
       "v_nom",
       "type",
       "x",
@@ -24,7 +32,15 @@
     },
     "Carrier": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "co2_emissions",
+      "color",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
       "co2_emissions",
       "color",
       "nice_name",
@@ -38,7 +54,18 @@
     },
     "Generator": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus",
+      "p_nom",
+      "p_nom_extendable",
+      "p_nom_min",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "efficiency"
+     ],
+     "in_memory_columns": [
       "bus",
       "control",
       "type",
@@ -92,7 +119,12 @@
     },
     "GlobalConstraint": {
      "count": 1,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "sense",
+      "constant"
+     ],
+     "in_memory_columns": [
       "type",
       "investment_period",
       "bus",
@@ -105,7 +137,18 @@
     },
     "Line": {
      "count": 7,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "x",
+      "r",
+      "s_nom",
+      "s_nom_extendable",
+      "capital_cost",
+      "carrier"
+     ],
+     "in_memory_columns": [
       "bus0",
       "bus1",
       "type",
@@ -146,7 +189,18 @@
     },
     "Link": {
      "count": 4,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "carrier",
+      "p_nom",
+      "p_nom_extendable",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
       "bus0",
       "bus1",
       "type",
@@ -193,7 +247,12 @@
     },
     "Load": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus",
+      "carrier"
+     ],
+     "in_memory_columns": [
       "bus",
       "carrier",
       "type",
@@ -232,7 +291,11 @@
    "components": {
     "Bus": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "v_nom"
+     ],
+     "in_memory_columns": [
       "v_nom",
       "type",
       "x",
@@ -251,7 +314,11 @@
     },
     "Carrier": {
      "count": 3,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "co2_emissions"
+     ],
+     "in_memory_columns": [
       "co2_emissions",
       "color",
       "nice_name",
@@ -262,7 +329,20 @@
     },
     "Generator": {
      "count": 12,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus",
+      "p_nom",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_min_pu",
+      "p_max_pu",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "efficiency"
+     ],
+     "in_memory_columns": [
       "bus",
       "control",
       "type",
@@ -319,7 +399,12 @@
     },
     "GlobalConstraint": {
      "count": 1,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "sense",
+      "constant"
+     ],
+     "in_memory_columns": [
       "type",
       "investment_period",
       "bus",
@@ -332,7 +417,16 @@
     },
     "Line": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "x",
+      "s_nom",
+      "s_nom_extendable",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
       "bus0",
       "bus1",
       "type",
@@ -373,7 +467,17 @@
     },
     "Link": {
      "count": 2,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "p_nom",
+      "p_nom_extendable",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
       "bus0",
       "bus1",
       "type",
@@ -420,7 +524,11 @@
     },
     "Load": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus"
+     ],
+     "in_memory_columns": [
       "bus",
       "carrier",
       "type",
@@ -442,7 +550,21 @@
     },
     "StorageUnit": {
      "count": 6,
-     "static_columns": [
+     "exported_columns": [
+      "name",
+      "bus",
+      "p_nom",
+      "p_nom_extendable",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "cyclic_state_of_charge",
+      "max_hours",
+      "efficiency_store",
+      "efficiency_dispatch",
+      "standing_loss"
+     ],
+     "in_memory_columns": [
       "bus",
       "control",
       "type",

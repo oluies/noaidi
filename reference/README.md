@@ -38,11 +38,30 @@ per-entity overrides", not a dense snapshot-by-entity matrix for every
 attribute — reproducing that is the difference between matching PyPSA's files
 and merely being equivalent to them.
 
-**The CSV export omits columns left at their default.** `buses.csv` in
-`ac-dc-meshed` carries six columns out of Bus's nineteen attributes. A writer
-that emits all of them produces a valid network and a different file, so
-round-trip fidelity means knowing the defaults, which is what `schema.json` is
-for.
+**The CSV export omits columns that were never set** — not columns whose values
+equal the default. `buses.csv` in `ac-dc-meshed` carries six columns out of Bus's
+nineteen attributes, and two of those six (`x`, `y`) hold exactly the default
+value. That is provenance, not content, and it is not recoverable from the file,
+so a reader must preserve the column set it was given rather than recompute it.
+
+**Networks carry columns the schema does not describe.** `buses.csv` has a
+`country` column and `carriers.csv` has `marginal_cost`, `efficiency` and
+`capital_cost` — none of which appear under `Bus` or `Carrier` in
+`schema.json`. PyPSA's component model is deliberately extensible, so these are
+normal input rather than corruption, and L1 must preserve unknown columns
+verbatim. `schema.json` is the authority for defaults and variability, not for
+which columns may appear.
+
+**`snapshots.csv` is not just an index.** Its header is
+`,snapshot,objective,stores,generators`: pandas' positional index, the label,
+then three weightings that scale each snapshot's contribution to the objective
+and to storage accounting. Reading the first field as the label yields the row
+number, which looks plausible and is wrong.
+
+Per-file exported headers are recorded in `manifest.json` as
+`exported_columns`, which is what a reader and writer can be held to — the
+in-memory column set is larger (Bus: 14 loaded against 6 exported) and would be
+an unmeetable target.
 
 ## Versions
 

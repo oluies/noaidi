@@ -31,7 +31,11 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-warnings.filterwarnings("ignore")
+# Only the noise. DeprecationWarning and FutureWarning from PyPSA and pandas are
+# the earliest signal of the API drift this whole pinning exercise exists to
+# catch, so they are left to print.
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "goldens"
@@ -46,8 +50,19 @@ NETWORKS = {
 
 
 def jsonable(value):
-    """Render a value so the JSON is stable across runs and platforms."""
-    if isinstance(value, (np.integer,)):
+    """Render a value so the JSON is stable across runs and platforms.
+
+    Order matters. `bool` subclasses `int`, so it is tested first; and plain
+    Python `int` has to be handled explicitly rather than falling through to the
+    catch-all, because PyPSA coerces int-typed defaults to `int` and stringifying
+    them would encode the same concept two different ways depending on the
+    declared type — `build_year` as `"0"` next to `p_nom` as `0.0`.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, (np.integer, int)):
         return int(value)
     if isinstance(value, (np.floating, float)):
         # NaN and infinities are meaningful here (unset bounds), and JSON has
@@ -57,13 +72,13 @@ def jsonable(value):
         if np.isinf(value):
             return {"$inf": "+" if value > 0 else "-"}
         return float(value)
-    if isinstance(value, (np.bool_, bool)):
-        return bool(value)
     if isinstance(value, (pd.Timestamp,)):
         return value.isoformat()
-    if value is None or isinstance(value, str):
+    if isinstance(value, str):
         return value
-    return str(value)
+    # Deliberately loud: a new dtype arriving with a version bump should stop the
+    # run rather than land in the goldens as somebody's `str()`.
+    raise TypeError(f"jsonable: unhandled {type(value).__name__}: {value!r}")
 
 
 def frame_to_json(df: pd.DataFrame) -> dict:
@@ -72,6 +87,19 @@ def frame_to_json(df: pd.DataFrame) -> dict:
         "columns": [str(c) for c in df.columns],
         "values": [[jsonable(v) for v in row] for row in df.to_numpy()],
     }
+
+
+def text_or_none(value) -> str | None:
+    """Optional text, with absence rendered as null rather than "nan".
+
+    `str(float("nan"))` is `"nan"`, which reads as an ordinary string and is
+    indistinguishable from a unit actually called that. Absence is spelled one
+    way across this file.
+    """
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def component_schema() -> dict:
@@ -94,14 +122,14 @@ def component_schema() -> dict:
         attrs = ctype.defaults
         schema[ctype.name] = {
             "list_name": ctype.list_name,
-            "category": str(ctype.category),
-            "description": str(ctype.description),
+            "category": text_or_none(ctype.category),
+            "description": text_or_none(ctype.description),
             "attributes": {
                 str(name): {
                     "type": str(row.get("type", "")),
-                    "unit": str(row.get("unit", "")),
+                    "unit": text_or_none(row.get("unit")),
                     "default": jsonable(row.get("default")),
-                    "status": str(row.get("status", "")),
+                    "status": text_or_none(row.get("status")),
                     # Whether PyPSA permits this attribute to vary by snapshot.
                     # This is the split the store has to model: a static column,
                     # or a static default plus per-entity overrides.
@@ -139,9 +167,18 @@ def capture_network(name: str, build) -> dict:
         # this manifest would be asked to invent them.
         if not (target / f"{component.list_name}.csv").exists():
             continue
+        exported = target / f"{component.list_name}.csv"
+        with exported.open() as handle:
+            exported_header = handle.readline().rstrip("\n").split(",")
+
         summary["components"][component.name] = {
             "count": int(len(component.static)),
-            "static_columns": [str(c) for c in component.static.columns],
+            # The columns actually in the file, which is what a reader and writer
+            # can be held to. The in-memory frame carries more -- Bus has 14
+            # columns loaded against 6 exported -- so recording that instead
+            # would give the writer an unmeetable target.
+            "exported_columns": exported_header,
+            "in_memory_columns": [str(c) for c in component.static.columns],
             # Only the entities that actually vary get a time series; the rest
             # fall back to the static value. Reproducing that is the difference
             # between matching PyPSA's files and merely being equivalent.
@@ -158,6 +195,11 @@ def capture_network(name: str, build) -> dict:
     try:
         n.lpf()
         results["lpf"] = {
+            # Link flows are undefined under lpf unless p_set is set, so link_p0
+            # is NaN throughout by construction. Recorded so a reviewer of a
+            # future regeneration can tell a deliberate NaN block from a
+            # regression.
+            "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
             "bus_v_ang": frame_to_json(n.buses_t.v_ang),
             "line_p0": frame_to_json(n.lines_t.p0),
             "link_p0": frame_to_json(n.links_t.p0),
@@ -169,9 +211,24 @@ def capture_network(name: str, build) -> dict:
     print(f"  {name}: optimisation")
     try:
         m = build()  # fresh, so the LPF result does not seed the optimisation
-        m.optimize(solver_name="highs")
+        # `optimize` returns (status, condition) and does NOT raise on a
+        # non-optimal termination, so an infeasible or truncated solve would
+        # otherwise be written out as though it had converged -- and committed,
+        # since regenerating after a version bump is the documented workflow.
+        status, condition = m.optimize(solver_name="highs")
+        if status != "ok" or condition != "optimal":
+            raise RuntimeError(f"solve did not converge: status={status} condition={condition}")
+
+        # `objective` is the model's objective value, not the system cost:
+        # PyPSA defines total cost as objective + objective_constant, which is
+        # why this reads negative on ac-dc-meshed. All three are captured so an
+        # L2 comparison does not have to guess which one it is looking at.
         results["optimize"] = {
+            "status": status,
+            "condition": condition,
             "objective": jsonable(m.objective),
+            "objective_constant": jsonable(m.objective_constant),
+            "total_system_cost": jsonable(m.objective + m.objective_constant),
             "generator_p": frame_to_json(m.generators_t.p),
             "line_p0": frame_to_json(m.lines_t.p0),
             "link_p0": frame_to_json(m.links_t.p0),
@@ -198,8 +255,12 @@ def main() -> int:
         "networks": {},
     }
 
+    failures: list[str] = []
     for name, build in NETWORKS.items():
         manifest["networks"][name] = capture_network(name, build)
+        recorded = json.loads((OUT / "results" / f"{name}.json").read_text())
+        failures += [f"{name}/{stage}: {body['error']}" for stage, body in recorded.items()
+                     if isinstance(body, dict) and "error" in body]
 
     reference = capture_reference_schema()
     (OUT / "schema.json").write_text(json.dumps(reference, indent=1, sort_keys=True))
@@ -207,6 +268,15 @@ def main() -> int:
 
     print(f"\nwrote goldens to {OUT}")
     print(f"pypsa {pypsa.__version__}, pandas {pd.__version__}")
+
+    if failures:
+        # Recorded in the JSON *and* signalled here: a regeneration where a solve
+        # failed should not exit successfully and leave the failure to be found
+        # by reading the committed file.
+        print(f"\n{len(failures)} stage(s) failed:", file=sys.stderr)
+        for f in failures:
+            print(f"  {f}", file=sys.stderr)
+        return 1
     return 0
 
 

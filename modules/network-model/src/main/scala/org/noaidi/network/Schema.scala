@@ -145,19 +145,31 @@ object Schema:
               name = attrName,
               valueType = AttributeType.parse(pypsaType),
               variability = Variability.parse(pypsaType, varying),
-              unit = a.get("unit").map(_.str).getOrElse(""),
+              unit = optionalText(a.get("unit")).getOrElse(""),
               defaultText = defaultRaw.filter(_.nonEmpty),
-              status = a.get("status").map(_.str).getOrElse(""),
+              status = optionalText(a.get("status")).getOrElse(""),
             )
           }
         ComponentSpec(
           name = componentName,
           listName = o("list_name").str,
-          description = o.get("description").map(_.str).getOrElse(""),
+          description = optionalText(o.get("description")).getOrElse(""),
           attributes = attrs,
         )
       }
     Schema(components)
+
+  /** Optional text, where absence is `null`.
+    *
+    * The generator emits null rather than the string "nan" for a missing unit or
+    * status, so absence has one representation across the file. Reading it with
+    * `.str` would throw on exactly those fields.
+    */
+  private def optionalText(v: Option[ujson.Value]): Option[String] = v.flatMap {
+    case ujson.Null   => None
+    case ujson.Str(s) => Option(s).filter(_.nonEmpty)
+    case other        => Some(other.render())
+  }
 
   /** The generator tags non-finite defaults rather than emitting invalid JSON. */
   private def renderDefault(v: ujson.Value): String = v match

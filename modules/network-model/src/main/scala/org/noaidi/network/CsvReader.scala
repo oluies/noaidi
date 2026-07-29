@@ -138,22 +138,39 @@ object CsvReader:
       columnName: String,
       spec: ComponentSpec,
   ): Column =
+    // A blank cell means "not set for this entity", which is the same thing a
+    // missing column means -- so it resolves to the schema default rather than to
+    // a zero value. PyPSA writes blanks exactly here: `carriers.csv` leaves
+    // `efficiency` empty for the carriers that do not set it, and its own
+    // importer fills the default. Reading that as NaN would turn an efficiency of
+    // 1.0 into no efficiency at all.
+    val default = attr.defaultText
     attr.valueType match
       case AttributeType.Float =>
-        Column.Floats(IArray.from(cells.map(parseFloat(_, columnName, spec))))
+        val d = default.map(defaultFloat).getOrElse(Double.NaN)
+        Column.Floats(IArray.from(cells.map { c =>
+          if c.trim.isEmpty then d else parseFloat(c, columnName, spec)
+        }))
       case AttributeType.Int =>
+        val d = default.flatMap(_.toIntOption).getOrElse(0)
         // PyPSA writes integers through pandas, which may render them as "3.0".
         Column.Ints(IArray.from(cells.map { c =>
           val t = c.trim
-          t.toIntOption.orElse(t.toDoubleOption.map(_.toInt)).getOrElse(0)
+          if t.isEmpty then d
+          else t.toIntOption.orElse(t.toDoubleOption.map(_.toInt)).getOrElse(d)
         }))
       case AttributeType.Bool =>
+        val d = default.exists(x => x == "true" || x == "True")
         Column.Bools(IArray.from(cells.map { c =>
           val t = c.trim.toLowerCase
-          t == "true" || t == "1" || t == "1.0"
+          if t.isEmpty then d else t == "true" || t == "1" || t == "1.0"
         }))
       case AttributeType.Str | AttributeType.Geometry =>
-        Column.Strings(IArray.from(cells.map(_.trim)))
+        val d = default.getOrElse("")
+        Column.Strings(IArray.from(cells.map { c =>
+          val t = c.trim
+          if t.isEmpty then d else t
+        }))
 
   /** Type of a column the schema does not describe, from its values.
     *
@@ -168,6 +185,12 @@ object CsvReader:
     else if present.nonEmpty && present.forall(_.toDoubleOption.isDefined) then
       Column.Floats(IArray.from(trimmed.map(c => if c.isEmpty then Double.NaN else c.toDouble)))
     else Column.Strings(IArray.from(trimmed))
+
+  private def defaultFloat(text: String): Double = text match
+    case "inf"  => Double.PositiveInfinity
+    case "-inf" => Double.NegativeInfinity
+    case "nan"  => Double.NaN
+    case other  => other.toDoubleOption.getOrElse(Double.NaN)
 
   private def parseFloat(cell: String, columnName: String, spec: ComponentSpec): Double =
     val t = cell.trim

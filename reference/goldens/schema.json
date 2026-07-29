@@ -5,28 +5,28 @@
     "default": "AC",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "control": {
     "default": "PQ",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "generator": {
     "default": "",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "location": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "marginal_price": {
@@ -40,7 +40,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p": {
@@ -61,21 +61,21 @@
     "default": "",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "type": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "unit": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "v_ang": {
@@ -126,18 +126,18 @@
     "default": 0.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "y": {
     "default": 0.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
-  "category": "nan",
+  "category": null,
   "description": "Fundamental node where all components attach.",
   "list_name": "buses"
  },
@@ -154,7 +154,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "max_growth": {
@@ -170,25 +170,25 @@
     "default": 0.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "name": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "nice_name": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
-  "category": "nan",
+  "category": null,
   "description": "Energy carriers of buses (e.g. \"AC\" for alternating current, \"DC\" for direct current, \"hydrogen\", or \"heat\") or technologies of other components (e.g. \"wind\", \"gas turbine\", \"electrolyser\", or \"heat pump\")",
   "list_name": "carriers"
  },
@@ -198,11 +198,11 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -212,7 +212,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -226,21 +226,21 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "committable": {
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "control": {
     "default": "PQ",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "discount_rate": {
@@ -253,7 +253,7 @@
     "varying": false
    },
    "down_time_before": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -315,14 +315,14 @@
     "varying": true
    },
    "min_down_time": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
     "varying": false
    },
    "min_up_time": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -377,7 +377,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -430,7 +430,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p_nom_max": {
@@ -535,7 +535,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "shut_down_cost": {
@@ -549,7 +549,7 @@
     "default": 1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "stand_by_cost": {
@@ -563,7 +563,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "start_up_cost": {
@@ -577,18 +577,18 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "type": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "up_time_before": {
-    "default": "1",
+    "default": 1,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -598,7 +598,7 @@
     "default": 1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
@@ -612,21 +612,21 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "carrier_attribute": {
     "default": "co2_emissions",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "constant": {
     "default": 0.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "investment_period": {
@@ -635,7 +635,7 @@
     },
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "mu": {
@@ -649,25 +649,25 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "sense": {
     "default": "==",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "type": {
     "default": "primary_energy",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
-  "category": "nan",
+  "category": null,
   "description": "Constraints in the optimisation problem that apply to multiple components at once.",
   "list_name": "global_constraints"
  },
@@ -677,7 +677,7 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "b": {
@@ -695,7 +695,7 @@
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -705,14 +705,14 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "bus1": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -726,7 +726,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "discount_rate": {
@@ -793,14 +793,14 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "num_parallel": {
     "default": 1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -879,7 +879,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "s_nom_max": {
@@ -925,7 +925,7 @@
     "default": "",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "terrain_factor": {
@@ -939,7 +939,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "v_ang_max": {
@@ -1020,14 +1020,14 @@
     "default": "ol",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "name": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "r_per_length": {
@@ -1041,7 +1041,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "x_per_length": {
@@ -1062,11 +1062,11 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -1076,14 +1076,14 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "bus1": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -1097,25 +1097,25 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "committable": {
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "cyclic_delay": {
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "delay": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshot weighting units",
@@ -1131,7 +1131,7 @@
     "varying": false
    },
    "down_time_before": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -1182,14 +1182,14 @@
     "varying": true
    },
    "min_down_time": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
     "varying": false
    },
    "min_up_time": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -1244,7 +1244,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -1311,7 +1311,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p_nom_max": {
@@ -1402,7 +1402,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "shut_down_cost": {
@@ -1423,7 +1423,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "start_up_cost": {
@@ -1437,7 +1437,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "terrain_factor": {
@@ -1451,11 +1451,11 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "up_time_before": {
-    "default": "1",
+    "default": 1,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -1472,28 +1472,28 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "bus": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "name": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p": {
@@ -1528,14 +1528,14 @@
     "default": -1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "type": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
@@ -1549,11 +1549,11 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -1563,14 +1563,14 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "bus1": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -1584,39 +1584,39 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "committable": {
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "cyclic_delay0": {
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "cyclic_delay1": {
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "delay0": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshot weighting units",
     "varying": false
    },
    "delay1": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshot weighting units",
@@ -1632,7 +1632,7 @@
     "varying": false
    },
    "down_time_before": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -1676,14 +1676,14 @@
     "varying": true
    },
    "min_down_time": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
     "varying": false
    },
    "min_up_time": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -1738,7 +1738,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -1805,7 +1805,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p_nom_max": {
@@ -1910,7 +1910,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "shut_down_cost": {
@@ -1931,7 +1931,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "start_up_cost": {
@@ -1945,7 +1945,7 @@
     "default": 1.0,
     "status": "Output",
     "type": "series",
-    "unit": "nan",
+    "unit": null,
     "varying": true
    },
    "terrain_factor": {
@@ -1959,11 +1959,11 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "up_time_before": {
-    "default": "1",
+    "default": 1,
     "status": "Input (optional)",
     "type": "int",
     "unit": "snapshots",
@@ -1980,7 +1980,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "geometry": {
@@ -1989,28 +1989,28 @@
     },
     "status": "Input (optional)",
     "type": "geometry",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "idx": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "name": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "type": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
@@ -2024,7 +2024,7 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "b": {
@@ -2045,7 +2045,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "g": {
@@ -2066,7 +2066,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p": {
@@ -2087,7 +2087,7 @@
     "default": -1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
@@ -2101,11 +2101,11 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -2115,7 +2115,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -2129,28 +2129,28 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "control": {
     "default": "PQ",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "cyclic_state_of_charge": {
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "cyclic_state_of_charge_per_period": {
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "discount_rate": {
@@ -2267,7 +2267,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -2327,7 +2327,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "p_nom_max": {
@@ -2412,7 +2412,7 @@
     "default": 1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "spill": {
@@ -2456,7 +2456,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "state_of_charge_set": {
@@ -2472,7 +2472,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
@@ -2486,11 +2486,11 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -2500,7 +2500,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -2514,7 +2514,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "discount_rate": {
@@ -2537,14 +2537,14 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "e_cyclic_per_period": {
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "e_initial": {
@@ -2558,7 +2558,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "e_max_pu": {
@@ -2586,7 +2586,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "e_nom_max": {
@@ -2705,7 +2705,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -2751,7 +2751,7 @@
     "default": 1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "standing_loss": {
@@ -2765,7 +2765,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
@@ -2779,25 +2779,25 @@
     "default": "AC",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "name": {
     "default": "",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "slack_bus": {
     "default": "",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    }
   },
-  "category": "nan",
+  "category": null,
   "description": "Subsets of buses and passive branches (i.e. lines and transformers) that are connected (i.e. synchronous areas).",
   "list_name": "sub_networks"
  },
@@ -2807,7 +2807,7 @@
     "default": true,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "b": {
@@ -2825,7 +2825,7 @@
     "varying": false
    },
    "build_year": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
     "unit": "year",
@@ -2835,14 +2835,14 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "bus1": {
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "capital_cost": {
@@ -2893,9 +2893,9 @@
    },
    "model": {
     "default": "t",
-    "status": " Input (required)",
+    "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "mu_lower": {
@@ -2916,14 +2916,14 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "num_parallel": {
     "default": 1.0,
     "status": "Input (optional)",
     "type": "float",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "overnight_cost": {
@@ -3009,7 +3009,7 @@
     "default": false,
     "status": "Input (optional)",
     "type": "boolean",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "s_nom_max": {
@@ -3055,14 +3055,14 @@
     "default": "",
     "status": "Output",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "tap_position": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "tap_ratio": {
@@ -3073,17 +3073,17 @@
     "varying": false
    },
    "tap_side": {
-    "default": "0",
+    "default": 0,
     "status": "Input (optional)",
     "type": "int",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "type": {
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "v_ang_max": {
@@ -3150,7 +3150,7 @@
     "default": "",
     "status": "Input (required)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "pfe": {
@@ -3171,7 +3171,7 @@
     "default": "",
     "status": "Input (optional)",
     "type": "string",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "s_nom": {
@@ -3182,31 +3182,31 @@
     "varying": false
    },
    "tap_max": {
-    "default": "0",
+    "default": 0,
     "status": "Input (required)",
     "type": "int",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "tap_min": {
-    "default": "0",
+    "default": 0,
     "status": "Input (required)",
     "type": "int",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "tap_neutral": {
-    "default": "0",
+    "default": 0,
     "status": "Input (required)",
     "type": "int",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "tap_side": {
-    "default": "0",
+    "default": 0,
     "status": "Input (required)",
     "type": "int",
-    "unit": "nan",
+    "unit": null,
     "varying": false
    },
    "tap_step": {

@@ -65,7 +65,18 @@ class GoldenNetworkSuite extends munit.FunSuite:
       val n        = network(name)
       val expected = manifest("networks")(name)
 
-      assertEquals(n.snapshotCount, expected("snapshots").arr.size, "snapshot count")
+      // Values, not just the count. Comparing sizes alone is what let a reader
+      // that returned the positional index instead of the timestamp pass: the
+      // count was right and every assertion was satisfied.
+      val expectedSnapshots = expected("snapshots").arr.map(_.str).toIndexedSeq
+      assertEquals(n.snapshotCount, expectedSnapshots.size, "snapshot count")
+      // PyPSA writes "2015-01-01 00:00:00" to CSV and reports the ISO form in
+      // the manifest; only the separator differs.
+      assertEquals(
+        n.snapshots.map(_.replace(' ', 'T')),
+        expectedSnapshots,
+        s"$name: snapshot labels",
+      )
 
       expected("components").obj.foreach { (componentName, info) =>
         val table = n.table(componentName)
@@ -74,6 +85,16 @@ class GoldenNetworkSuite extends munit.FunSuite:
           table.get.size,
           info("count").num.toInt,
           s"$name: $componentName entity count",
+        )
+
+        // The column set the export actually carried. This is the assertion that
+        // would have caught four silently-dropped custom columns -- `country` on
+        // buses, three on carriers -- which the previous version never read.
+        val exported = info("exported_columns").arr.map(_.str).toSet - "name"
+        assertEquals(
+          table.get.static.keySet,
+          exported,
+          s"$name: $componentName column set",
         )
       }
     }
@@ -119,6 +140,36 @@ class GoldenNetworkSuite extends munit.FunSuite:
         // was omitted from the file entirely.
         assertEquals(resolved, generators.float("p_max_pu", id), s"$id should fall back")
         assert(resolved.isFinite, s"$id resolved to $resolved")
+    }
+  }
+
+  test("custom columns outside the schema are preserved") {
+    assume(available, "goldens missing")
+    // PyPSA's component model is extensible and the reference network uses it:
+    // buses.csv carries `country`, which appears nowhere in Bus's 19 schema
+    // attributes. Dropping it would lose data on every round-trip.
+    val buses = network("ac-dc-meshed").require("Bus")
+    assert(schema("Bus").attribute("country").isEmpty, "country is unexpectedly in the schema")
+    assert(buses.static.contains("country"), "the custom column was dropped")
+    assertEquals(buses.string("country", "London"), "UK")
+
+    val carriers = network("ac-dc-meshed").require("Carrier")
+    Seq("marginal_cost", "efficiency", "capital_cost").foreach { c =>
+      assert(carriers.static.contains(c), s"carriers.$c was dropped")
+    }
+  }
+
+  test("a blank cell resolves to the schema default, not to zero") {
+    assume(available, "goldens missing")
+    // carriers.csv leaves cells empty for entities that do not set an
+    // extensible attribute, and PyPSA's own importer fills the default there.
+    // Reading a blank efficiency as NaN would turn 1.0 into no value at all.
+    val generators = network("ac-dc-meshed").require("Generator")
+    generators.ids.foreach { id =>
+      assert(
+        generators.float("efficiency", id).isFinite,
+        s"$id has a non-finite efficiency",
+      )
     }
   }
 

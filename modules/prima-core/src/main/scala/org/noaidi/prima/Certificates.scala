@@ -11,23 +11,35 @@ package org.noaidi.prima
   * ==Normalisation==
   *
   * Both tests measure how far a direction falls short of being an exact
-  * certificate, and both normalise that shortfall by the '''norm of the
-  * direction''', never by the certificate's own objective value.
+  * certificate. The measure must be '''dimensionless''': the same LP written in
+  * different units has to get the same verdict, or the tolerance means nothing.
   *
-  * That distinction is the whole soundness argument. A certificate may be
-  * scaled by any positive constant, so the measure has to be scale-invariant in
-  * the direction — dividing by `||y||` achieves that. Dividing by the
-  * certificate value would achieve it too, but it would also let unrelated
-  * problem data dilute a genuine violation: a single row with a large
-  * right-hand side inflates the value while leaving the violation untouched,
-  * driving the reported residual under any tolerance. On the feasible problem
-  * `x in [0, inf)` with the row `x >= 1e10`, the direction `y = 1` has an
-  * unabsorbed reduced cost of 1 and a certificate value of 1e10; normalised by
-  * the value that reads as 1e-10 and declares a feasible problem infeasible.
+  * Getting that right requires normalising each kind of violation against
+  * something with matching units, which is why the terms are normalised
+  * separately and only then combined:
+  *
+  *   - A dual-cone violation is a component of `y`, so `||y||` makes it
+  *     dimensionless.
+  *   - An unabsorbed reduced cost is a component of `K'y`, so it carries the
+  *     units of the constraint matrix as well and needs `||K|| * ||y||`.
+  *   - For the unboundedness test, `Kd` residuals likewise need `||K|| * ||d||`
+  *     while bound-direction violations are components of `d` and need `||d||`.
+  *
+  * Two normalisations that look reasonable are not, and both were tried:
+  *
+  *   - Dividing by the certificate's own objective value is scale-invariant in
+  *     the direction but lets a large right-hand side dilute a violation. On the
+  *     feasible problem `x in [0, inf)` with the row `x >= 1e10`, the direction
+  *     `y = 1` leaves an unabsorbed reduced cost of 1 against a value of 1e10 —
+  *     which reads as 1e-10 and declares a feasible problem infeasible.
+  *   - Dividing everything by `||y||` fixes that but leaves the matrix's units
+  *     in the reduced-cost term, so the same hole reopens by shrinking a
+  *     coefficient instead. On the feasible problem `x in [0, inf)` with the row
+  *     `1e-10 x >= 1`, the direction `y = 1` reads as 1e-10 for the same reason.
   *
   * Reporting a feasible problem as infeasible is the one failure mode a solver
-  * must not have, so the tolerance must never be reachable by inflating the
-  * data.
+  * must not have, so no rescaling of the data may bring a violating direction
+  * under the tolerance.
   */
 object Certificates:
 
@@ -101,7 +113,14 @@ object Certificates:
       i += 1
 
     if !(value > 0.0) || !value.isFinite then None
-    else Some(math.sqrt(math.max(residualSq, coneSq)) / norm).filter(_.isFinite)
+    else
+      // The two violations carry different units, so they are made
+      // dimensionless separately and combined afterwards. A zero matrix norm
+      // implies `K'y` is zero, hence no reduced-cost residual to scale.
+      val matrixNorm  = problem.constraintMatrix.spectralNormBound
+      val reducedTerm = if matrixNorm > 0.0 then math.sqrt(residualSq) / (matrixNorm * norm) else 0.0
+      val coneTerm    = math.sqrt(coneSq) / norm
+      Some(math.hypot(reducedTerm, coneTerm)).filter(_.isFinite)
 
   /** Evidence that the objective is unbounded below on the feasible set.
     *
@@ -150,24 +169,30 @@ object Certificates:
           problem.constraintMatrix.multiplyInto(d, buf)
           buf
 
-      var residualSq = 0.0
+      // Row violations are components of `Kd`, bound violations are components
+      // of `d`. Different units, so they are accumulated separately.
+      var rowSq = 0.0
       i = 0
       while i < nEq do
-        residualSq += kd(i) * kd(i)
+        rowSq += kd(i) * kd(i)
         i += 1
       while i < m do
-        if kd(i) < 0.0 then residualSq += kd(i) * kd(i)
+        if kd(i) < 0.0 then rowSq += kd(i) * kd(i)
         i += 1
 
       // Moving in direction `d` must not push a variable through a finite bound.
+      var boundSq = 0.0
       i = 0
       while i < n do
         val di = d(i)
-        if di > 0.0 && !upper(i).isPosInfinity then residualSq += di * di
-        else if di < 0.0 && !lower(i).isNegInfinity then residualSq += di * di
+        if di > 0.0 && !upper(i).isPosInfinity then boundSq += di * di
+        else if di < 0.0 && !lower(i).isNegInfinity then boundSq += di * di
         i += 1
 
-      Some(math.sqrt(residualSq) / norm).filter(_.isFinite)
+      val matrixNorm = problem.constraintMatrix.spectralNormBound
+      val rowTerm    = if matrixNorm > 0.0 then math.sqrt(rowSq) / (matrixNorm * norm) else 0.0
+      val boundTerm  = math.sqrt(boundSq) / norm
+      Some(math.hypot(rowTerm, boundTerm)).filter(_.isFinite)
 
   /** Test the primal and dual iterates for a certificate and report whichever
     * holds.

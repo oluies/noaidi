@@ -141,16 +141,34 @@ class MixedPrecisionSuite extends munit.FunSuite:
     finally cpu.close()
   }
 
-  test("infeasibility found in float32 is reported without a second pass") {
+  test("a float32 infeasibility verdict is re-established in double precision") {
+    // The device finds its certificate at a loosened tolerance -- float32 has
+    // about seven digits, so it cannot meet a 1e-8 standard -- and the verdict
+    // is only skipped past refinement if it still holds at the caller's own
+    // tolerance in fp64. Here it does not, so the solve refines and the
+    // certificate is established properly. Either route is acceptable; what
+    // matters is that the answer is right and never rests on float32 alone.
     val result = mixed(LpFixtures.infeasible.problem)
     assertEquals(result.solution.status, SolveStatus.PrimalInfeasible, s"$result")
-    assert(!result.refined, "an infeasibility certificate should not need refining")
   }
 
-  test("unboundedness found in float32 is reported without a second pass") {
+  test("a float32 unboundedness verdict is re-established in double precision") {
     val result = mixed(LpFixtures.unbounded.problem)
     assertEquals(result.solution.status, SolveStatus.DualInfeasible, s"$result")
-    assert(!result.refined)
+  }
+
+  test("a certificate that cannot meet the caller's tolerance is not skipped past") {
+    // Tighten the caller's infeasibility tolerance well past what float32 can
+    // establish. The device's verdict must then be re-checked rather than
+    // returned, which is what the fp64 verification exists to guarantee.
+    val strict = params.copy(infeasibilityTolerance = 1e-12)
+    val device = Float32Kernels()
+    val result =
+      try MixedPrecision.solve(LpFixtures.infeasible.problem, strict, device)
+      finally device.close()
+
+    assert(result.refined, "a float32 certificate was trusted at a tolerance it cannot meet")
+    assertEquals(result.solution.status, SolveStatus.PrimalInfeasible, s"$result")
   }
 
   test("alwaysRefine forces the second pass even on a conclusive status") {

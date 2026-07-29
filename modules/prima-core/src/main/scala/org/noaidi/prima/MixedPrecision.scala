@@ -130,14 +130,28 @@ object MixedPrecision:
       )
       val reduced = Pdhg.solveWith(problem, reducedParams, device, cancelled)
 
-      // An infeasibility or unboundedness certificate found on the device is
-      // taken at face value unless asked otherwise. It was tested against the
-      // original problem data in double precision — only the matrix products
-      // feeding it came from float32 — and against the loosened tolerance set
-      // above, so it is a weaker claim than a double-precision certificate.
-      // `alwaysRefine` re-establishes it at full precision where that matters.
-      val skipRefinement =
-        !mixed.alwaysRefine && reduced.status.isConclusive && reduced.status != SolveStatus.Optimal
+      // A certificate found on the device was established at the loosened
+      // tolerance above — a thousandfold relaxation by default — from matrix
+      // products computed in float32. Returning that as the final answer would
+      // mean reporting a problem infeasible on evidence the caller never asked
+      // to be enough, with no double-precision check anywhere in the path.
+      //
+      // So it is re-tested here in full precision at the caller's own tolerance.
+      // That costs a couple of sparse products against a whole refinement pass,
+      // and if it does not hold the solve falls through to refinement rather
+      // than trusting the device.
+      val certificateHolds =
+        reduced.status.isConclusive && reduced.status != SolveStatus.Optimal &&
+          Certificates
+            .classify(
+              problem,
+              Unsafe.raw(reduced.primal),
+              Unsafe.raw(reduced.dual),
+              params.infeasibilityTolerance,
+            )
+            .contains(reduced.status)
+
+      val skipRefinement = !mixed.alwaysRefine && certificateHolds
 
       if skipRefinement then
         Result(
@@ -156,13 +170,22 @@ object MixedPrecision:
             timeLimitMillis =
               params.timeLimitMillis.map(limit => math.max(1L, limit - reduced.solveTimeMillis))
           )
+          // A float32 pass that diverges overflows to infinity, and those
+          // infinities reach the reported solution. `Pdhg.WarmStart` rightly
+          // refuses them, but throwing here would turn a recoverable situation
+          // into an exception from a function whose contract is to return a
+          // Result — and `Solver` sits behind `LpSolver`, which reports failure
+          // through `SolveStatus`. A diverged device pass simply means there is
+          // nothing useful to warm-start from, so the refinement runs cold.
+          val usable =
+            reduced.primal.forall(_.isFinite) && reduced.dual.forall(_.isFinite)
           val refined =
             Pdhg.solveWith(
               problem,
               refinementParams,
               cpu,
               cancelled,
-              warmStart = Some(Pdhg.WarmStart(reduced)),
+              warmStart = Option.when(usable)(Pdhg.WarmStart(reduced)),
             )
           Result(
             solution = refined,

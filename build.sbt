@@ -69,6 +69,16 @@ lazy val primaOjalgo = project
 val cyfraVersion = "0.1.0-RC1"
 val lwjglVersion = "3.4.0"
 
+// The module is configured for macOS on Apple Silicon, which is where the spike
+// was run. Everything host-specific is gated on these so that another platform
+// gets a build that compiles and simply has no Vulkan wiring, rather than one
+// that fails at runtime in a way that looks like a driver problem.
+val isMacArm =
+  sys.props.get("os.name").exists(_.toLowerCase.startsWith("mac")) &&
+    sys.props.get("os.arch").contains("aarch64")
+val homebrewLib = "/opt/homebrew/lib"
+val moltenVkIcd = file("/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json")
+
 lazy val primaCyfra = project
   .in(file("modules/prima-cyfra"))
   .dependsOn(primaCore % "compile->compile;test->test")
@@ -81,17 +91,33 @@ lazy val primaCyfra = project
       "io.computenode" %% "cyfra-dsl"     % cyfraVersion,
       "io.computenode" %% "cyfra-runtime" % cyfraVersion,
     ),
-    // LWJGL resolves its native bindings by classifier, and Cyfra's own
-    // dependencies declare only the Java side.
-    libraryDependencies ++= Seq("lwjgl", "lwjgl-vma").map { lib =>
-      "org.lwjgl" % lib % lwjglVersion classifier "natives-macos-arm64"
-    },
-    // The Vulkan loader and MoltenVK ICD come from Homebrew rather than from
-    // the build, so the tests have to be told where to find them.
+    // LWJGL resolves its native bindings by classifier and Cyfra declares only
+    // the Java side, so the host's classifier has to be added here. Gated on
+    // the actual host: hardcoding `natives-macos-arm64` would leave a Linux
+    // build with no usable natives, failing at runtime with an
+    // UnsatisfiedLinkError that reads as a missing driver rather than a build
+    // misconfiguration. Cyfra pulls the Linux natives transitively already.
+    libraryDependencies ++= (
+      if isMacArm then
+        Seq("lwjgl", "lwjgl-vma").map(lib => "org.lwjgl" % lib % lwjglVersion classifier "natives-macos-arm64")
+      else Seq.empty
+    ),
     Test / fork := true,
-    Test / envVars ++= Map(
-      "VK_ICD_FILENAMES" -> "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json",
-      "DYLD_LIBRARY_PATH" -> "/opt/homebrew/lib",
+    // Only point the loader at a specific ICD when that ICD actually exists.
+    // Setting VK_ICD_FILENAMES to a missing path makes the Vulkan loader skip
+    // normal driver discovery rather than fall back to it, so an unconditional
+    // value would break machines that are otherwise perfectly capable.
+    Test / envVars ++= (
+      if moltenVkIcd.exists then Map("VK_ICD_FILENAMES" -> moltenVkIcd.getAbsolutePath) else Map.empty
+    ),
+    // Prepended, not overwritten, so an inherited value survives.
+    Test / envVars ++= (
+      if isMacArm && file(homebrewLib).isDirectory then
+        Map(
+          "DYLD_LIBRARY_PATH" ->
+            (homebrewLib +: sys.env.get("DYLD_LIBRARY_PATH").filter(_.nonEmpty).toSeq).mkString(":")
+        )
+      else Map.empty
     ),
     // Deliberately no -Dorg.lwjgl.librarypath: LWJGL ships its own natives and
     // pointing it at Homebrew's makes it report a version mismatch. Only the

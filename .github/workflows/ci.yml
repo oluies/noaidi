@@ -67,6 +67,14 @@ jobs:
           fi
           echo "$total tests passed" >> "$GITHUB_STEP_SUMMARY"
 
+      # prima-cyfra is not aggregated into root, because running it needs a
+      # Vulkan stack no runner is guaranteed to have. Compiling it needs only
+      # the Maven artifacts, and it reaches into prima-core's package-private
+      # internals — so without this step a refactor there would break the spike
+      # silently, and only surface the next time someone with a GPU opened it.
+      - name: Compile the GPU spike
+        run: sbt --batch "primaCyfra/Test/compile"
+
   # Prima's answers are only meaningful next to an independent solver's, so the
   # cross-check against ojAlgo is surfaced as its own job rather than buried in
   # the test output.

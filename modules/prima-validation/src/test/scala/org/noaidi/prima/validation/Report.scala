@@ -83,8 +83,14 @@ object Report:
     }
 
     val disagreements = rows.filter(r => r.primaStatus != r.oracleStatus)
-    val worst =
-      rows.filter(_.primaStatus == SolveStatus.Optimal).map(_.relativeGap).maxOption.getOrElse(0.0)
+    // Same condition the objective columns use: a gap computed against an
+    // oracle that did not reach an optimum is meaningless, and this line is the
+    // one CI publishes.
+    val worst = rows
+      .filter(r => r.primaStatus == SolveStatus.Optimal && r.oracleStatus == SolveStatus.Optimal)
+      .map(_.relativeGap)
+      .maxOption
+      .getOrElse(0.0)
     println(f"%nworst relative objective gap against the oracle: $worst%.3e")
     if disagreements.nonEmpty then
       println(s"STATUS DISAGREEMENTS: ${disagreements.map(_.name).mkString(", ")}")

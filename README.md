@@ -27,7 +27,7 @@ commitment — depends on it.
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
 | `prima-cyfra` | GPU spike. Not in the root build — see below. |
 
-143 tests pass. Worst relative objective disagreement with ojAlgo across the
+147 tests pass. Worst relative objective disagreement with ojAlgo across the
 validation ladder is 4.9e-10.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
@@ -56,7 +56,7 @@ experiment would confound all three.
 
 **The measurements are mixed, and that is the honest headline.** Double-precision
 work removed against a cold solve: 75% on the PyPSA-shaped dispatch fixture at a
-1e-9 tolerance and 100% at 1e-6, 35–65% on mid-size random instances, but −14%
+1e-9 tolerance and 100% at 1e-6, 35–70% on mid-size random instances, but −14%
 at 1e-9 and −621% at 1e-6 on the largest dense random LP, where the float32
 point is measurably a *worse* starting point than zero. That is unexplained and
 is why `MixedPrecision` is opt-in. The underlying pattern: float32 reaches 1e-5
@@ -85,10 +85,16 @@ GSeq.gen(start, p => p + 1)      // start = rowPtr(row)
 
 The nested `GIO.read` is the indexed gather the question hung on.
 
+One measurement came out of it. Reusing a single built program across 25
+dispatches costs 17.3 ms on the first and a median of 1.4 ms thereafter, which
+is consistent with SPIR-V compilation being hoisted out of `execute` and paid
+once — the property that makes per-matrix specialisation a per-solve cost rather
+than a per-iteration one.
+
 What this does *not* establish is value. There is no `CyfraKernels` implementing
-the other seven operations and no performance measurement at all — and given the
-mixed-precision result above, a timing on a real SpMV is worth having before
-building the full backend.
+the other seven operations, and nothing has been timed against the CPU
+reference. Given the mixed-precision result above, that comparison is worth
+having before building the full backend.
 
 ## Building
 
@@ -120,9 +126,13 @@ brew install molten-vk vulkan-loader
 sbt primaCyfra/testFull
 ```
 
-The build points the tests at Homebrew's ICD via `VK_ICD_FILENAMES`. On Linux
-with a native Vulkan driver that variable is unnecessary — drop it from
-`build.sbt` or override it.
+The module as configured targets **macOS on Apple Silicon**, which is where
+the spike was run. Everything host-specific is gated on the host in
+`build.sbt`, so another platform gets a build that compiles and simply has no
+Vulkan wiring, rather than one that fails at runtime in a way that looks like a
+missing driver. Running it elsewhere means adding the right LWJGL `natives-*`
+classifier for that platform — the macOS one is not a default — and leaving the
+ICD to normal loader discovery.
 
 ## Using the solver
 

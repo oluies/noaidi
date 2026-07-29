@@ -215,8 +215,14 @@ Three constraints the spike surfaced, none fatal:
 
 - **The kernel is specialised per matrix shape.** The DSL body cannot read a
   runtime dispatch parameter, so `rows`, `cols` and `maxRowNnz` are captured
-  when the program is built. A solve holds its matrix fixed, so this means one
-  SPIR-V compilation per solve rather than per iteration.
+  when the program is built. That is only tolerable if a built program can be
+  dispatched repeatedly, which the spike exercises rather than assumes: one
+  `GProgram` reused across 25 dispatches costs 17.3 ms on the first and a
+  median of 1.4 ms thereafter. A twelvefold drop is consistent with SPIR-V
+  compilation being hoisted out of `execute` and paid once, which is what makes
+  this a per-solve cost rather than a per-iteration one. The timing is
+  informational — wall clock on a shared machine is too noisy to assert on —
+  but correctness across all 25 dispatches is checked.
 - **`limit` needs a static cap**, satisfied by the maximum row non-zero count,
   which is a plain Scala `Int` at construction time. A pathological matrix with
   one very long row makes every invocation's loop bound that long, though

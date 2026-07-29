@@ -223,6 +223,58 @@ class CertificatesSuite extends munit.FunSuite:
     assertEquals(Certificates.classify(bounded, Array(1.0, 1.0), Array(0.0), 1e-8), None)
   }
 
+  test("a reduced-cost violation is not diluted by a small matrix coefficient") {
+    // Feasible: x in [0, inf) with the row 1e-10*x >= 1, satisfied at x = 1e10.
+    //
+    // This is the hole that normalising by ||y|| alone left open. The residual
+    // is a component of K'y and so carries the matrix's units; dividing by
+    // ||y|| leaves them in, and shrinking a coefficient shrinks the reported
+    // shortfall just as inflating a right-hand side once did.
+    val b = LpProblem.builder(1)
+    b.bounds(0, 0.0, inf)
+    b.greaterThan(Seq(0 -> 1e-10), 1.0)
+    val feasible = b.build()._1
+
+    val residual = Certificates.primalInfeasibility(feasible, Array(1.0))
+    assert(
+      residual.forall(_ > 1e-3),
+      s"a feasible problem produced a passing infeasibility certificate: $residual",
+    )
+    assertEquals(Certificates.classify(feasible, Array(0.0), Array(1.0), 1e-8), None)
+  }
+
+  test("a recession violation is not diluted by a small matrix coefficient") {
+    // Bounded: x in [0, inf) with c = -1 and the row -1e-9*x >= 0, which forces
+    // x = 0. The mirror of the case above, on the Kd term of the dual test.
+    val b = LpProblem.builder(1)
+    b.objectiveCoefficient(0, -1.0)
+    b.bounds(0, 0.0, inf)
+    b.lessThan(Seq(0 -> 1e-9), 0.0)
+    val bounded = b.build()._1
+
+    val residual = Certificates.dualInfeasibility(bounded, Array(1.0))
+    assert(
+      residual.forall(_ > 1e-3),
+      s"a bounded problem produced a passing unboundedness certificate: $residual",
+    )
+  }
+
+  test("the shortfall is invariant under a change of units") {
+    // Multiplying K and q by the same factor is a pure change of units. If the
+    // measure moved with it, the same LP would get opposite verdicts depending
+    // on whether it was written in MW or W.
+    def shortfall(units: Double): Double =
+      val b = LpProblem.builder(1)
+      b.bounds(0, 0.0, inf)
+      b.greaterThan(Seq(0 -> units), units * 7.0)
+      Certificates.primalInfeasibility(b.build()._1, Array(1.0)).get
+
+    val base = shortfall(1.0)
+    Seq(1e-8, 1e-4, 1.0, 1e4, 1e8).foreach { t =>
+      assertEqualsDouble(shortfall(t), base, 1e-9, s"shortfall moved at scale $t")
+    }
+  }
+
   test("the reported shortfall does not depend on the problem's scale") {
     // The same wrong direction against the same structure, with one redundant
     // row's rhs varied over ten orders of magnitude. A measure that can be

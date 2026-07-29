@@ -21,16 +21,36 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-    # Same slot as Scala Steward, so all dependency noise lands together and
-    # can be reviewed in one pass rather than trickling through the week.
-    open-pull-requests-limit: 5
+      # Stated rather than inferred. Steward's cron is UTC by Actions'
+      # definition; Dependabot reads `time` in this timezone, which defaults to
+      # Etc/UTC. Both land in the same slot today, but leaving it implicit means
+      # a changed default would separate them with no signal.
+      timezone: "Etc/UTC"
+
+    # Version updates all collapse into the single group below, so this bites
+    # only if something fails to group.
+    open-pull-requests-limit: 1
+
     labels:
       - "dependencies"
-    commit-message:
-      prefix: "Update"
+
+    # No `commit-message.prefix`: Dependabot prepends a prefix to its own
+    # subject rather than replacing the verb, so "Update" would yield
+    # "Update: bump the actions group with N updates" — a doubled verb. Its
+    # default subject is already imperative and matches the surrounding history.
+
     groups:
       # Actions move together often enough that separate PRs are mostly noise;
       # a single grouped PR either builds or does not.
+      #
+      # Two entries because a group applies to version updates only unless told
+      # otherwise, and security advisories are exactly the case where several
+      # actions do move at once.
       actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      actions-security:
+        applies-to: security-updates
         patterns:
           - "*"

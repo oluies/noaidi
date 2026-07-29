@@ -144,20 +144,6 @@
      ],
      "varying": {}
     },
-    "LineType": {
-     "count": 59,
-     "static_columns": [
-      "f_nom",
-      "r_per_length",
-      "x_per_length",
-      "c_per_length",
-      "i_nom",
-      "mounting",
-      "cross_section",
-      "references"
-     ],
-     "varying": {}
-    },
     "Link": {
      "count": 4,
      "static_columns": [
@@ -226,27 +212,6 @@
        "Manchester"
       ]
      }
-    },
-    "TransformerType": {
-     "count": 14,
-     "static_columns": [
-      "f_nom",
-      "s_nom",
-      "v_nom_0",
-      "v_nom_1",
-      "vsc",
-      "vscr",
-      "pfe",
-      "i0",
-      "phase_shift",
-      "tap_side",
-      "tap_neutral",
-      "tap_min",
-      "tap_max",
-      "tap_step",
-      "references"
-     ],
-     "varying": {}
     }
    },
    "name": "ac-dc-meshed",
@@ -406,20 +371,6 @@
      ],
      "varying": {}
     },
-    "LineType": {
-     "count": 59,
-     "static_columns": [
-      "f_nom",
-      "r_per_length",
-      "x_per_length",
-      "c_per_length",
-      "i_nom",
-      "mounting",
-      "cross_section",
-      "references"
-     ],
-     "varying": {}
-    },
     "Link": {
      "count": 2,
      "static_columns": [
@@ -541,27 +492,6 @@
        "Storage 4"
       ]
      }
-    },
-    "TransformerType": {
-     "count": 14,
-     "static_columns": [
-      "f_nom",
-      "s_nom",
-      "v_nom_0",
-      "v_nom_1",
-      "vsc",
-      "vscr",
-      "pfe",
-      "i0",
-      "phase_shift",
-      "tap_side",
-      "tap_neutral",
-      "tap_min",
-      "tap_max",
-      "tap_step",
-      "references"
-     ],
-     "varying": {}
     }
    },
    "name": "storage-hvdc",

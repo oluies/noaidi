@@ -131,6 +131,14 @@ def capture_network(name: str, build) -> dict:
     for component in n.components:
         if len(component.static) == 0:
             continue
+        # Only what the export actually wrote. A loaded network also carries
+        # PyPSA's standard line and transformer types -- 59 and 14 rows of
+        # library data -- which `export_to_csv_folder` correctly omits because
+        # they are not network data. Reporting them here would describe the
+        # in-memory object rather than the files, and a reader checked against
+        # this manifest would be asked to invent them.
+        if not (target / f"{component.list_name}.csv").exists():
+            continue
         summary["components"][component.name] = {
             "count": int(len(component.static)),
             "static_columns": [str(c) for c in component.static.columns],

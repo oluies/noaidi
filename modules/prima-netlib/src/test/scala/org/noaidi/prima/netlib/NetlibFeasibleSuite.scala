@@ -46,6 +46,9 @@ class NetlibFeasibleSuite extends munit.FunSuite:
   private val mustConverge: Set[String] = Set(
     "afiro", "sc50a", "sc50b", "kb2", "adlittle", "blend", "sc105", "stocfor1",
     "israel", "beaconfd", "brandy", "e226", "sc205", "scorpion",
+    // Reached only once presolve landed: both need heavy singleton-row
+    // elimination (34 and 47 rows) before the iteration converges.
+    "scagr7", "bandm",
   )
 
   private val outcomes = scala.collection.mutable.LinkedHashMap.empty[String, (SolveStatus, String)]
@@ -60,7 +63,15 @@ class NetlibFeasibleSuite extends munit.FunSuite:
       assume(!instance.isMixedInteger, s"$name has integer columns")
 
       val reference = NetlibCorpus.referenceObjectives.get(name)
-      val solution  = Pdhg.solve(instance.problem, params)
+
+      // Presolve then solve then restore, which is how a caller would use it.
+      // The measured claim is that this converges on instances the raw solver
+      // cannot reach, so the suite has to exercise the same path.
+      val presolved = Presolve(instance.problem)
+      val solution =
+        if presolved.provenInfeasible then
+          Pdhg.solve(instance.problem, params) // let the solver speak for itself
+        else presolved.restore(Pdhg.solve(presolved.reduced, params))
 
       val note = reference match
         case Some(expected) if solution.status == SolveStatus.Optimal =>
@@ -68,7 +79,7 @@ class NetlibFeasibleSuite extends munit.FunSuite:
           f"gap=$gap%.2e"
         case Some(_) => "-"
         case None    => "no reference"
-      outcomes(name) = (solution.status, note)
+      outcomes(name) = (solution.status, s"$note  [${presolved.stats}]")
 
       // Correctness, asserted for every instance: an optimum that disagrees
       // with the published value is wrong regardless of which instances happen

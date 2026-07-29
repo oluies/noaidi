@@ -23,7 +23,7 @@ trusting a number that came out of this module.
 | ZIO effect boundary with cooperative interruption and streaming | complete |
 | Cyfra GPU backend | **not started** |
 | MILP / branch-and-bound | **not started** |
-| Presolve | **not started** |
+| Presolve: exact reductions with dual postsolve | complete |
 
 ## How the answers were checked
 
@@ -67,12 +67,13 @@ were reproduced under ojAlgo 55.2.0 and 57.1.0 — two major versions apart — 
 neither figure moved; running either version on the other configuration does
 move it.
 
-Stated carefully, because the two configurations differ in more than one way:
-macOS/aarch64/JDK 26 against Linux/x86_64/JDK 25. Architecture is the leading
-hypothesis, via summation order in ojAlgo's simplex and its
-hardware-profile-dependent blocking, but the JDK differs too and that has not
-been separated. CI now reports the figure on two JDKs on the same OS, which will
-settle whether the JVM version moves it.
+The two configurations differ in more than one way — macOS/aarch64/JDK 26
+against Linux/x86_64/JDK 25 — so the JDK was a second uncontrolled variable. CI
+now reports the figure on two JDKs on the same OS, and it comes out
+bit-identical at 5.874e-10 on both JDK 21 and JDK 25. The JVM version therefore
+does not move it across that range, which leaves architecture as the live
+explanation: summation order in ojAlgo's simplex and its
+hardware-profile-dependent blocking.
 
 The practical consequence stands either way: a shift in this number across a
 dependency bump is not evidence about the bump unless both measurements came
@@ -89,18 +90,24 @@ from the corpus, computed by Gurobi at 1e-8.
 
 At `eps = 1e-8`, 50k iterations, 30s per instance:
 
-| | result |
-| --- | --- |
-| Feasible instances solved to optimality | **14 / 19** |
-| Worst disagreement with the published optimum, where solved | **2.2e-08** |
-| Infeasible instances reported optimal | **0 / 29** |
-| Infeasible instances proven infeasible | 11 / 29 |
+| | without presolve | with presolve |
+| --- | --- | --- |
+| Feasible instances solved to optimality | 14 / 19 | **16 / 19** |
+| Worst disagreement with the published optimum | 2.2e-08 | **2.2e-08** |
+| Infeasible instances reported optimal | 0 / 29 | **0 / 29** |
+| Infeasible instances proven infeasible | 11 / 29 | **12 / 29** (4 by presolve alone) |
 
-The five feasible instances that do not converge (`share2b`, `scagr7`,
-`share1b`, `lotfi`, `bandm`) hit the iteration limit rather than failing. Same
-for 17 of the infeasible set. **This is what having no presolve costs**, and it
-is the clearest available argument for building one: PDLP recovers much of
-Netlib through presolve, and these instances are where that would show.
+Presolve was built on the strength of the left-hand column and the right-hand
+one is what it bought. `scagr7` and `bandm` moved from the iteration limit to
+converged, both after heavy singleton-row elimination — 34 and 47 rows. Four
+infeasible instances are now settled without iterating at all, by an empty row
+that cannot hold or bounds driven into contradiction.
+
+Three feasible instances still do not converge (`share2b`, `share1b`, `lotfi`),
+along with 16 infeasible ones. They hit the iteration limit rather than failing.
+Getting them needs the approximate reductions — forcing and dominated rows,
+coefficient tightening — which is a different kind of decision from the exact
+ones, since those can change the answer.
 
 The assertions are deliberately asymmetric, since the two failure directions are
 not equally bad:
@@ -296,11 +303,20 @@ performance measurement at all. The spike establishes feasibility, not value.
 And the licensing question stands: Cyfra is LGPL-2.1 where the rest of this
 build is Apache-2.0, which is why the backend lives in its own module.
 
-**No presolve.** Empty rows, fixed variables, singleton rows and duplicate
-columns are all passed straight to the iteration. This is now the best-evidenced
-gap in the solver: on Netlib it is what separates 14 of 19 feasible instances
-from all of them, and 11 of 29 infeasible ones from a proof. PDLP recovers much
-of that corpus through presolve. It needs a postsolve to map duals back.
+**Presolve does only the exact reductions.** Fixed variables, empty rows and
+columns, and singleton rows are removed; forcing rows, dominated rows and
+coefficient tightening are not. Those are where the remaining Netlib coverage
+is, and they are a different kind of decision — an exact reduction cannot change
+the answer, an approximate one can.
+
+**Postsolve maps optimal duals, not Farkas rays.** The dual reconstruction is
+derived for an optimal solution and is accurate enough for pricing, which is
+what the power-system layer needs. It does not carry an infeasibility
+certificate: a Farkas ray mapped back through it will not generally re-verify
+against the original problem. `NetlibInfeasibleSuite` therefore re-checks
+certificates against the reduced problem, which is the one the solver actually
+proved infeasible — sound, because every reduction here is exact, so an
+infeasible reduced problem implies an infeasible original.
 
 **No MILP.** Unit commitment needs branch-and-bound around the LP. Nothing here
 is specific to continuous problems, but the warm-start path a tree needs does

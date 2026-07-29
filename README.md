@@ -29,12 +29,12 @@ commitment — depends on it.
 | `prima-cyfra` | GPU spike. Not in the root build — see below. |
 | `prima-netlib` | Netlib LP corpus. Not in the root build; fetches on first run. |
 
-164 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
-Against Netlib — the first oracle here independent of ojAlgo — 14 of 19 feasible
+180 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
-better, and **none of the 29 infeasible instances is reported optimal**. The
-instances that do not converge hit the iteration limit, which is what having no
-presolve costs.
+better, and **none of the 29 infeasible instances is reported optimal**.
+Presolve moved that from 14 to 16 and settles four infeasible instances without
+iterating at all.
 
 Worst relative objective disagreement with ojAlgo across the
 validation ladder is 4.9e-10 on macOS/aarch64/JDK 26 and 5.9e-10 on

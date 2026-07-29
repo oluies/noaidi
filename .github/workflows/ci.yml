@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Scala Steward opens branches in this repo; build them without needing a PR.
+  # Re-run on demand, e.g. to confirm a flake or to rebuild after a secret
+  # changes. Scala Steward's own updates arrive as pull requests and are covered
+  # by the trigger above.
   workflow_dispatch:
 
 concurrency:
@@ -50,9 +52,14 @@ jobs:
         run: |
           set -euo pipefail
           sbt --batch "Test/compile; testFull" 2>&1 | tee sbt-test.log
+          # `|| true` matters: when grep matches nothing -- which is precisely
+          # the case being guarded against -- it exits 1, and under `pipefail`
+          # plus `set -e` that would abort the step here, before the explicit
+          # check below could report why.
           total=$(grep -oE 'Passed: Total [0-9]+' sbt-test.log \
             | grep -oE '[0-9]+$' \
-            | awk '{ sum += $1 } END { print sum + 0 }')
+            | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          total=${total:-0}
           echo "Total tests run across all modules: $total"
           if [ "$total" -lt 1 ]; then
             echo "::error::No tests ran -- sbt reported success without executing anything."
@@ -86,10 +93,15 @@ jobs:
       - name: Publish report to the job summary
         if: always()
         run: |
+          # `sed -n` exits 0 when its address never matches, so a `|| cat`
+          # fallback would be dead code and the summary would silently publish
+          # an empty block if the header ever changes.
+          body=$(sed -n '/instance .*size .*status/,$p' report.txt)
+          [ -n "$body" ] || body=$(cat report.txt)
           {
             echo '## Prima vs ojAlgo'
             echo
             echo '```'
-            sed -n '/^instance /,$p' report.txt || cat report.txt
+            echo "$body"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

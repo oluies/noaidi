@@ -65,10 +65,15 @@ object Report:
     )
     println("-" * 150)
     rows.foreach { r =>
+      // Objective columns are meaningless for a problem with no optimum, so
+      // they are dashed rather than printed as whatever the solvers last held.
+      val optimal    = r.primaStatus == "Optimal"
+      val primaObj   = if optimal then f"${r.primaObjective}%16.6f" else f"${"-"}%16s"
+      val oracleObj  = if optimal then f"${r.oracleObjective}%16.6f" else f"${"-"}%16s"
+      val gap        = if optimal then f"${r.relativeGap}%9.2e" else f"${"-"}%9s"
       println(
-        f"${r.name}%-20s ${r.size}%-22s ${r.primaStatus}%-17s ${r.primaObjective}%16.6f " +
-          f"${r.oracleObjective}%16.6f ${r.relativeGap}%9.2e ${r.primaIterations}%8d " +
-          f"${r.primaRestarts}%9d ${r.primaMillis}%9d ${r.oracleMillis}%10d"
+        f"${r.name}%-20s ${r.size}%-22s ${r.primaStatus}%-17s $primaObj $oracleObj $gap " +
+          f"${r.primaIterations}%8d ${r.primaRestarts}%9d ${r.primaMillis}%9d ${r.oracleMillis}%10d"
       )
     }
 

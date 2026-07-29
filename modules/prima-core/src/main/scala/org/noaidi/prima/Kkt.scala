@@ -87,21 +87,10 @@ object Kkt:
         problem.constraintMatrix.multiplyInto(x, buf)
         buf
 
-    // Primal residual: equalities must hold exactly, inequalities `Kx >= q`
-    // contribute only their shortfall.
-    var primalSq = 0.0
-    var i        = 0
-    while i < nEq do
-      val r = ax(i) - q(i)
-      primalSq += r * r
-      i += 1
-    while i < m do
-      val shortfall = q(i) - ax(i)
-      if shortfall > 0.0 then primalSq += shortfall * shortfall
-      i += 1
+    val primalSq = primalResidualSquared(problem, ax)
 
     var primalObj = problem.objectiveOffset
-    i = 0
+    var i         = 0
     while i < n do
       primalObj += c(i) * x(i)
       i += 1
@@ -162,11 +151,21 @@ object Kkt:
     * that mean nothing.
     */
   def primalResidualNorm(problem: LpProblem, x: Array[Double]): Double =
+    val ax = new Array[Double](problem.numConstraints)
+    problem.constraintMatrix.multiplyInto(x, ax)
+    math.sqrt(primalResidualSquared(problem, ax))
+
+  /** The single definition of primal infeasibility: equalities must hold
+    * exactly, and `Kx >= q` rows contribute only their shortfall.
+    *
+    * Shared by [[evaluate]] and [[primalResidualNorm]] so the two cannot drift
+    * apart — otherwise a residual reported by one backend would stop meaning
+    * the same thing as one reported by another.
+    */
+  private def primalResidualSquared(problem: LpProblem, ax: Array[Double]): Double =
     val m   = problem.numConstraints
     val nEq = problem.numEqualities
     val q   = problem.rhsRaw
-    val ax  = new Array[Double](m)
-    problem.constraintMatrix.multiplyInto(x, ax)
 
     var sum = 0.0
     var i   = 0
@@ -178,7 +177,7 @@ object Kkt:
       val shortfall = q(i) - ax(i)
       if shortfall > 0.0 then sum += shortfall * shortfall
       i += 1
-    math.sqrt(sum)
+    sum
 
   private[prima] def norm2(a: Array[Double]): Double =
     var s = 0.0

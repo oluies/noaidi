@@ -37,17 +37,43 @@ class CertificatesSuite extends munit.FunSuite:
   }
 
   test("a direction with a non-positive certificate value is not a candidate") {
-    // `y = 0` gives a certificate value of zero: nothing is proven.
+    // Zero proves nothing. Both of these give exactly zero: the second row of
+    // `contradiction` has rhs -0.0, so weighting it alone contributes nothing.
     assertEquals(Certificates.primalInfeasibility(contradiction, Array(0.0, 0.0)), None)
-    // Reversing the sign makes the value negative.
     assertEquals(Certificates.primalInfeasibility(contradiction, Array(0.0, 1.0)), None)
+    // Negating the first row's multiplier makes the value strictly negative,
+    // which is the branch the zero cases above do not reach.
+    assertEquals(Certificates.primalInfeasibility(contradiction, Array(-1.0, 0.0)), None)
+  }
+
+  // `x` in `[0, 5]` with `x <= -1`: infeasible, and the finite lower bound
+  // absorbs the induced reduced cost completely. That isolation is the point —
+  // it leaves cone violation as the only thing that can contribute residual.
+  private val absorbed: LpProblem =
+    val b = LpProblem.builder(1)
+    b.bounds(0, 0.0, 5.0)
+    b.lessThan(Seq(0 -> 1.0), -1.0)
+    b.lessThan(Seq(0 -> 1.0), 100.0)
+    b.build()._1
+
+  test("a certificate whose reduced cost is fully absorbed has zero residual") {
+    // Only the binding row is weighted, and its multiplier is in the cone.
+    val residual = Certificates.primalInfeasibility(absorbed, Array(2.0, 0.0))
+    assert(residual.isDefined, "the direction was not a candidate")
+    assertEqualsDouble(residual.get, 0.0, 1e-12)
   }
 
   test("a dual multiplier outside the cone counts against the certificate") {
-    // The second row's multiplier is negative, which is not a feasible dual
-    // direction; the residual must reflect that rather than ignore it.
-    val residual = Certificates.primalInfeasibility(contradiction, Array(2.0, -1.0))
-    assert(residual.forall(_ > 1e-6), s"cone violation was not penalised: $residual")
+    // Same problem, but the second row now carries a negative multiplier, which
+    // is not a feasible dual direction. Nothing else contributes residual here,
+    // so the expected value pins the cone term exactly: deleting the cone
+    // accumulation would make this zero.
+    val y        = Array(2.0, -1.0)
+    val residual = Certificates.primalInfeasibility(absorbed, y)
+    assert(residual.isDefined, "the direction was not a candidate")
+    // Certificate value is q'y = 1*2 + (-100)*(-1) = 102; the only residual is
+    // the cone violation of magnitude 1.
+    assertEqualsDouble(residual.get, 1.0 / 102.0, 1e-12)
   }
 
   test("a reduced cost absorbed by a finite bound does not count as residual") {

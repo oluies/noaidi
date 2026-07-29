@@ -40,7 +40,7 @@ and twelve random sparse instances. Objective values are compared; solution
 vectors deliberately are not, because several fixtures are degenerate and two
 solvers landing on different vertices of the same optimal face is correct.
 
-Measured on the ladder (Apple aarch64, JDK 26, `epsAbs = epsRel = 1e-9`):
+Measured on the ladder (Apple aarch64, JDK 26, ojAlgo 57.1.0, `epsAbs = epsRel = 1e-9`):
 
 ```
 instance             size                   status                   prima obj       ojalgo obj   rel gap    iters  restarts  prima ms  ojalgo ms
@@ -58,7 +58,19 @@ random-200x120       200v/120c/2464nz       Optimal               -1796.551031  
 random-600x400       600v/400c/9529nz       Optimal               -5285.522448     -5285.522445  4.86e-10    35392        17       474       802
 ```
 
-Worst relative objective gap against the oracle: **4.9e-10**.
+Worst relative objective gap against the oracle: **4.9e-10** here, **5.9e-10**
+on CI's Linux x86_64 runners.
+
+That gap is platform-dependent and version-independent, which is worth knowing
+before reading anything into a change in it. Both figures were reproduced under
+ojAlgo 55.2.0 and 57.1.0 — two major versions apart — and neither moved; run the
+same version on the other platform and it does. The cause is almost certainly
+summation order, in ojAlgo's simplex and in its hardware-profile-dependent
+blocking, not a difference in either solver's answer.
+
+The practical consequence: a shift in this number across a dependency bump is
+not evidence about the bump unless both measurements came from the same
+machine.
 
 Regenerate with `sbt "primaValidation/Test/runMain org.noaidi.prima.validation.Report"`.
 

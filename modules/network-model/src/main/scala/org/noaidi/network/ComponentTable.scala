@@ -21,12 +21,16 @@ enum Column:
     case _: Strings => AttributeType.Str
     case _: Bools   => AttributeType.Bool
 
-  /** Rendered value at `row`, for writing and for diagnostics. */
+  /** Rendered value at `row`, for writing and for diagnostics.
+    *
+    * Booleans render Python-style — `True`/`False` — because that is what pandas
+    * writes and what PyPSA's own reader expects back.
+    */
   def text(row: Int): String = this match
-    case Floats(v)  => v(row).toString
+    case Floats(v)  => CsvWriter.render(v(row))
     case Ints(v)    => v(row).toString
     case Strings(v) => v(row)
-    case Bools(v)   => v(row).toString
+    case Bools(v)   => if v(row) then "True" else "False"
 
 /** Per-snapshot values for one attribute, for the entities that actually vary.
   *
@@ -141,8 +145,21 @@ final case class Network(
     schema: Schema,
     snapshots: IndexedSeq[String],
     tables: ListMap[String, ComponentTable],
+    /** Per-snapshot weightings, keyed by the column name PyPSA uses.
+      *
+      * `snapshots.csv` is not just an index: it carries `objective`, `stores`
+      * and `generators` weightings, which scale each snapshot's contribution to
+      * the objective and to storage accounting. A model holding only the labels
+      * would round-trip the file wrongly and, worse, get the objective wrong
+      * once L2 arrives — a network with non-unit weightings is how a
+      * representative-period study is expressed.
+      */
+    snapshotWeightings: ListMap[String, IArray[Double]] = ListMap.empty,
 ):
   def snapshotCount: Int = snapshots.length
+
+  def weighting(kind: String, snapshot: Int): Double =
+    snapshotWeightings.get(kind).map(_(snapshot)).getOrElse(1.0)
 
   /** Table for a component type, by name or by PyPSA's plural list name. */
   def table(component: String): Option[ComponentTable] =

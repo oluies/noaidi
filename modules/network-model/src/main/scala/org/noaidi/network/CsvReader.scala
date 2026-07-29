@@ -38,7 +38,7 @@ object CsvReader:
     val files = Files.list(directory).iterator.asScala.toIndexedSeq.map(_.getFileName.toString).sorted
     val csvs  = files.filter(_.endsWith(".csv"))
 
-    val snapshots = readSnapshots(directory.resolve("snapshots.csv"))
+    val (snapshots, weightings) = readSnapshots(directory.resolve("snapshots.csv"))
 
     // Split `generators.csv` from `generators-p_max_pu.csv`. Component list
     // names contain underscores but not hyphens, and PyPSA uses the hyphen
@@ -71,20 +71,40 @@ object CsvReader:
       schema = schema,
       snapshots = snapshots,
       tables = ListMap.from(tables.map(t => t.spec.name -> t)),
+      snapshotWeightings = weightings,
     )
 
   /** Files that are not component tables. */
   private val reserved = Set("snapshots.csv", "network.csv", "investment_periods.csv")
 
-  private def readSnapshots(path: Path): IndexedSeq[String] =
-    if !Files.exists(path) then IndexedSeq.empty
+  /** Snapshot labels and their weightings.
+    *
+    * The file is `,snapshot,objective,stores,generators`: a blank index column,
+    * the label, then the weightings. Taking the first field would read the
+    * positional index rather than the timestamp, which happens to look
+    * plausible and is wrong.
+    */
+  private def readSnapshots(path: Path): (IndexedSeq[String], ListMap[String, IArray[Double]]) =
+    if !Files.exists(path) then (IndexedSeq.empty, ListMap.empty)
     else
       val rows = parse(path)
-      if rows.isEmpty then IndexedSeq.empty
+      if rows.isEmpty then (IndexedSeq.empty, ListMap.empty)
       else
-        // The header names the index column ("snapshot"); the first field of
-        // each row is the value.
-        rows.tail.map(_.headOption.getOrElse(""))
+        val header = rows.head
+        val body   = rows.tail
+        val labelAt = header.indexOf("snapshot") match
+          case -1 => if header.length > 1 then 1 else 0
+          case i  => i
+        val labels = body.map(r => if labelAt < r.length then r(labelAt) else "")
+
+        val weightings = header.zipWithIndex
+          .filter((name, i) => i != labelAt && name.nonEmpty)
+          .map { (name, i) =>
+            name -> IArray.from(body.map { r =>
+              if i < r.length then r(i).trim.toDoubleOption.getOrElse(1.0) else 1.0
+            })
+          }
+        (labels, ListMap.from(weightings))
 
   private def readStatic(path: Path, spec: ComponentSpec): ComponentTable =
     val rows = parse(path)
@@ -97,11 +117,17 @@ object CsvReader:
     // PyPSA writes the entity id in the first column, headed "name".
     val ids = body.map(_.headOption.getOrElse(""))
 
-    val columns = header.zipWithIndex.tail.flatMap { (columnName, index) =>
-      spec.attribute(columnName).map { attr =>
-        val cells = body.map(r => if index < r.length then r(index) else "")
-        columnName -> column(attr, cells, columnName, spec)
-      }
+    val columns = header.zipWithIndex.tail.map { (columnName, index) =>
+      val cells = body.map(r => if index < r.length then r(index) else "")
+      // A column with no schema entry is a custom attribute, not an error.
+      // PyPSA lets users add their own and the reference network does exactly
+      // that -- `buses.csv` carries a `country` column that is nowhere in the
+      // component metadata. Dropping unknown columns silently loses data on
+      // every round-trip, so the type is inferred from the values instead.
+      val col = spec.attribute(columnName) match
+        case Some(attr) => column(attr, cells, columnName, spec)
+        case None       => inferColumn(cells)
+      columnName -> col
     }
 
     ComponentTable(spec, ids, ListMap.from(columns), ListMap.empty)
@@ -128,6 +154,20 @@ object CsvReader:
         }))
       case AttributeType.Str | AttributeType.Geometry =>
         Column.Strings(IArray.from(cells.map(_.trim)))
+
+  /** Type of a column the schema does not describe, from its values.
+    *
+    * Conservative: a column is only numeric or boolean if every value is, so a
+    * mixed column stays textual and survives the round-trip verbatim.
+    */
+  private def inferColumn(cells: IndexedSeq[String]): Column =
+    val trimmed = cells.map(_.trim)
+    val present = trimmed.filter(_.nonEmpty)
+    if present.nonEmpty && present.forall(c => c == "True" || c == "False") then
+      Column.Bools(IArray.from(trimmed.map(_ == "True")))
+    else if present.nonEmpty && present.forall(_.toDoubleOption.isDefined) then
+      Column.Floats(IArray.from(trimmed.map(c => if c.isEmpty then Double.NaN else c.toDouble)))
+    else Column.Strings(IArray.from(trimmed))
 
   private def parseFloat(cell: String, columnName: String, spec: ComponentSpec): Double =
     val t = cell.trim

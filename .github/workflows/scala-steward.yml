@@ -27,3 +27,11 @@ jobs:
           # to run on what it opens.
           github-token: ${{ secrets.SCALA_STEWARD_TOKEN }}
           repo-config: .scala-steward.conf
+          # Steward needs an author for the commits it makes, and derives one
+          # from the token's account by default. That fails outright when the
+          # account has email privacy enabled — which is the sensible setting,
+          # so the address is supplied here rather than the privacy turned off.
+          # GitHub's noreply form routes to the account without exposing a real
+          # address.
+          author-email: "150961+oluies@users.noreply.github.com"
+          author-name: "Scala Steward"

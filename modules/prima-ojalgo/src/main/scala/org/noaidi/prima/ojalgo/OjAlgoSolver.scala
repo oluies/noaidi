@@ -57,52 +57,42 @@ final class OjAlgoSolver(options: OjAlgoSolver.Options = OjAlgoSolver.Options())
       primal(i) = result.doubleValue(i)
       i += 1
 
-    // ojAlgo exposes multipliers only for some solver paths, and their sign
-    // convention follows its own `<=` orientation rather than the `>=` standard
-    // form here. They are surfaced when present but nothing depends on them:
-    // Prima's duals are validated against complementary slackness instead.
-    val dual = extractDuals(result, problem.numConstraints)
-
     val status = mapState(result.getState)
-    val error =
-      if status == SolveStatus.Optimal then Kkt.evaluate(problem, primal, dual)
-      else KktError(Double.NaN, Double.NaN, result.getValue, Double.NaN)
 
-    val reduced = new Array[Double](problem.numVariables)
-    if status == SolveStatus.Optimal then
-      val ktY = new Array[Double](problem.numVariables)
-      matrix.transpose.multiplyInto(dual, ktY)
-      i = 0
-      while i < problem.numVariables do
-        reduced(i) = problem.objectiveRaw(i) - ktY(i)
-        i += 1
+    // ojAlgo exposes multipliers only on some of its solver paths, and where it
+    // does they follow its own `<=` orientation rather than the `>=` standard
+    // form used here. Rather than substitute zeros — which would flow into the
+    // dual objective, the duality gap and the reduced costs and come back as
+    // plausible-looking numbers that are simply wrong — the dual side is
+    // reported as NaN whenever it cannot be established. A caller reading
+    // `dual` or `dualityGap` from this backend then gets an unmistakable answer
+    // instead of a quiet one.
+    val duals   = Array.fill(problem.numConstraints)(Double.NaN)
+    val reduced = Array.fill(problem.numVariables)(Double.NaN)
+
+    val error =
+      if status == SolveStatus.Optimal then
+        KktError(
+          primalResidualNorm = Kkt.primalResidualNorm(problem, primal),
+          dualResidualNorm = Double.NaN,
+          primalObjective = problem.primalObjective(Unsafe.wrap(primal.clone())),
+          dualObjective = Double.NaN,
+        )
+      else KktError(Double.NaN, Double.NaN, result.getValue, Double.NaN)
 
     LpSolution(
       status = status,
       primal = Unsafe.wrap(primal),
-      dual = Unsafe.wrap(dual),
+      dual = Unsafe.wrap(duals),
       reducedCosts = Unsafe.wrap(reduced),
       objectiveValue =
-        if status == SolveStatus.Optimal then problem.primalObjective(Unsafe.wrap(primal.clone()))
-        else result.getValue,
-      dualObjectiveValue = error.dualObjective,
+        if status == SolveStatus.Optimal then error.primalObjective else result.getValue,
+      dualObjectiveValue = Double.NaN,
       iterations = 0,
       restarts = 0,
       solveTimeMillis = elapsed,
       kkt = error,
     )
-
-  private def extractDuals(result: Optimisation.Result, m: Int): Array[Double] =
-    val out = new Array[Double](m)
-    val multipliers = result.getMultipliers
-    if multipliers.isPresent then
-      val values = multipliers.get
-      val count  = math.min(m, values.count().toInt)
-      var i      = 0
-      while i < count do
-        out(i) = values.doubleValue(i.toLong)
-        i += 1
-    out
 
   private def mapState(state: Optimisation.State): SolveStatus =
     if state == Optimisation.State.OPTIMAL || state == Optimisation.State.DISTINCT then

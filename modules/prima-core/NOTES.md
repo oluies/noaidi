@@ -44,21 +44,21 @@ Measured on the ladder (Apple aarch64, JDK 26, `epsAbs = epsRel = 1e-9`):
 
 ```
 instance             size                   status                   prima obj       ojalgo obj   rel gap    iters  restarts  prima ms  ojalgo ms
-tiny-lower-bound     1v/1c/1nz              Optimal                   3.000000         3.000000  4.84e-12       64         0         0        78
-product-mix          2v/3c/4nz              Optimal                 -36.000000       -36.000000  3.92e-12      128         1         1         0
-equality-split       2v/1c/2nz              Optimal                  24.000000        24.000000  1.95e-13       64         0         0         0
+tiny-lower-bound     1v/1c/1nz              Optimal                   3.000000         3.000000  4.84e-12       64         0         1       102
+product-mix          2v/3c/4nz              Optimal                 -36.000000       -36.000000  1.99e-10      128         1         2         0
+equality-split       2v/1c/2nz              Optimal                  24.000000        24.000000  1.52e-13       64         0         0         0
 degenerate           2v/2c/4nz              Optimal                   2.000000         2.000000  3.55e-14       64         0         0         0
-free-sign            2v/1c/2nz              Optimal                  -2.000000        -2.000000  0.00e+00        3         0         0         0
+free-sign            2v/1c/2nz              Optimal                  -2.000000        -2.000000  0.00e+00        2         0         0         0
 range-row            2v/2c/4nz              Optimal                   2.000000         2.000000  1.03e-11       64         0         0         0
-economic-dispatch    8v/4c/10nz             Optimal                3700.000000      3700.000000  3.46e-12      256         3         0         0
-infeasible           1v/2c/2nz              PrimalInfeasible                 -                -         -     1280         6         0         0
+economic-dispatch    8v/4c/10nz             Optimal                3700.000000      3700.000000  1.51e-11      256         3         0         1
+infeasible           1v/2c/2nz              PrimalInfeasible                 -                -         -     1088         5         0         0
 unbounded            1v/1c/1nz              DualInfeasible                   -                -         -       64         0         0         0
-random-60x30         60v/30c/439nz          Optimal                -773.369199      -773.369199  1.05e-11     1344        10         2         7
-random-200x120       200v/120c/2464nz       Optimal               -1796.551033     -1796.551031  8.05e-10     5888        15        25        28
-random-600x400       600v/400c/9529nz       Optimal               -5285.522442     -5285.522445  5.55e-10    59840        26       749       813
+random-60x30         60v/30c/439nz          Optimal                -773.369199      -773.369199  3.68e-11     1280         9         2         7
+random-200x120       200v/120c/2464nz       Optimal               -1796.551031     -1796.551031  1.46e-10     6464        18        29        31
+random-600x400       600v/400c/9529nz       Optimal               -5285.522448     -5285.522445  4.86e-10    35392        17       474       802
 ```
 
-Worst relative objective gap against the oracle: **8.0e-10**.
+Worst relative objective gap against the oracle: **4.9e-10**.
 
 Regenerate with `sbt "primaValidation/Test/runMain org.noaidi.prima.validation.Report"`.
 
@@ -70,7 +70,7 @@ bounds the objective error only up to the problem's conditioning. Tightening
 `epsAbs`/`epsRel` tightens this proportionally, at a cost in iterations.
 
 **Iteration count grows steeply with size.** 1.3k iterations at 60 variables,
-60k at 600. That is expected — first-order methods trade a low per-iteration
+35k at 600. That is expected — first-order methods trade a low per-iteration
 cost against a high iteration count, which is the whole reason the per-iteration
 work needs to be on a GPU. Against ojAlgo's simplex the crossover on these dense
 random instances is around 600 variables, and dense random LPs are close to the
@@ -144,11 +144,24 @@ not exist yet.
 600-variable random instance nearly reaches. Anything larger needs the limit
 raised explicitly, and there is no heuristic that scales it with problem size.
 
-**ojAlgo's duals are not used.** Its multipliers are exposed only on some solver
-paths and follow its own sign convention. Prima's duals are validated by
-complementary slackness against its own primal instead, which is a weaker check
-than a cross-solver comparison would be. A HiGHS backend would give a proper
-dual oracle.
+**ojAlgo reports no duals at all.** Its multipliers are exposed only on some
+solver paths and follow its own `<=` sign convention rather than the `>=`
+standard form used here. Rather than pass along numbers that cannot be vouched
+for, `OjAlgoSolver` returns `NaN` for `dual`, `reducedCosts`,
+`dualObjectiveValue` and the dual half of its `KktError` — a caller doing
+arithmetic on them gets an unmistakable answer instead of a quietly wrong one.
+The consequence is that Prima's duals have no cross-solver oracle: they are
+validated by complementary slackness against Prima's own primal, which is a
+weaker check. A HiGHS backend would fix this.
+
+**Initial step size uses a bound, not an estimate.** `eta` starts at
+`1 / sqrt(||K||_1 * ||K||_inf)`, which bounds `||K||_2` from above by Holder's
+inequality. Neither induced norm alone would do: for an `m x 1` column of ones
+`||K||_inf` is 1 while `||K||_2` is `sqrt(m)`, so using it would start every
+solve outside the PDHG stability condition by a factor of `sqrt(m)`. The bound
+can be loose by up to `sqrt(min(m,n))`, which costs a conservative first step
+that the adaptive rule grows away — the safe direction to err in, since an
+underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA yet.** That gate belongs to the layers above this
 one — this module has no power-system concepts in it. The `economic-dispatch`

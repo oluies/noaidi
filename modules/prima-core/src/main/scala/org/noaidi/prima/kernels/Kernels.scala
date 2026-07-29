@@ -123,9 +123,3 @@ trait Kernels extends AutoCloseable:
   ): Unit
 
 end Kernels
-
-object Kernels:
-  /** A backend able to hold vectors as plain `Array[Double]`, which lets host
-    * code read iterates without a copy. Only the CPU reference satisfies this.
-    */
-  type Aux[V, M] = Kernels { type Vec = V; type Mat = M }

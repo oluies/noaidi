@@ -131,11 +131,15 @@ object Certificates:
 
       Some(math.sqrt(residualSq) / math.abs(value)).filter(_.isFinite)
 
-  /** Test a direction against both certificates and report whichever holds.
+  /** Test the primal and dual iterates for a certificate and report whichever
+    * holds.
     *
-    * A direction cannot certify both, since a positive Farkas value and a
-    * negative objective slope are mutually exclusive on the same vector, so the
-    * order of these checks does not matter.
+    * The two tests read different vectors — infeasibility from `y`, unbounded-
+    * ness from `x` — so both can pass at once. That is not a contradiction: an
+    * LP can be both primal and dual infeasible. This reports primal
+    * infeasibility in preference, because it is the answer that describes the
+    * constraint set the caller wrote, and a caller needing both can run the two
+    * tests directly.
     */
   def classify(
       problem: LpProblem,

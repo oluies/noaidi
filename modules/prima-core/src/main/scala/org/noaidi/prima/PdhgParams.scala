@@ -64,6 +64,19 @@ final case class PdhgParams(
     restartSufficientReduction > 0.0 && restartSufficientReduction <= restartNecessaryReduction,
     "restartSufficientReduction must be positive and no greater than restartNecessaryReduction",
   )
+  // Zero would make the artificial criterion fire at every checkpoint, throwing
+  // away the running average before it can ever be the better candidate — a
+  // silent collapse in convergence rather than a configuration error.
+  require(
+    restartArtificialFraction > 0.0 && restartArtificialFraction <= 1.0,
+    s"restartArtificialFraction must lie in (0, 1], got $restartArtificialFraction",
+  )
+  // Negative would make every certificate test fail, silently disabling
+  // infeasibility detection.
+  require(
+    infeasibilityTolerance >= 0.0,
+    s"infeasibilityTolerance must be non-negative, got $infeasibilityTolerance",
+  )
 
 object PdhgParams:
   val default: PdhgParams = PdhgParams()

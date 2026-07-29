@@ -169,7 +169,11 @@ object Pdhg:
           if movement == 0.0 then
             // Neither variable moved: the iteration is at a fixed point, which
             // for PDHG is a saddle point of the Lagrangian. Whether that is
-            // optimal is decided by the usual test.
+            // optimal is decided by the usual test — on a freshly computed `Kx`,
+            // since judging a genuine optimum against a residual that has been
+            // drifting since the last checkpoint would report it as a numerical
+            // failure.
+            k.spmv(matrix, x, kx)
             val error = evaluate(x, y, kx, ktY)
             outcome = Some(
               (if converged(error) then SolveStatus.Optimal else SolveStatus.NumericalError, error)
@@ -192,10 +196,12 @@ object Pdhg:
     // -- setup ---------------------------------------------------------------
 
     private def initialise(): Unit =
-      // PDHG requires `eta * ||K||_2 <= 1`; the infinity norm is an easy upper
-      // bound on the spectral norm and the adaptive rule corrects it from there.
-      val normInf = sp.constraintMatrix.normInf
-      stepSize = if normInf > 0.0 then 1.0 / normInf else 1.0
+      // PDHG is stable only while `eta * ||K||_2 <= 1`, so the first step is
+      // taken from an upper bound on the spectral norm. The adaptive rule grows
+      // it from there; starting too large would put the opening iterations
+      // outside the region where the method converges.
+      val bound = sp.constraintMatrix.spectralNormBound
+      stepSize = if bound > 0.0 then 1.0 / bound else 1.0
 
       // Balance the two blocks by the scale of the data each one sees.
       val cNorm = Kkt.norm2(sp.objectiveRaw)

@@ -121,6 +121,58 @@ class PdhgSuite extends munit.FunSuite:
     assertEquals(solution.iterations, 0)
   }
 
+  test("stops at the time limit without claiming optimality") {
+    // Tolerances that cannot be met, so only the clock can end this.
+    val timed = PdhgParams(
+      epsAbs = 1e-16,
+      epsRel = 1e-16,
+      maxIterations = 50_000_000,
+      timeLimitMillis = Some(50L),
+    )
+    val problem =
+      LpFixtures.randomFeasible(seed = 5, numVariables = 200, numEqualities = 40, numInequalities = 80)
+
+    val started  = System.nanoTime()
+    val solution = Pdhg.solve(problem, timed)
+    val elapsed  = (System.nanoTime() - started) / 1000000L
+
+    assertEquals(solution.status, SolveStatus.TimeLimit, s"$solution")
+    assert(solution.iterations < 50_000_000, "the iteration limit ended this, not the clock")
+    // The limit is only checked at evaluation points, so allow generous slack;
+    // the assertion is that it stopped early, not that it stopped punctually.
+    assert(elapsed < 20000, s"time limit overshot badly: ${elapsed}ms")
+  }
+
+  test("parameters that would silently break convergence are rejected") {
+    // Zero would fire the artificial restart at every checkpoint, discarding the
+    // running average before it can ever be the better candidate.
+    intercept[IllegalArgumentException](PdhgParams(restartArtificialFraction = 0.0))
+    intercept[IllegalArgumentException](PdhgParams(restartArtificialFraction = 1.5))
+    // Negative would make every certificate test fail, disabling detection.
+    intercept[IllegalArgumentException](PdhgParams(infeasibilityTolerance = -1e-9))
+  }
+
+  test("the initial step size respects the PDHG stability condition") {
+    // A tall thin column is the case where the induced infinity norm is not a
+    // bound on the spectral norm: here ||K||_inf is 1 but ||K||_2 is sqrt(m).
+    val m      = 100
+    val column = SparseMatrix.fromTriplets(m, 1, (0 until m).map(r => (r, 0, 1.0)))
+    assertEqualsDouble(column.normInf, 1.0, 1e-12)
+    assert(
+      column.spectralNormBound >= math.sqrt(m.toDouble) - 1e-9,
+      s"bound ${column.spectralNormBound} is below the true spectral norm ${math.sqrt(m.toDouble)}",
+    )
+
+    // And the solver built on it still lands on the right answer.
+    val b = LpProblem.builder(1)
+    b.objectiveCoefficient(0, 1.0)
+    b.bounds(0, 0.0, 10.0)
+    for _ <- 0 until m do b.greaterThan(Seq(0 -> 1.0), 3.0)
+    val solution = Pdhg.solve(b.build()._1, params)
+    assertEquals(solution.status, SolveStatus.Optimal, s"$solution")
+    assertEqualsDouble(solution.objectiveValue, 3.0, 1e-6)
+  }
+
   test("restarts happen on a problem that needs them") {
     val problem  = LpFixtures.randomFeasible(seed = 7, numVariables = 40, numEqualities = 8, numInequalities = 12)
     val solution = Pdhg.solve(problem, params)

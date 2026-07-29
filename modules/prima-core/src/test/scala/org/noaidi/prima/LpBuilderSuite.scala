@@ -63,6 +63,21 @@ class LpBuilderSuite extends munit.FunSuite:
     intercept[IllegalArgumentException](b.bounds(0, 5.0, 1.0))
   }
 
+  test("every builder method rejects an out-of-range variable the same way") {
+    val b = LpProblem.builder(2)
+    intercept[IllegalArgumentException](b.objectiveCoefficient(2, 1.0))
+    intercept[IllegalArgumentException](b.bounds(-1, 0.0, 1.0))
+    intercept[IllegalArgumentException](b.greaterThan(Seq(5 -> 1.0), 0.0))
+  }
+
+  test("non-finite objective coefficients are rejected") {
+    val b = LpProblem.builder(1)
+    b.objectiveCoefficient(0, Double.PositiveInfinity)
+    b.bounds(0, 0.0, 1.0)
+    b.greaterThan(Seq(0 -> 1.0), 0.0)
+    intercept[IllegalArgumentException](b.build())
+  }
+
   test("primalObjective includes the offset") {
     val b = LpProblem.builder(1)
     b.objectiveCoefficient(0, 2.0)

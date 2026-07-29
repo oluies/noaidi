@@ -79,10 +79,33 @@ class SparseMatrixSuite extends munit.FunSuite:
     assertEqualsDouble(m.normFrobenius, math.sqrt(14.0), 1e-12)
   }
 
-  test("spectral norm estimate matches a known singular value") {
-    // A diagonal matrix's largest singular value is its largest |entry|.
-    val m = SparseMatrix.fromTriplets(3, 3, Seq((0, 0, 2.0), (1, 1, -7.0), (2, 2, 3.0)))
-    assertEqualsDouble(m.spectralNormEstimate(), 7.0, 1e-6)
+  test("spectralNormBound is an upper bound, including where normInf is not") {
+    // Diagonal: largest singular value is the largest |entry|, and both induced
+    // norms agree with it.
+    val diagonal = SparseMatrix.fromTriplets(3, 3, Seq((0, 0, 2.0), (1, 1, -7.0), (2, 2, 3.0)))
+    assertEqualsDouble(diagonal.norm1, 7.0, 1e-12)
+    assertEqualsDouble(diagonal.normInf, 7.0, 1e-12)
+    assert(diagonal.spectralNormBound >= 7.0 - 1e-12)
+
+    // A column of ones is the counterexample to using normInf alone: its
+    // spectral norm is sqrt(m) while every row sums to 1.
+    val m      = 25
+    val column = SparseMatrix.fromTriplets(m, 1, (0 until m).map(r => (r, 0, 1.0)))
+    assertEqualsDouble(column.normInf, 1.0, 1e-12)
+    assertEqualsDouble(column.norm1, m.toDouble, 1e-12)
+    assertEqualsDouble(column.spectralNormBound, math.sqrt(m.toDouble), 1e-12)
+    assert(column.spectralNormBound > column.normInf)
+  }
+
+  test("non-finite entries are rejected at construction") {
+    // An infinite entry survives arithmetic but turns a scaling factor into
+    // zero, surfacing much later as a NaN variable bound.
+    intercept[IllegalArgumentException] {
+      SparseMatrix.fromTriplets(1, 1, Seq((0, 0, Double.PositiveInfinity)))
+    }
+    intercept[IllegalArgumentException] {
+      SparseMatrix.fromTriplets(1, 1, Seq((0, 0, Double.NaN)))
+    }
   }
 
   test("scaledBy applies row and column diagonals") {

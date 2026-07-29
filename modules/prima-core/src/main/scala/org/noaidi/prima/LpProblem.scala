@@ -49,15 +49,6 @@ final class LpProblem private (
       i += 1
     s
 
-  /** True when every bound is finite and consistent, i.e. `X` is a box. */
-  def hasFiniteBounds: Boolean =
-    var i  = 0
-    var ok = true
-    while i < numVariables && ok do
-      ok = !lowerRaw(i).isNegInfinity && !upperRaw(i).isPosInfinity
-      i += 1
-    ok
-
   override def toString: String =
     s"LpProblem(vars=$numVariables, eq=$numEqualities, ineq=$numInequalities, nnz=${constraintMatrix.nnz})"
 
@@ -95,7 +86,7 @@ object LpProblem:
         variableLower(i) <= variableUpper(i),
         s"variable $i has empty bound interval [${variableLower(i)}, ${variableUpper(i)}]",
       )
-      require(!objective(i).isNaN, s"objective coefficient $i is NaN")
+      require(objective(i).isFinite, s"objective coefficient $i is not finite: ${objective(i)}")
       i += 1
     var r = 0
     while r < rhs.length do
@@ -171,7 +162,14 @@ final class LpBuilder(numVariables: Int):
   private final case class Row(coefficients: Seq[(Int, Double)], lo: Double, hi: Double)
   private val rows = mutable.ArrayBuffer.empty[Row]
 
+  private def checkVariable(variable: Int): Unit =
+    require(
+      variable >= 0 && variable < numVariables,
+      s"variable index $variable out of range [0, $numVariables)",
+    )
+
   def objectiveCoefficient(variable: Int, value: Double): this.type =
+    checkVariable(variable)
     objective(variable) = value
     this
 
@@ -180,6 +178,7 @@ final class LpBuilder(numVariables: Int):
     this
 
   def bounds(variable: Int, lo: Double, hi: Double): this.type =
+    checkVariable(variable)
     require(lo <= hi, s"variable $variable has empty bound interval [$lo, $hi]")
     lower(variable) = lo
     upper(variable) = hi
@@ -194,9 +193,7 @@ final class LpBuilder(numVariables: Int):
       !(lo.isNegInfinity && hi.isPosInfinity),
       "constraint is unbounded on both sides and would have no effect",
     )
-    coefficients.foreach { (v, _) =>
-      require(v >= 0 && v < numVariables, s"variable index $v out of range [0, $numVariables)")
-    }
+    coefficients.foreach { (v, _) => checkVariable(v) }
     rows += Row(coefficients, lo, hi)
     this
 

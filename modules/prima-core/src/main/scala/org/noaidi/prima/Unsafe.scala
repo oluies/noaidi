@@ -14,12 +14,8 @@ package org.noaidi.prima
   */
 private[prima] object Unsafe:
 
-  inline def wrap(a: Array[Double]): IArray[Double]  = a.asInstanceOf[IArray[Double]]
-  inline def wrapInts(a: Array[Int]): IArray[Int]    = a.asInstanceOf[IArray[Int]]
-  inline def raw(a: IArray[Double]): Array[Double]   = a.asInstanceOf[Array[Double]]
-  inline def rawInts(a: IArray[Int]): Array[Int]     = a.asInstanceOf[Array[Int]]
-
-  /** A defensive copy, for the cases where the caller does not own the source. */
-  inline def copyOf(a: IArray[Double]): Array[Double] = raw(a).clone()
+  inline def wrap(a: Array[Double]): IArray[Double] = a.asInstanceOf[IArray[Double]]
+  inline def wrapInts(a: Array[Int]): IArray[Int]   = a.asInstanceOf[IArray[Int]]
+  inline def raw(a: IArray[Double]): Array[Double]  = a.asInstanceOf[Array[Double]]
 
 end Unsafe

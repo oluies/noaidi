@@ -137,6 +137,9 @@ final class SparseMatrix private (
       k += 1
     m
 
+  /** Induced 1-norm, i.e. the largest absolute column sum. */
+  def norm1: Double = transpose.normInf
+
   /** Induced infinity norm, i.e. the largest absolute row sum. */
   def normInf: Double =
     var m = 0.0
@@ -161,43 +164,21 @@ final class SparseMatrix private (
       k += 1
     math.sqrt(s)
 
-  /** Power iteration for the largest singular value of this matrix.
+  /** An upper bound on the spectral norm, from Holder's inequality:
+    * `||K||_2 <= sqrt(||K||_1 * ||K||_inf)`.
     *
-    * PDHG's step size must satisfy `eta * ||K||_2 <= 1`; the adaptive rule finds
-    * that on its own, but a spectral estimate is a useful sanity bound and is
-    * cheap enough to be worth having.
+    * PDHG is stable only while `eta * ||K||_2 <= 1`, and this is the cheapest
+    * quantity that bounds `||K||_2` from above. Neither induced norm alone
+    * does: for an `m x 1` column of ones, `||K||_inf` is 1 while `||K||_2` is
+    * `sqrt(m)`, so using it would start every solve outside the stability
+    * condition by a factor of `sqrt(m)`.
+    *
+    * The bound is tight for that column, and loose by at most `sqrt(min(m,n))`
+    * in general — an overestimate costs a conservative first step, which the
+    * adaptive rule grows away within a few iterations, whereas an underestimate
+    * would start the method outside the region where it converges at all.
     */
-  def spectralNormEstimate(iterations: Int = 100, tolerance: Double = 1e-8): Double =
-    if nnz == 0 then 0.0
-    else
-      val t   = transpose
-      var v   = Array.fill(cols)(1.0 / math.sqrt(cols.toDouble))
-      val kv  = new Array[Double](rows)
-      val ktv = new Array[Double](cols)
-      var sigma = 0.0
-      var it    = 0
-      var done  = false
-      while it < iterations && !done do
-        multiplyInto(v, kv)
-        t.multiplyInto(kv, ktv)
-        var norm = 0.0
-        var i    = 0
-        while i < cols do
-          norm += ktv(i) * ktv(i)
-          i += 1
-        norm = math.sqrt(norm)
-        if norm <= 0.0 then done = true
-        else
-          val next = math.sqrt(norm)
-          if math.abs(next - sigma) <= tolerance * math.max(next, 1.0) then done = true
-          sigma = next
-          i = 0
-          while i < cols do
-            ktv(i) /= norm
-            i += 1
-          v = ktv.clone()
-        it += 1
-      sigma
+  def spectralNormBound: Double = math.sqrt(norm1 * normInf)
 
   def toDense: Array[Array[Double]] =
     val out = Array.ofDim[Double](rows, cols)
@@ -226,7 +207,10 @@ object SparseMatrix:
     raw.foreach { case (r, c, v) =>
       require(r >= 0 && r < rows, s"row index $r out of range [0, $rows)")
       require(c >= 0 && c < cols, s"column index $c out of range [0, $cols)")
-      require(!v.isNaN, s"NaN entry at ($r, $c)")
+      // Infinities are rejected as well as NaN: an infinite entry survives
+      // construction but turns a scaling factor into zero, which then shows up
+      // as a NaN variable bound far from the offending input.
+      require(v.isFinite, s"entry at ($r, $c) is not finite: $v")
     }
 
     java.util.Arrays.sort(

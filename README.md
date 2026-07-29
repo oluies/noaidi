@@ -26,10 +26,12 @@ commitment — depends on it.
 | `prima-ojalgo` | ojAlgo behind the common solver interface — CPU fallback and correctness oracle. |
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
 
-82 tests pass. Worst relative objective disagreement with ojAlgo across the
-validation ladder is 8.0e-10. See
-[`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) for the numbers,
-the design decisions behind them, and the known gaps.
+105 tests pass. Worst relative objective disagreement with ojAlgo across the
+validation ladder is 4.9e-10.
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
+- [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) — the numbers,
+  the numerical caveats, and the known gaps.
 
 ## Building
 

@@ -154,6 +154,32 @@ object Kkt:
         epsAbs + epsRel * (math.abs(error.primalObjective) + math.abs(error.dualObjective)),
     )
 
+  /** Primal residual norm alone, for a solver that produces a primal solution
+    * but no trustworthy duals.
+    *
+    * The alternative — evaluating with a placeholder dual — would return a
+    * fully-populated [[KktError]] whose dual fields are arithmetic on numbers
+    * that mean nothing.
+    */
+  def primalResidualNorm(problem: LpProblem, x: Array[Double]): Double =
+    val m   = problem.numConstraints
+    val nEq = problem.numEqualities
+    val q   = problem.rhsRaw
+    val ax  = new Array[Double](m)
+    problem.constraintMatrix.multiplyInto(x, ax)
+
+    var sum = 0.0
+    var i   = 0
+    while i < nEq do
+      val r = ax(i) - q(i)
+      sum += r * r
+      i += 1
+    while i < m do
+      val shortfall = q(i) - ax(i)
+      if shortfall > 0.0 then sum += shortfall * shortfall
+      i += 1
+    math.sqrt(sum)
+
   private[prima] def norm2(a: Array[Double]): Double =
     var s = 0.0
     var i = 0

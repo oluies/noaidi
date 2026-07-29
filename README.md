@@ -25,18 +25,70 @@ commitment — depends on it.
 | `prima-zio` | Effect boundary: solves on the blocking pool, cooperative interruption, ZStream fan-out over scenario sweeps. |
 | `prima-ojalgo` | ojAlgo behind the common solver interface — CPU fallback and correctness oracle. |
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
+| `prima-cyfra` | GPU spike. Not in the root build — see below. |
 
-137 tests pass. Worst relative objective disagreement with ojAlgo across the
+143 tests pass. Worst relative objective disagreement with ojAlgo across the
 validation ladder is 4.9e-10.
-
-Reduced precision is handled too: every accelerator backend in prospect is
-float32-only — Cyfra's DSL has no double type on any target — so `Float32Kernels`
-and `MixedPrecision` make that path measurable and testable on the CPU, ahead of
-any GPU work. The results are mixed and the numbers are in NOTES.md.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
 - [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) — the numbers,
   the numerical caveats, and the known gaps.
+
+### What the GPU investigation found
+
+Three findings, in the order they changed the plan.
+
+**Cyfra is float32-only, on every target.** Version 0.1.0-RC1 exposes `Float32`,
+`Int32` and `UInt32` and nothing else — verified against the published jar and
+against `main`, which has no newer published release despite tags through
+`rc7`. This is not an Apple limitation being inherited: a Cyfra backend runs
+single precision on NVIDIA hardware that could do better. Apple GPUs offer no
+fp64 through Vulkan or Metal either, since Metal has no `double` type at all and
+MoltenVK therefore cannot expose `shaderFloat64`.
+
+So reduced precision is the normal case for every accelerator in prospect, which
+makes the mixed-precision path a prerequisite for a GPU backend rather than a
+follow-up to one. `Float32Kernels` runs the same arithmetic on the CPU with
+every operation rounded to float32, and `MixedPrecision` composes it with a
+double-precision refinement. Building that first isolates the algorithm's
+precision sensitivity from SPIR-V correctness and driver behaviour — a GPU
+experiment would confound all three.
+
+**The measurements are mixed, and that is the honest headline.** Double-precision
+work removed against a cold solve: 75% on the PyPSA-shaped dispatch fixture at a
+1e-9 tolerance and 100% at 1e-6, 35–65% on mid-size random instances, but −14%
+at 1e-9 and −621% at 1e-6 on the largest dense random LP, where the float32
+point is measurably a *worse* starting point than zero. That is unexplained and
+is why `MixedPrecision` is opt-in. The underlying pattern: float32 reaches 1e-5
+on the 600-variable instance in 1,792 iterations where a cold solve needs 35,392
+for 1e-9 — the first digits are nearly free and the last cost everything, so a
+float32 device removes only the cheap prefix unless the caller's tolerance is
+loose enough for it to deliver the whole answer.
+
+**CSR SpMV does run on the GPU.** This was the gating question for a Cyfra
+backend, and it was genuinely open: SpMV is the one kernel PDHG cannot do
+without, and it is the one Cyfra was not designed around — its demonstrated use
+is dense arrays and ray tracing, where every invocation does identical work. A
+CSR row needs an indexed gather through a column-index buffer and an inner loop
+whose trip count is known only at runtime and differs per row.
+
+Both are expressible, and verified end to end on Apple M5 Pro through MoltenVK
+against the CPU reference:
+
+```scala
+GSeq.gen(start, p => p + 1)      // start = rowPtr(row)
+  .takeWhile(p => p < end)       // end   = rowPtr(row+1) — the runtime bound
+  .limit(maxRowNnz)              // static cap SPIR-V needs
+  .map(p => GIO.read(values, p) * GIO.read(x, GIO.read(colIndices, p)))
+  .fold[Float32](0.0f, _ + _)
+```
+
+The nested `GIO.read` is the indexed gather the question hung on.
+
+What this does *not* establish is value. There is no `CyfraKernels` implementing
+the other seven operations and no performance measurement at all — and given the
+mixed-precision result above, a timing on a real SpMV is worth having before
+building the full backend.
 
 ## Building
 
@@ -49,6 +101,28 @@ sbt "primaValidation/Test/runMain org.noaidi.prima.validation.Report"  # cross-s
 
 Use `testFull`, not `test`: under sbt 2 the `test` task is incremental and will
 report success having run nothing.
+
+The report prints the cross-solver ladder and then the mixed-precision
+comparison at two tolerance regimes, which give opposite answers — see the GPU
+findings above.
+
+### Running the GPU spike
+
+`prima-cyfra` is deliberately **not** aggregated into the root build, so
+`sbt testFull` never touches it. It needs a Vulkan loader and an ICD at runtime,
+which no CI runner is guaranteed to have, and Cyfra is LGPL-2.1 where the rest
+of this build is Apache-2.0. Keeping it separate and opt-in contains both.
+
+On macOS:
+
+```bash
+brew install molten-vk vulkan-loader
+sbt primaCyfra/testFull
+```
+
+The build points the tests at Homebrew's ICD via `VK_ICD_FILENAMES`. On Linux
+with a native Vulkan driver that variable is unnecessary — drop it from
+`build.sbt` or override it.
 
 ## Using the solver
 
@@ -87,16 +161,19 @@ PrimaZio.solveAll(problems, parallelism = 8) // ZStream fan-out over a sweep
 
 ## Roadmap
 
-The migration order from the brief, with Prima done and everything else ahead:
+The migration order from the brief. Prima and the GPU groundwork are done;
+everything from the foundation layer up is ahead:
 
 1. ~~**Prima**: restarted PDHG LP solver, fp64 reference, validated against ojAlgo.~~ ✅
-2. **Prima GPU**: Cyfra backend behind the existing `Kernels` seam; validate against cuPDLP-C.
-3. **L0 foundation**: numeric core (Breeze/ND4J), typed columnar store for component tables and snapshot series, graph module.
-4. **L1 I/O and solver plumbing**: CSV/netCDF/HDF5 round-tripping PyPSA byte-for-byte; solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima.
-5. **L2 physics**: linearised power flow, Newton-Raphson AC/DC, economic dispatch, LOPF, SCLOPF, unit commitment.
-6. **L3 features**: clustering, statistics, sector coupling, plotting.
-7. **L4 acceleration**: remaining kernels onto Cyfra/MLX/CUDA, plus Spatial/Chisel for FPGA.
-8. **L5 runtime**: ZIO Streams over snapshots and contingencies, Pekko cluster distribution.
+2. ~~**Reduced precision**: `Float32Kernels`, warm start, `MixedPrecision` with fp64 refinement.~~ ✅
+3. ~~**Cyfra feasibility**: CSR SpMV on the GPU, matching the CPU reference.~~ ✅
+4. **Prima GPU**: the remaining seven kernel operations behind `Kernels`, then a timing against the CPU reference, then validation against cuPDLP-C. Worth resolving the dense-instance warm-start regression first — it is a concrete, reproducible anomaly with two named suspects in NOTES.md, and it decides how much a GPU can actually buy.
+5. **L0 foundation**: numeric core (Breeze/ND4J), typed columnar store for component tables and snapshot series, graph module.
+6. **L1 I/O and solver plumbing**: CSV/netCDF/HDF5 round-tripping PyPSA byte-for-byte; solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima.
+7. **L2 physics**: linearised power flow, Newton-Raphson AC/DC, economic dispatch, LOPF, SCLOPF, unit commitment.
+8. **L3 features**: clustering, statistics, sector coupling, plotting.
+9. **L4 acceleration**: remaining kernels onto Cyfra/MLX/CUDA, plus Spatial/Chisel for FPGA.
+10. **L5 runtime**: ZIO Streams over snapshots and contingencies, Pekko cluster distribution.
 
 From L1 onwards, every module is gated on golden-file comparison against a
 pinned PyPSA version run on the same example networks. That harness does not

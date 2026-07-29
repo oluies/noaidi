@@ -74,7 +74,6 @@ object Kkt:
   ): KktError =
     val m       = problem.numConstraints
     val n       = problem.numVariables
-    val nEq     = problem.numEqualities
     val q       = problem.rhsRaw
     val c       = problem.objectiveRaw
     val lower   = problem.lowerRaw

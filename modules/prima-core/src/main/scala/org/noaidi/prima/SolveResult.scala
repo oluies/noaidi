@@ -41,19 +41,28 @@ final case class LpSolution(
     restarts: Int,
     solveTimeMillis: Long,
     kkt: KktError,
-    /** Step size the adaptive rule had settled on, in the equilibrated space.
+    /** Step size the adaptive rule had settled on, in the equilibrated space,
+      * or `NaN` if this solver has no such notion.
       *
       * Reported so it can be handed to a warm-started solve. Both passes over a
       * problem derive the same scaling, so the value transfers between them —
       * and it represents real work, since the rule takes thousands of
       * iterations to converge on a large instance.
+      *
+      * `NaN` rather than a plausible default is deliberate. Any backend that is
+      * not PDHG — a simplex solver, say — leaves this unset, and a default of
+      * `1.0` would be indistinguishable from a rule that genuinely converged
+      * there. A warm start built from such a solution would then override the
+      * opening step size derived from the spectral norm bound with a fabricated
+      * one, and start the method outside the region where it converges.
       */
-    finalStepSize: Double = 1.0,
+    finalStepSize: Double = Double.NaN,
 
     /** Primal weight the restart schedule had settled on, likewise in the
-      * equilibrated space and likewise worth carrying across a warm start.
+      * equilibrated space, `NaN` when unset, and likewise worth carrying across
+      * a warm start.
       */
-    finalPrimalWeight: Double = 1.0,
+    finalPrimalWeight: Double = Double.NaN,
 ):
   def dualityGap: Double = kkt.absoluteGap
 

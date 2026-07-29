@@ -16,7 +16,8 @@ object Report:
   private final case class Row(
       name: String,
       size: String,
-      primaStatus: String,
+      primaStatus: SolveStatus,
+      oracleStatus: SolveStatus,
       primaObjective: Double,
       primaIterations: Int,
       primaRestarts: Int,
@@ -50,7 +51,8 @@ object Report:
       Row(
         name = name,
         size = s"${problem.numVariables}v/${problem.numConstraints}c/${problem.constraintMatrix.nnz}nz",
-        primaStatus = mine.status.toString,
+        primaStatus = mine.status,
+        oracleStatus = theirs.status,
         primaObjective = mine.objectiveValue,
         primaIterations = mine.iterations,
         primaRestarts = mine.restarts,
@@ -61,25 +63,31 @@ object Report:
     }
 
     println(
-      f"${"instance"}%-20s ${"size"}%-22s ${"status"}%-17s ${"prima obj"}%16s " +
+      f"${"instance"}%-20s ${"size"}%-22s ${"prima"}%-17s ${"ojalgo"}%-17s ${"prima obj"}%16s " +
         f"${"ojalgo obj"}%16s ${"rel gap"}%9s ${"iters"}%8s ${"restarts"}%9s ${"prima ms"}%9s ${"ojalgo ms"}%10s"
     )
-    println("-" * 150)
+    println("-" * 168)
     rows.foreach { r =>
       // Objective columns are meaningless for a problem with no optimum, so
       // they are dashed rather than printed as whatever the solvers last held.
-      val optimal    = r.primaStatus == "Optimal"
+      // Compared against the enum, not its rendered name, so renaming a case
+      // cannot silently turn every row into dashes.
+      val optimal = r.primaStatus == SolveStatus.Optimal && r.oracleStatus == SolveStatus.Optimal
       val primaObj   = if optimal then f"${r.primaObjective}%16.6f" else f"${"-"}%16s"
       val oracleObj  = if optimal then f"${r.oracleObjective}%16.6f" else f"${"-"}%16s"
       val gap        = if optimal then f"${r.relativeGap}%9.2e" else f"${"-"}%9s"
       println(
-        f"${r.name}%-20s ${r.size}%-22s ${r.primaStatus}%-17s $primaObj $oracleObj $gap " +
+        f"${r.name}%-20s ${r.size}%-22s ${r.primaStatus}%-17s ${r.oracleStatus}%-17s $primaObj $oracleObj $gap " +
           f"${r.primaIterations}%8d ${r.primaRestarts}%9d ${r.primaMillis}%9d ${r.oracleMillis}%10d"
       )
     }
 
-    val worst = rows.filter(_.primaStatus == "Optimal").map(_.relativeGap).maxOption.getOrElse(0.0)
+    val disagreements = rows.filter(r => r.primaStatus != r.oracleStatus)
+    val worst =
+      rows.filter(_.primaStatus == SolveStatus.Optimal).map(_.relativeGap).maxOption.getOrElse(0.0)
     println(f"%nworst relative objective gap against the oracle: $worst%.3e")
+    if disagreements.nonEmpty then
+      println(s"STATUS DISAGREEMENTS: ${disagreements.map(_.name).mkString(", ")}")
 
     // Two tolerance regimes, because they give opposite answers. At 1e-9 the
     // float32 device can only deliver a starting point and the double-precision

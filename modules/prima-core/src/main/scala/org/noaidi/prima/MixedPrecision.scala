@@ -15,13 +15,21 @@ import org.noaidi.prima.kernels.{Kernels, ScalaKernels}
   * starting point. The reduced-precision pass runs to whatever tolerance
   * float32 can support and gets close to the optimum quickly; the CPU then
   * takes over in double precision, warm-started from that point, and tightens
-  * to the tolerance actually asked for. The refinement converges in a small
-  * fraction of the iterations a cold double-precision solve would need, so the
-  * accelerator still earns its place.
+  * to the tolerance actually asked for.
   *
-  * The reported result always comes from the double-precision pass, so a caller
-  * gets the same guarantees regardless of which device did the bulk of the
-  * work. That is the property that makes this safe to switch on by default.
+  * '''Whether that pays off depends on the problem, and it is opt-in for that
+  * reason.''' On structured, sparse instances — the LOPF workload this is meant
+  * for — the refinement removes most of the double-precision work: 75% on the
+  * dispatch fixture at a 1e-9 tolerance and all of it at 1e-6. On dense random
+  * LPs at tight tolerance the float32 point is measurably a *worse* starting
+  * point than zero, and refinement can cost several times a cold solve. That is
+  * unexplained. See `NOTES.md` for the measurements before enabling this on a
+  * new class of problem.
+  *
+  * What does hold unconditionally is the answer: the reported result always
+  * comes from the double-precision pass, so accuracy never depends on which
+  * device did the bulk of the work. That is what makes this safe to expose even
+  * where it is not yet safe to assume it is faster.
   */
 object MixedPrecision:
 
@@ -48,7 +56,24 @@ object MixedPrecision:
         * whole solve.
         */
       alwaysRefine: Boolean = false,
-  )
+
+      /** Share of a caller's time limit given to the reduced pass.
+        *
+        * Without this the two passes would each get the caller's full limit and
+        * a solve could run for twice as long as asked. The refinement gets
+        * whatever remains after the reduced pass actually finishes.
+        */
+      reducedTimeShare: Double = 0.5,
+  ):
+    require(reducedTolerance > 0.0, s"reducedTolerance must be positive, got $reducedTolerance")
+    require(
+      reducedMaxIterations > 0,
+      s"reducedMaxIterations must be positive, got $reducedMaxIterations",
+    )
+    require(
+      reducedTimeShare > 0.0 && reducedTimeShare < 1.0,
+      s"reducedTimeShare must lie in (0, 1), got $reducedTimeShare",
+    )
 
   object Params:
     val default: Params = Params()
@@ -81,21 +106,36 @@ object MixedPrecision:
       params: PdhgParams,
       device: Kernels,
       mixed: Params = Params.default,
+      cancelled: () => Boolean = () => false,
   ): Result =
     if device.capabilities.supportsFloat64 then
-      val solution = Pdhg.solveWith(problem, params, device)
+      val solution = Pdhg.solveWith(problem, params, device, cancelled)
       Result(solution, 0, 0, 0L, solution.iterations, solution.solveTimeMillis, refined = false)
     else
       val reducedParams = params.copy(
         epsAbs = math.max(params.epsAbs, mixed.reducedTolerance),
         epsRel = math.max(params.epsRel, mixed.reducedTolerance),
         maxIterations = math.min(params.maxIterations, mixed.reducedMaxIterations),
+        // A time limit means the whole solve, not each pass. Splitting it here
+        // and charging the refinement for what the reduced pass actually spent
+        // keeps the total inside what the caller asked for.
+        timeLimitMillis =
+          params.timeLimitMillis.map(limit => math.max(1L, (limit * mixed.reducedTimeShare).toLong)),
+        // The reduced pass computes its certificate residuals from float32
+        // matrix products, which carry around 1e-7 relative noise. Holding it to
+        // the caller's 1e-8 default would mean no certificate could ever pass,
+        // so infeasibility would never be detected on the device.
+        infeasibilityTolerance =
+          math.max(params.infeasibilityTolerance, mixed.reducedTolerance),
       )
-      val reduced = Pdhg.solveWith(problem, reducedParams, device)
+      val reduced = Pdhg.solveWith(problem, reducedParams, device, cancelled)
 
-      // An infeasibility or unboundedness certificate that survives float32 is
-      // not a marginal thing — the test is scale-invariant and the tolerance is
-      // absolute — so it is taken at face value unless asked otherwise.
+      // An infeasibility or unboundedness certificate found on the device is
+      // taken at face value unless asked otherwise. It was tested against the
+      // original problem data in double precision — only the matrix products
+      // feeding it came from float32 — and against the loosened tolerance set
+      // above, so it is a weaker claim than a double-precision certificate.
+      // `alwaysRefine` re-establishes it at full precision where that matters.
       val skipRefinement =
         !mixed.alwaysRefine && reduced.status.isConclusive && reduced.status != SolveStatus.Optimal
 
@@ -112,11 +152,16 @@ object MixedPrecision:
       else
         val cpu = ScalaKernels()
         try
+          val refinementParams = params.copy(
+            timeLimitMillis =
+              params.timeLimitMillis.map(limit => math.max(1L, limit - reduced.solveTimeMillis))
+          )
           val refined =
             Pdhg.solveWith(
               problem,
-              params,
+              refinementParams,
               cpu,
+              cancelled,
               warmStart = Some(Pdhg.WarmStart(reduced)),
             )
           Result(

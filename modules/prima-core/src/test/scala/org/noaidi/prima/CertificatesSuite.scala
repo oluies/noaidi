@@ -71,9 +71,10 @@ class CertificatesSuite extends munit.FunSuite:
     val y        = Array(2.0, -1.0)
     val residual = Certificates.primalInfeasibility(absorbed, y)
     assert(residual.isDefined, "the direction was not a candidate")
-    // Certificate value is q'y = 1*2 + (-100)*(-1) = 102; the only residual is
-    // the cone violation of magnitude 1.
-    assertEqualsDouble(residual.get, 1.0 / 102.0, 1e-12)
+    // Cone violation of magnitude 1 against ||y|| = sqrt(5). Normalised by the
+    // direction, so the redundant row's rhs of 100 does not enter -- see the
+    // scale-invariance test below.
+    assertEqualsDouble(residual.get, 1.0 / math.sqrt(5.0), 1e-12)
   }
 
   test("a reduced cost absorbed by a finite bound does not count as residual") {
@@ -159,6 +160,85 @@ class CertificatesSuite extends munit.FunSuite:
 
     val status = Certificates.classify(problem, Array(0.0, 1.0), Array(1.0, 1.0), 1e-8)
     assertEquals(status, Some(SolveStatus.PrimalInfeasible))
+  }
+
+  // -- normalisation: a large right-hand side must not buy a certificate ------
+  //
+  // These are the regression tests for a real false positive. Normalising the
+  // shortfall by the certificate's own value let an unrelated large coefficient
+  // dilute a genuine violation until it slipped under the tolerance, so a
+  // *feasible* problem was reported infeasible. Both directions below are wrong
+  // by a full unit; only the normalisation decides whether that is visible.
+
+  test("a cone violation is not diluted by a large right-hand side") {
+    // Feasible: x in [0, 5] with the redundant row x <= 1e10.
+    val b = LpProblem.builder(1)
+    b.bounds(0, 0.0, 5.0)
+    b.lessThan(Seq(0 -> 1.0), 1e10)
+    val feasible = b.build()._1
+
+    // y = -1 violates the dual cone outright. Normalised by the certificate
+    // value this read as 1e-10 and passed at the default tolerance.
+    val residual = Certificates.primalInfeasibility(feasible, Array(-1.0))
+    assert(
+      residual.forall(_ > 1e-3),
+      s"a feasible problem produced a passing infeasibility certificate: $residual",
+    )
+    assertEquals(Certificates.classify(feasible, Array(0.0), Array(-1.0), 1e-8), None)
+  }
+
+  test("an unabsorbed reduced cost is not diluted by a large right-hand side") {
+    // Feasible: x in [0, inf) with the row x >= 1e10, satisfied at x = 1e10.
+    val b = LpProblem.builder(1)
+    b.bounds(0, 0.0, inf)
+    b.greaterThan(Seq(0 -> 1.0), 1e10)
+    val feasible = b.build()._1
+
+    // y = 1 is in the cone but leaves a reduced cost of 1 that no finite bound
+    // can absorb. Against the value of 1e10 that read as 1e-10.
+    val residual = Certificates.primalInfeasibility(feasible, Array(1.0))
+    assert(
+      residual.forall(_ > 1e-3),
+      s"a feasible problem produced a passing infeasibility certificate: $residual",
+    )
+  }
+
+  test("a recession violation is not diluted by a large cost coefficient") {
+    // Bounded: every variable has a finite box, so the objective cannot run
+    // away in any direction.
+    val b = LpProblem.builder(2)
+    b.objectiveCoefficient(0, -1e10)
+    b.bounds(0, 0.0, 1.0)
+    b.bounds(1, 0.0, 1.0)
+    b.greaterThan(Seq(0 -> 1.0, 1 -> 1.0), 0.0)
+    val bounded = b.build()._1
+
+    // d = (1, 1) walks straight through both upper bounds. Normalised by
+    // |c'd| = 1e10 the violation read as 1.4e-10.
+    val residual = Certificates.dualInfeasibility(bounded, Array(1.0, 1.0))
+    assert(
+      residual.forall(_ > 1e-3),
+      s"a bounded problem produced a passing unboundedness certificate: $residual",
+    )
+    assertEquals(Certificates.classify(bounded, Array(1.0, 1.0), Array(0.0), 1e-8), None)
+  }
+
+  test("the reported shortfall does not depend on the problem's scale") {
+    // The same wrong direction against the same structure, with one redundant
+    // row's rhs varied over ten orders of magnitude. A measure that can be
+    // defeated by inflating the data would fall as the rhs grows.
+    def shortfall(redundantRhs: Double): Double =
+      val b = LpProblem.builder(1)
+      b.bounds(0, 0.0, 5.0)
+      b.lessThan(Seq(0 -> 1.0), -1.0)
+      b.lessThan(Seq(0 -> 1.0), redundantRhs)
+      Certificates.primalInfeasibility(b.build()._1, Array(2.0, -1.0)).get
+
+    val small = shortfall(100.0)
+    val large = shortfall(1e10)
+    assertEqualsDouble(large, small, 1e-12, "shortfall moved when only the data scale changed")
+    // Scale-invariant in the direction, as a certificate must be.
+    assertEqualsDouble(shortfall(100.0), 1.0 / math.sqrt(5.0), 1e-12)
   }
 
   test("classify reports nothing for an ordinary feasible point") {

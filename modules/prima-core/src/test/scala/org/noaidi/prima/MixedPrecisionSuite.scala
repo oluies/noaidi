@@ -20,6 +20,15 @@ class MixedPrecisionSuite extends munit.FunSuite:
     try MixedPrecision.solve(problem, params, device)
     finally device.close()
 
+  /** `Pdhg.solveWith` does not own the backend it is given, so tests must close
+    * it. A no-op for the CPU reference, but this suite is the worked example a
+    * device-backend author will copy, where it leaks device memory.
+    */
+  private def withCpu[A](f: ScalaKernels => A): A =
+    val k = ScalaKernels()
+    try f(k)
+    finally k.close()
+
   LpFixtures.optimal.foreach { instance =>
     test(s"mixed precision reaches the known optimum on ${instance.name}") {
       val result = mixed(instance.problem)
@@ -82,13 +91,23 @@ class MixedPrecisionSuite extends munit.FunSuite:
     // actually matters -- the reported result comes from the double-precision
     // pass and is right regardless -- without asserting a speed-up that does
     // not hold here.
-    val problem =
-      LpFixtures.randomFeasible(seed = 3, numVariables = 200, numEqualities = 40, numInequalities = 80)
+    // Density matches the validation ladder's random-200x120. The default 0.3
+    // would be three times as dense, and all three solves here run at 1e-9;
+    // exhausting the iteration budget would then surface as a bogus correctness
+    // failure rather than as the budget exhaustion it is.
+    val problem = LpFixtures.randomFeasible(
+      seed = 3,
+      numVariables = 200,
+      numEqualities = 40,
+      numInequalities = 80,
+      density = 0.10,
+    )
 
     val result = mixed(problem)
     val cold   = Pdhg.solve(problem, params)
 
-    assertEquals(result.solution.status, SolveStatus.Optimal, s"$result")
+    assertEquals(result.solution.status, SolveStatus.Optimal, s"mixed did not converge: $result")
+    assertEquals(cold.status, SolveStatus.Optimal, s"cold solve did not converge: $cold")
     assertEqualsDouble(
       result.solution.objectiveValue,
       cold.objectiveValue,
@@ -152,12 +171,9 @@ class MixedPrecisionSuite extends munit.FunSuite:
     val problem = LpFixtures.economicDispatch.problem
     val cold    = Pdhg.solve(problem, params)
 
-    val warm = Pdhg.solveWith(
-      problem,
-      params,
-      ScalaKernels(),
-      warmStart = Some(Pdhg.WarmStart(cold)),
-    )
+    val warm = withCpu { k =>
+      Pdhg.solveWith(problem, params, k, warmStart = Some(Pdhg.WarmStart(cold)))
+    }
     assertEquals(warm.status, SolveStatus.Optimal, s"$warm")
     assertEqualsDouble(warm.objectiveValue, cold.objectiveValue, 1e-6)
     assert(
@@ -174,7 +190,7 @@ class MixedPrecisionSuite extends munit.FunSuite:
       primal = IArray(1e6, -1e6),
       dual = IArray(-5.0),
     )
-    val solution = Pdhg.solveWith(problem, params, ScalaKernels(), warmStart = Some(wild))
+    val solution = withCpu(k => Pdhg.solveWith(problem, params, k, warmStart = Some(wild)))
     assertEquals(solution.status, SolveStatus.Optimal, s"$solution")
     assertEqualsDouble(solution.objectiveValue, 24.0, 1e-6)
   }
@@ -183,6 +199,6 @@ class MixedPrecisionSuite extends munit.FunSuite:
     val problem = LpFixtures.equalitySplit.problem
     val wrong   = Pdhg.WarmStart(primal = IArray(1.0), dual = IArray(0.0))
     intercept[IllegalArgumentException] {
-      Pdhg.solveWith(problem, params, ScalaKernels(), warmStart = Some(wrong))
+      withCpu(k => Pdhg.solveWith(problem, params, k, warmStart = Some(wrong)))
     }
   }

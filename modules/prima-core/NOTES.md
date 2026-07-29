@@ -173,8 +173,10 @@ Dense random LPs are close to the worst case for a first-order method and are
 not representative of power-system LPs, but this is unresolved and is the reason
 `MixedPrecision` is opt-in rather than the default path.
 
-Regenerate both tables with the validation report; it prints the 1e-9 and 1e-6
-regimes side by side.
+The table above is a hand-filtered view: the validation report prints the two
+tolerance regimes as separate tables covering all twelve ladder instances, and
+the six rows here are the ones worth carrying. Run it to regenerate the
+underlying numbers, then merge.
 
 ## Known gaps
 
@@ -194,9 +196,6 @@ above; it is LGPL-2.1 where the rest of this stack is Apache-2.0; the CSR SpMV
 kernel will have to be hand-written in its DSL, whose demonstrated use is dense
 arrays; and running it on macOS needs MoltenVK, which is not a dependency the
 build can supply.
-
-**Mixed precision helps on structured problems and hurts on dense random ones.**
-See the section below; this is the main open question in the GPU strategy.
 
 **No presolve.** Empty rows, fixed variables, singleton rows and duplicate
 columns are all passed straight to the iteration. PDLP gets a substantial part

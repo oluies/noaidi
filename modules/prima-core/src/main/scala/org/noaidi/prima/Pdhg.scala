@@ -77,8 +77,26 @@ object Pdhg:
   )
 
   object WarmStart:
-    /** Resume from a previous solve, adaptive state included. */
+    /** Resume from a previous solve, adaptive state included.
+      *
+      * Rejects a solution carrying non-finite vectors rather than propagating
+      * them. Not every backend reports a dual — `OjAlgoSolver` deliberately
+      * returns `NaN` rather than multipliers it cannot vouch for — and a `NaN`
+      * starting point silently poisons every subsequent iterate. Since
+      * [[LpSolver]] exists so that a caller need not know which backend
+      * produced a solution, that has to fail loudly here rather than surface as
+      * an inexplicable `NumericalError` later.
+      */
     def apply(solution: LpSolution): WarmStart =
+      require(
+        solution.primal.forall(_.isFinite),
+        "warm start rejected: the source solution's primal vector is not finite",
+      )
+      require(
+        solution.dual.forall(_.isFinite),
+        "warm start rejected: the source solution has no usable dual vector " +
+          "(this backend reports duals it cannot vouch for as NaN)",
+      )
       WarmStart(
         primal = solution.primal,
         dual = solution.dual,
@@ -255,7 +273,10 @@ object Pdhg:
             ws.primal.length == n,
             s"warm start has ${ws.primal.length} primal entries, expected $n",
           )
-          scaled.scalePrimal(Unsafe.raw(ws.primal).clone())
+          require(ws.primal.forall(_.isFinite), "warm start primal vector is not finite")
+          // `scalePrimal` allocates its own output and never writes to its
+          // argument, so passing the read-only view directly is correct.
+          scaled.scalePrimal(Unsafe.raw(ws.primal))
         case None => new Array[Double](n)
 
       var i = 0
@@ -269,6 +290,7 @@ object Pdhg:
 
       warmStart.foreach { ws =>
         require(ws.dual.length == m, s"warm start has ${ws.dual.length} dual entries, expected $m")
+        require(ws.dual.forall(_.isFinite), "warm start dual vector is not finite")
         val startDual = new Array[Double](m)
         var r         = 0
         while r < m do

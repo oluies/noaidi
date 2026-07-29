@@ -8,11 +8,26 @@ package org.noaidi.prima
   * certificate, so testing a few candidate directions at each evaluation point
   * is enough.
   *
-  * Both tests are scale-invariant: a certificate may be multiplied by any
-  * positive constant, so each direction is first normalised by its own
-  * certificate value and the residuals are then compared against an absolute
-  * tolerance. That avoids having to guess the magnitude a diverging iterate
-  * happens to have reached.
+  * ==Normalisation==
+  *
+  * Both tests measure how far a direction falls short of being an exact
+  * certificate, and both normalise that shortfall by the '''norm of the
+  * direction''', never by the certificate's own objective value.
+  *
+  * That distinction is the whole soundness argument. A certificate may be
+  * scaled by any positive constant, so the measure has to be scale-invariant in
+  * the direction — dividing by `||y||` achieves that. Dividing by the
+  * certificate value would achieve it too, but it would also let unrelated
+  * problem data dilute a genuine violation: a single row with a large
+  * right-hand side inflates the value while leaving the violation untouched,
+  * driving the reported residual under any tolerance. On the feasible problem
+  * `x in [0, inf)` with the row `x >= 1e10`, the direction `y = 1` has an
+  * unabsorbed reduced cost of 1 and a certificate value of 1e10; normalised by
+  * the value that reads as 1e-10 and declares a feasible problem infeasible.
+  *
+  * Reporting a feasible problem as infeasible is the one failure mode a solver
+  * must not have, so the tolerance must never be reachable by inflating the
+  * data.
   */
 object Certificates:
 
@@ -23,10 +38,12 @@ object Certificates:
     * dual objective is strictly positive — the homogeneous dual has an
     * improving ray, so the primal cannot be feasible.
     *
-    * Returns the normalised residual of the test: the smaller it is the better
-    * `y` works as a certificate, and a caller declares infeasibility once it
-    * falls under its tolerance. `None` means `y` is not even a candidate,
-    * because its certificate value is not positive.
+    * Returns how far `y` is from satisfying the first two conditions, as a
+    * fraction of `||y||`: the worse of its dual-cone violation and its
+    * unabsorbed reduced cost. A caller declares infeasibility once that falls
+    * under its tolerance. `None` means `y` is not a candidate at all, either
+    * because it is the zero vector or because its certificate value is not
+    * positive.
     */
   def primalInfeasibility(
       problem: LpProblem,
@@ -40,6 +57,14 @@ object Certificates:
     val lower = problem.lowerRaw
     val upper = problem.upperRaw
 
+    var normSq = 0.0
+    var i      = 0
+    while i < m do
+      normSq += y(i) * y(i)
+      i += 1
+    if normSq <= 0.0 || !normSq.isFinite then return None
+    val norm = math.sqrt(normSq)
+
     val aty =
       if ktY != null then ktY
       else
@@ -47,9 +72,9 @@ object Certificates:
         problem.constraintMatrix.transpose.multiplyInto(y, buf)
         buf
 
-    // Homogeneous problem: cost vector is zero, so the reduced cost is -K'y.
-    var value  = 0.0
-    var i      = 0
+    // Homogeneous problem: the cost vector is zero, so the reduced cost is -K'y.
+    var value = 0.0
+    i = 0
     while i < m do
       value += q(i) * y(i)
       i += 1
@@ -76,7 +101,7 @@ object Certificates:
       i += 1
 
     if !(value > 0.0) || !value.isFinite then None
-    else Some(math.sqrt(residualSq + coneSq) / value).filter(_.isFinite)
+    else Some(math.sqrt(math.max(residualSq, coneSq)) / norm).filter(_.isFinite)
 
   /** Evidence that the objective is unbounded below on the feasible set.
     *
@@ -84,6 +109,11 @@ object Certificates:
     * — equality rows unchanged, inequality rows non-decreasing, and moving along
     * it never leaves a finite variable bound — while strictly decreasing the
     * objective.
+    *
+    * Returns the recession violation as a fraction of `||d||`, on the same
+    * reasoning as [[primalInfeasibility]]: normalising by `|c'd|` would let one
+    * large cost coefficient hide a direction that walks straight through a
+    * finite bound.
     */
   def dualInfeasibility(
       problem: LpProblem,
@@ -97,8 +127,16 @@ object Certificates:
     val lower = problem.lowerRaw
     val upper = problem.upperRaw
 
+    var normSq = 0.0
+    var i      = 0
+    while i < n do
+      normSq += d(i) * d(i)
+      i += 1
+    if normSq <= 0.0 || !normSq.isFinite then return None
+    val norm = math.sqrt(normSq)
+
     var value = 0.0
-    var i     = 0
+    i = 0
     while i < n do
       value += c(i) * d(i)
       i += 1
@@ -129,7 +167,7 @@ object Certificates:
         else if di < 0.0 && !lower(i).isNegInfinity then residualSq += di * di
         i += 1
 
-      Some(math.sqrt(residualSq) / math.abs(value)).filter(_.isFinite)
+      Some(math.sqrt(residualSq) / norm).filter(_.isFinite)
 
   /** Test the primal and dual iterates for a certificate and report whichever
     * holds.

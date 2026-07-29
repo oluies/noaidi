@@ -26,19 +26,40 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
     try f(k)
     finally k.close()
 
+  /** Elementwise comparison at the backend's declared precision.
+    *
+    * Anything that came out of arithmetic goes through here. Exact comparison
+    * is reserved for the few results a backend must reproduce bit-for-bit —
+    * zero-fill, copies, and clamps, which return a bound verbatim rather than
+    * computing it — and those are called out where they appear.
+    */
+  private def assertVecEquals(actual: Array[Double], expected: Seq[Double], hint: String = ""): Unit =
+    assertEquals(actual.length, expected.length, s"$hint: wrong length")
+    actual.zip(expected).zipWithIndex.foreach { case ((a, e), i) =>
+      assertEqualsDouble(a, e, tol * math.max(1.0, math.abs(e)), s"$hint: element $i")
+    }
+
   /** Relative tolerance the backend is held to, from its declared precision.
     *
     * A little looser than the raw epsilon in each case, because a backend is
     * free to reduce in a different order — a GPU reduces in tree order and will
     * not match any host's sequential accumulation bit for bit.
     */
-  private val tol: Double =
+  // `lazy`, not `val`: this is a base class meant to be subclassed by device
+  // backends, and a `val` here runs during superclass construction, before the
+  // subclass's own fields are initialised. A `newKernels()` that reads a device
+  // handle or config field would see it null and the suite would die with a
+  // class-initialisation error instead of a test failure.
+  private lazy val tol: Double =
     val k = newKernels()
     try if k.capabilities.supportsFloat64 then 1e-12 else 1e-6
     finally k.close()
 
   test(s"$backendName: upload and download round-trip") {
     withKernels { k =>
+      // Exact, deliberately: these values are representable in every format a
+      // backend might use, and a round-trip performs no arithmetic. A backend
+      // that perturbs them is corrupting data, not losing precision.
       val data = Array(1.0, -2.5, 3.75, 0.0)
       val v    = k.upload(data)
       val out  = new Array[Double](4)
@@ -60,6 +81,7 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
 
   test(s"$backendName: allocate yields zeros") {
     withKernels { k =>
+      // Exact: zero is exactly representable everywhere and no arithmetic runs.
       val out = new Array[Double](5)
       k.download(k.allocate(5), out)
       assertEquals(out.toList, List.fill(5)(0.0))
@@ -75,8 +97,7 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
       k.spmv(m, x, out)
       val host = new Array[Double](2)
       k.download(out, host)
-      assertEqualsDouble(host(0), 8.0, tol)
-      assertEqualsDouble(host(1), 9.0, tol)
+      assertVecEquals(host, Seq(8.0, 9.0), "spmv")
     }
   }
 
@@ -88,12 +109,12 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
       k.axpby(2.0, x, -1.0, y, out)
       val host = new Array[Double](3)
       k.download(out, host)
-      assertEquals(host.toList, List(-8.0, -16.0, -24.0))
+      assertVecEquals(host, Seq(-8.0, -16.0, -24.0), "axpby")
 
       // Writing into one of the inputs must give the same answer.
       k.axpby(2.0, x, -1.0, y, y)
       k.download(y, host)
-      assertEquals(host.toList, List(-8.0, -16.0, -24.0))
+      assertVecEquals(host, Seq(-8.0, -16.0, -24.0), "axpby aliased")
     }
   }
 
@@ -120,7 +141,7 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
       k.primalStep(x, ktY, cost, lower, upper, 1.0, out)
       val host = new Array[Double](3)
       k.download(out, host)
-      assertEquals(host.toList, List(-0.5, 0.5, 0.0))
+      assertVecEquals(host, Seq(-0.5, 0.5, 0.0), "primalStep")
     }
   }
 
@@ -136,7 +157,7 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
       k.primalStep(x, ktY, cost, lower, upper, 2.0, out)
       val host = new Array[Double](2)
       k.download(out, host)
-      assertEquals(host.toList, List(-2.0, 2.0))
+      assertVecEquals(host, Seq(-2.0, 2.0), "primalStep with infinite bounds")
     }
   }
 
@@ -152,7 +173,7 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
       k.dualStep(y, kxBar, rhs, 1.0, 2, out)
       val host = new Array[Double](4)
       k.download(out, host)
-      assertEquals(host.toList, List(-5.0, 5.0, 0.0, 5.0))
+      assertVecEquals(host, Seq(-5.0, 5.0, 0.0, 5.0), "dualStep")
     }
   }
 

@@ -25,9 +25,18 @@ commitment — depends on it.
 | `prima-zio` | Effect boundary: solves on the blocking pool, cooperative interruption, ZStream fan-out over scenario sweeps. |
 | `prima-ojalgo` | ojAlgo behind the common solver interface — CPU fallback and correctness oracle. |
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
+| `prima-mps` | MPS reader, for reaching the standard LP corpora. |
 | `prima-cyfra` | GPU spike. Not in the root build — see below. |
+| `prima-netlib` | Netlib LP corpus. Not in the root build; fetches on first run. |
 
-147 tests pass. Worst relative objective disagreement with ojAlgo across the
+164 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+Against Netlib — the first oracle here independent of ojAlgo — 14 of 19 feasible
+instances solve to optimality, agreeing with the published optima to 2.2e-08 or
+better, and **none of the 29 infeasible instances is reported optimal**. The
+instances that do not converge hit the iteration limit, which is what having no
+presolve costs.
+
+Worst relative objective disagreement with ojAlgo across the
 validation ladder is 4.9e-10 on macOS/aarch64/JDK 26 and 5.9e-10 on
 Linux/x86_64/JDK 25 — a difference between configurations rather than between
 solvers, unchanged across two major versions of ojAlgo, and asserted not to

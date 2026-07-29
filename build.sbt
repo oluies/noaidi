@@ -59,6 +59,18 @@ lazy val primaOjalgo = project
     libraryDependencies += "org.ojalgo" % "ojalgo" % ojalgoVersion,
   )
 
+// MPS reader. Pure parsing, no third-party dependencies, so it is aggregated
+// and runs in CI like the rest. It exists to reach the standard LP test
+// corpora — Netlib above all — which no amount of hand-written fixtures
+// substitutes for.
+lazy val primaMps = project
+  .in(file("modules/prima-mps"))
+  .dependsOn(primaCore % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name := "prima-mps",
+  )
+
 // GPU backend spike. Cyfra compiles a Scala 3 DSL to SPIR-V and runs it on
 // Vulkan, which on macOS means MoltenVK translating to Metal.
 //
@@ -124,6 +136,26 @@ lazy val primaCyfra = project
     // Vulkan loader and ICD come from outside, via the env vars above.
   )
 
+// Netlib LP corpus. Not aggregated: the suite downloads its instances on first
+// run and skips itself when they are absent and cannot be fetched, so it needs
+// network access once and no CI runner is obliged to have it.
+//
+// The download lives in the suite rather than in an sbt task deliberately.
+// sbt 2 caches task results in a machine-wide action cache that `clean` does
+// not clear, so a fetch task that failed once would keep replaying its failure;
+// and a corpus that provisions itself keeps the module self-contained.
+lazy val primaNetlib = project
+  .in(file("modules/prima-netlib"))
+  .dependsOn(primaCore % "compile->compile;test->test", primaMps)
+  .settings(commonSettings)
+  .settings(
+    name := "prima-netlib",
+    publish / skip := true,
+    Test / fork := true,
+    Test / envVars += "PRIMA_NETLIB_DIR" ->
+      ((ThisBuild / baseDirectory).value / "target" / "netlib").getAbsolutePath,
+  )
+
 // Cross-backend validation: Prima vs ojAlgo on a ladder of LP instances.
 lazy val primaValidation = project
   .in(file("modules/prima-validation"))
@@ -136,7 +168,7 @@ lazy val primaValidation = project
 
 lazy val root = project
   .in(file("."))
-  .aggregate(primaCore, primaZio, primaOjalgo, primaValidation)
+  .aggregate(primaCore, primaZio, primaOjalgo, primaMps, primaValidation)
   .settings(
     name := "noaidi",
     publish / skip := true,

@@ -81,6 +81,45 @@ from the same machine. The bound is enforced by
 
 Regenerate with `sbt "primaValidation/Test/runMain org.noaidi.prima.validation.Report"`.
 
+**Against Netlib.** `prima-mps` reads MPS; `prima-netlib` runs the standard LP
+corpus. This is the first oracle in the project independent of ojAlgo — every
+earlier cross-check ran against a solver that is part of this build, so a shared
+misunderstanding of a model would have gone unnoticed. Reference optima come
+from the corpus, computed by Gurobi at 1e-8.
+
+At `eps = 1e-8`, 50k iterations, 30s per instance:
+
+| | result |
+| --- | --- |
+| Feasible instances solved to optimality | **14 / 19** |
+| Worst disagreement with the published optimum, where solved | **2.2e-08** |
+| Infeasible instances reported optimal | **0 / 29** |
+| Infeasible instances proven infeasible | 11 / 29 |
+
+The five feasible instances that do not converge (`share2b`, `scagr7`,
+`share1b`, `lotfi`, `bandm`) hit the iteration limit rather than failing. Same
+for 17 of the infeasible set. **This is what having no presolve costs**, and it
+is the clearest available argument for building one: PDLP recovers much of
+Netlib through presolve, and these instances are where that would show.
+
+The assertions are deliberately asymmetric, since the two failure directions are
+not equally bad:
+
+- Whenever Prima reports an optimum it must match the published value — asserted
+  for every instance, always.
+- No known-feasible instance may be reported infeasible, and no known-infeasible
+  instance may be reported optimal — asserted for every instance, always. These
+  are the errors the certificate bugs produced.
+- *Reaching* an optimum is asserted only for a named subset that currently does.
+  Asserting it for all of Netlib would produce a permanently red build that
+  everyone learns to ignore; the subset is a regression gate and should grow when
+  presolve lands.
+
+One infeasible instance is reported `DualInfeasible` rather than
+`PrimalInfeasible`. That is not a defect: an LP can be both, and
+`Certificates.classify` prefers the primal answer only when its certificate
+passes first.
+
 ## Numerical deltas worth knowing
 
 **Objective agreement is about 1e-10 relative, not machine precision.** At
@@ -258,9 +297,10 @@ And the licensing question stands: Cyfra is LGPL-2.1 where the rest of this
 build is Apache-2.0, which is why the backend lives in its own module.
 
 **No presolve.** Empty rows, fixed variables, singleton rows and duplicate
-columns are all passed straight to the iteration. PDLP gets a substantial part
-of its performance from presolve, so this is the largest single piece of
-missing performance, and it needs a postsolve to map duals back.
+columns are all passed straight to the iteration. This is now the best-evidenced
+gap in the solver: on Netlib it is what separates 14 of 19 feasible instances
+from all of them, and 11 of 29 infeasible ones from a proof. PDLP recovers much
+of that corpus through presolve. It needs a postsolve to map duals back.
 
 **No MILP.** Unit commitment needs branch-and-bound around the LP. Nothing here
 is specific to continuous problems, but the warm-start path a tree needs does

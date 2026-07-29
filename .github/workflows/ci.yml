@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Re-run on demand, e.g. to confirm a flake or to rebuild after a secret
+  # changes. Scala Steward's own updates arrive as pull requests and are covered
+  # by the trigger above.
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 21 is the current LTS floor; 25 is what the module is developed against.
+        java: ["21", "25"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: sbt
+
+      # The sbt version itself comes from project/build.properties; this only
+      # installs the runner script that reads it.
+      - uses: sbt/setup-sbt@v1
+
+      # sbt 2 joins all command-line arguments into a single command and parses
+      # the result as one expression, so multiple commands must be quoted and
+      # separated with semicolons. `sbt compile testFull` is a parse error.
+      #
+      # `testFull` rather than `test`: under sbt 2 the `test` task is
+      # incremental and exits 0 having run nothing when caches are warm, which
+      # would leave this job green while executing no tests.
+      #
+      # A green sbt run does not prove tests executed, so the count is asserted
+      # from the same run's output. It has to be the same run: a second
+      # `testFull` would find its work already done and legitimately report
+      # zero, which is the very failure this guards against.
+      - name: Compile and test
+        run: |
+          set -euo pipefail
+          sbt --batch "Test/compile; testFull" 2>&1 | tee sbt-test.log
+          # `|| true` matters: when grep matches nothing -- which is precisely
+          # the case being guarded against -- it exits 1, and under `pipefail`
+          # plus `set -e` that would abort the step here, before the explicit
+          # check below could report why.
+          total=$(grep -oE 'Passed: Total [0-9]+' sbt-test.log \
+            | grep -oE '[0-9]+$' \
+            | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          total=${total:-0}
+          echo "Total tests run across all modules: $total"
+          if [ "$total" -lt 1 ]; then
+            echo "::error::No tests ran -- sbt reported success without executing anything."
+            exit 1
+          fi
+          echo "$total tests passed" >> "$GITHUB_STEP_SUMMARY"
+
+      # prima-cyfra is not aggregated into root, because running it needs a
+      # Vulkan stack no runner is guaranteed to have. Compiling it needs only
+      # the Maven artifacts, and it reaches into prima-core's package-private
+      # internals — so without this step a refactor there would break the spike
+      # silently, and only surface the next time someone with a GPU opened it.
+      - name: Compile the GPU spike
+        run: sbt --batch "primaCyfra/Test/compile"
+
+  # Prima's answers are only meaningful next to an independent solver's, so the
+  # cross-check against ojAlgo is surfaced as its own job rather than buried in
+  # the test output.
+  validation-report:
+    name: Solver validation report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: sbt
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Prima vs ojAlgo
+        run: |
+          set -euo pipefail
+          sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.Report" \
+            | tee report.txt
+
+      - name: Publish report to the job summary
+        if: always()
+        run: |
+          # `sed -n` exits 0 when its address never matches, so a `|| cat`
+          # fallback would be dead code and the summary would silently publish
+          # an empty block if the header ever changes.
+          body=$(sed -n '/instance .*size .*status/,$p' report.txt)
+          [ -n "$body" ] || body=$(cat report.txt)
+          {
+            echo '## Prima vs ojAlgo'
+            echo
+            echo '```'
+            echo "$body"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -208,6 +208,25 @@ class MpsReaderSuite extends munit.FunSuite:
     }
   }
 
+  test("a valueless bound resolves the column with the set name omitted") {
+    // ` MI X 0.0` -- no bound-set name, but an ignored value present. Position
+    // alone cannot tell this from ` MI BND X`, so the column is identified by
+    // membership in COLUMNS.
+    assertEquals(boundsOf(" MI X         0.0"), (Double.NegativeInfinity, Double.PositiveInfinity))
+    assertEquals(boundsOf(" FR X"), (Double.NegativeInfinity, Double.PositiveInfinity))
+  }
+
+  test("a BOUNDS line carrying two entries is rejected, not misassigned") {
+    // Taking the value from the last token would give X the bound meant for the
+    // second entry and drop that entry entirely -- a different feasible region.
+    intercept[MpsParseException] {
+      MpsReader.fromString(
+        "ROWS\n N  C\n G  R1\nCOLUMNS\n    X    R1   1.0\n    Y    R1   1.0\n" +
+          "BOUNDS\n UP BND  X  4.0  Y  5.0\nENDATA\n"
+      )
+    }
+  }
+
   test("MI leaves the upper bound alone rather than forcing it to zero") {
     // Older readers set the upper bound to zero here. The difference is
     // invisible until an instance relies on it.

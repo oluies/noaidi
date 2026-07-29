@@ -69,13 +69,16 @@ class OracleAgreementSuite extends munit.FunSuite:
     // Ladder, formula and bound all come from ValidationLadder, which Report
     // also uses. Sharing them is what makes "the assertion enforces the
     // published number" structurally true rather than a claim in a comment.
-    val gaps = ValidationLadder.instances.flatMap { (name, problem) =>
-      val mine   = prima.solve(problem)
-      val theirs = oracle.solve(problem)
-      // The ladder carries the infeasible and unbounded fixtures too; a gap is
-      // only meaningful where both solvers reached an optimum.
-      Option.when(mine.status == SolveStatus.Optimal && theirs.status == SolveStatus.Optimal) {
-        (name, ValidationLadder.relativeGap(mine.objectiveValue, theirs.objectiveValue))
+    val gaps = ValidationLadder.entries.flatMap { entry =>
+      val mine   = prima.solve(entry.problem)
+      val theirs = oracle.solve(entry.problem)
+      // Asserted against the *expected* status, not filtered on the observed
+      // one. Filtering would let an instance that regressed to IterationLimit
+      // drop out of the comparison instead of failing it.
+      assertEquals(mine.status, entry.expected, s"${entry.name}: prima: $mine")
+      assertEquals(theirs.status, entry.expected, s"${entry.name}: ojalgo: $theirs")
+      Option.when(entry.expected == SolveStatus.Optimal) {
+        (entry.name, ValidationLadder.relativeGap(mine.objectiveValue, theirs.objectiveValue))
       }
     }
 

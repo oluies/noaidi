@@ -53,7 +53,7 @@ class NetlibInfeasibleSuite extends munit.FunSuite:
       // for exactly those instances.
       val status = presolved.provenStatus.getOrElse(onReduced.get.status)
       results(name) = status
-      if presolved.provenStatus.isDefined then provenByPresolve += name
+      if presolved.provenInfeasible then provenByPresolve += name
 
       // The hard assertion. A first-order method that has not proven anything
       // should say so; claiming an optimum on an infeasible problem means it

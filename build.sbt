@@ -16,7 +16,7 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 
 val munitVersion  = "1.3.4"
 val zioVersion    = "2.1.26"
-val ojalgoVersion = "55.2.0"
+val ojalgoVersion = "57.1.0"
 
 // Note for CI and for anyone reading test output: under sbt 2 the `test` task is
 // incremental and will happily report success having run nothing. Use `testFull`

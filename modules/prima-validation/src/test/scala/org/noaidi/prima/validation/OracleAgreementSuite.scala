@@ -61,6 +61,33 @@ class OracleAgreementSuite extends munit.FunSuite:
     }
   }
 
+  test("the worst objective gap across the ladder stays within its documented bound") {
+    // The per-instance assertions above run at 1e-6, three orders of magnitude
+    // looser than the figure both documents publish, and the CI report only
+    // prints. This is what actually holds that number.
+    //
+    // Ladder, formula and bound all come from ValidationLadder, which Report
+    // also uses. Sharing them is what makes "the assertion enforces the
+    // published number" structurally true rather than a claim in a comment.
+    val gaps = ValidationLadder.instances.flatMap { (name, problem) =>
+      val mine   = prima.solve(problem)
+      val theirs = oracle.solve(problem)
+      // The ladder carries the infeasible and unbounded fixtures too; a gap is
+      // only meaningful where both solvers reached an optimum.
+      Option.when(mine.status == SolveStatus.Optimal && theirs.status == SolveStatus.Optimal) {
+        (name, ValidationLadder.relativeGap(mine.objectiveValue, theirs.objectiveValue))
+      }
+    }
+
+    assert(gaps.nonEmpty, "no instance produced a comparable optimum")
+    val (worstName, worst) = gaps.maxBy(_._2)
+    assert(
+      worst <= ValidationLadder.worstGapBound,
+      f"worst relative objective gap $worst%.3e on $worstName exceeds " +
+        f"the documented bound of ${ValidationLadder.worstGapBound}%.0e",
+    )
+  }
+
   test("prima's solutions are primal feasible on every random instance") {
     (1L to 12L).foreach { seed =>
       val problem  = LpFixtures.randomFeasible(seed, 30, 6, 10, 0.25)

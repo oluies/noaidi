@@ -23,7 +23,7 @@ trusting a number that came out of this module.
 | ZIO effect boundary with cooperative interruption and streaming | complete |
 | Cyfra GPU backend | **not started** |
 | MILP / branch-and-bound | **not started** |
-| Presolve | **not started** |
+| Presolve: exact reductions with dual postsolve | complete |
 
 ## How the answers were checked
 
@@ -40,7 +40,7 @@ and twelve random sparse instances. Objective values are compared; solution
 vectors deliberately are not, because several fixtures are degenerate and two
 solvers landing on different vertices of the same optimal face is correct.
 
-Measured on the ladder (Apple aarch64, JDK 26, `epsAbs = epsRel = 1e-9`):
+Measured on the ladder (Apple aarch64, JDK 26, ojAlgo 57.1.0, `epsAbs = epsRel = 1e-9`):
 
 ```
 instance             size                   status                   prima obj       ojalgo obj   rel gap    iters  restarts  prima ms  ojalgo ms
@@ -58,9 +58,75 @@ random-200x120       200v/120c/2464nz       Optimal               -1796.551031  
 random-600x400       600v/400c/9529nz       Optimal               -5285.522448     -5285.522445  4.86e-10    35392        17       474       802
 ```
 
-Worst relative objective gap against the oracle: **4.9e-10**.
+Worst relative objective gap against the oracle: **4.9e-10** here, **5.9e-10**
+on CI's Linux x86_64 runners.
+
+That difference is configuration-dependent and ojAlgo-version-independent,
+which is worth knowing before reading anything into a change in it. Both figures
+were reproduced under ojAlgo 55.2.0 and 57.1.0 — two major versions apart — and
+neither figure moved; running either version on the other configuration does
+move it.
+
+The two configurations differ in more than one way — macOS/aarch64/JDK 26
+against Linux/x86_64/JDK 25 — so the JDK was a second uncontrolled variable. CI
+now reports the figure on two JDKs on the same OS, and it comes out
+bit-identical at 5.874e-10 on both JDK 21 and JDK 25. That rules out JVM
+sensitivity between those two versions — but the macOS figure was taken on JDK
+26, which is not in the matrix, so it does not rule the JDK out entirely.
+Architecture remains the leading hypothesis, via summation order in ojAlgo's
+simplex and its hardware-profile-dependent blocking; it is not yet established.
+
+The practical consequence stands either way: a shift in this number across a
+dependency bump is not evidence about the bump unless both measurements came
+from the same machine. The bound is enforced by
+`OracleAgreementSuite`, which fails if the worst gap exceeds 1e-8.
 
 Regenerate with `sbt "primaValidation/Test/runMain org.noaidi.prima.validation.Report"`.
+
+**Against Netlib.** `prima-mps` reads MPS; `prima-netlib` runs the standard LP
+corpus. This is the first oracle in the project independent of ojAlgo — every
+earlier cross-check ran against a solver that is part of this build, so a shared
+misunderstanding of a model would have gone unnoticed. Reference optima come
+from the corpus, computed by Gurobi at 1e-8.
+
+At `eps = 1e-8`, 50k iterations, 30s per instance:
+
+| | without presolve | with presolve |
+| --- | --- | --- |
+| Feasible instances solved to optimality | 14 / 19 | **16 / 19** |
+| Worst disagreement with the published optimum | 2.2e-08 | **2.2e-08** |
+| Infeasible instances reported optimal | 0 / 29 | **0 / 29** |
+| Infeasible instances proven infeasible | 11 / 29 | **12 / 29** (4 by presolve alone) |
+
+Presolve was built on the strength of the left-hand column and the right-hand
+one is what it bought. `scagr7` and `bandm` moved from the iteration limit to
+converged, both after heavy singleton-row elimination — 34 and 47 rows. Four
+infeasible instances are now settled without iterating at all, by an empty row
+that cannot hold or bounds driven into contradiction.
+
+Three feasible instances still do not converge (`share2b`, `share1b`, `lotfi`),
+along with 16 infeasible ones. They hit the iteration limit rather than failing.
+Getting them needs the approximate reductions — forcing and dominated rows,
+coefficient tightening — which is a different kind of decision from the exact
+ones, since those can change the answer.
+
+The assertions are deliberately asymmetric, since the two failure directions are
+not equally bad:
+
+- Whenever Prima reports an optimum it must match the published value — asserted
+  for every instance, always.
+- No known-feasible instance may be reported infeasible, and no known-infeasible
+  instance may be reported optimal — asserted for every instance, always. These
+  are the errors the certificate bugs produced.
+- *Reaching* an optimum is asserted only for a named subset that currently does.
+  Asserting it for all of Netlib would produce a permanently red build that
+  everyone learns to ignore; the subset is a regression gate and should grow when
+  presolve lands.
+
+One infeasible instance is reported `DualInfeasible` rather than
+`PrimalInfeasible`. That is not a defect: an LP can be both, and
+`Certificates.classify` prefers the primal answer only when its certificate
+passes first.
 
 ## Numerical deltas worth knowing
 
@@ -238,10 +304,20 @@ performance measurement at all. The spike establishes feasibility, not value.
 And the licensing question stands: Cyfra is LGPL-2.1 where the rest of this
 build is Apache-2.0, which is why the backend lives in its own module.
 
-**No presolve.** Empty rows, fixed variables, singleton rows and duplicate
-columns are all passed straight to the iteration. PDLP gets a substantial part
-of its performance from presolve, so this is the largest single piece of
-missing performance, and it needs a postsolve to map duals back.
+**Presolve does only the exact reductions.** Fixed variables, empty rows and
+columns, and singleton rows are removed; forcing rows, dominated rows and
+coefficient tightening are not. Those are where the remaining Netlib coverage
+is, and they are a different kind of decision — an exact reduction cannot change
+the answer, an approximate one can.
+
+**Postsolve maps optimal duals, not Farkas rays.** The dual reconstruction is
+derived for an optimal solution and is accurate enough for pricing, which is
+what the power-system layer needs. It does not carry an infeasibility
+certificate: a Farkas ray mapped back through it will not generally re-verify
+against the original problem. `NetlibInfeasibleSuite` therefore re-checks
+certificates against the reduced problem, which is the one the solver actually
+proved infeasible — sound, because every reduction here is exact, so an
+infeasible reduced problem implies an infeasible original.
 
 **No MILP.** Unit commitment needs branch-and-bound around the LP. Nothing here
 is specific to continuous problems, but the warm-start path a tree needs does

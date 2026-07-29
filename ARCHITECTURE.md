@@ -204,12 +204,49 @@ index order bit-for-bit — but nothing looser than that.
 
 ### Precision is a declared capability
 
-`KernelCapabilities.supportsFloat64` exists because Apple GPUs offer no float64
-through either Vulkan/MoltenVK or Metal, while LP solvers normally want it. That
-is a per-target property, not a per-vendor special case, so it is declared and
-`requiresDoublePrecisionRefinement` is derived from it. A float32 backend is
-expected to iterate in reduced precision and hand off to a host double-precision
-refinement pass. The hook is in place; the pass is not yet written.
+`KernelCapabilities.supportsFloat64` is declared per backend, and
+`requiresDoublePrecisionRefinement` derives from it, because **every accelerator
+in prospect is float32-only**. Cyfra's DSL has no double type on any target, and
+Apple GPUs expose none through Vulkan or Metal regardless. Reduced precision is
+the normal case, not a vendor quirk.
+
+`Float32Kernels` is a CPU backend that rounds every operation to float32. It
+exists so the reduced-precision question can be answered without a GPU: running
+the experiment on real hardware would confound the algorithm's precision
+sensitivity with SPIR-V correctness and driver behaviour, and only the first of
+those is a design input.
+
+`MixedPrecision` composes the two — reduced pass on the device, then a
+double-precision refinement on the CPU warm-started from it. The result always
+comes from the double-precision pass, so accuracy never depends on the device.
+
+```mermaid
+flowchart TD
+    start(["LP, tolerance 1e-9"])
+    check{"device<br/>supports fp64?"}
+    direct["solve on device"]
+    reduced["float32 pass<br/>to 1e-5"]
+    conclusive{"infeasible or<br/>unbounded?"}
+    refine["fp64 refinement on CPU,<br/>warm-started with point,<br/>step size and primal weight"]
+    done(["LpSolution"])
+
+    start --> check
+    check -->|"yes"| direct --> done
+    check -->|"no"| reduced --> conclusive
+    conclusive -->|"yes -- a float32 certificate<br/>holds in fp64"| done
+    conclusive -->|"no"| refine --> done
+```
+
+The warm start carries the adapted step size and primal weight, not just the
+point. That is not tuning: handing over the point alone makes large instances
+*slower* than a cold solve, because the adaptive rules need thousands of
+iterations to settle and a solve resuming near the optimum with fresh state
+spends longer unwinding the mismatch than a cold solve spends converging.
+
+This path is opt-in, and deliberately so. It removes 75–100% of double-precision
+work on structured problems but is measurably worse on dense random LPs at tight
+tolerance, for reasons not yet understood.
+[`NOTES.md`](modules/prima-core/NOTES.md) has the numbers.
 
 ## Where this fits in the port
 

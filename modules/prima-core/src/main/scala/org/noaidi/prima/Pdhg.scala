@@ -50,8 +50,41 @@ object Pdhg:
       params: PdhgParams,
       kernels: Kernels,
       cancelled: () => Boolean = () => false,
+      warmStart: Option[WarmStart] = None,
   ): LpSolution =
-    new Solve(problem, params, kernels, cancelled).run()
+    new Solve(problem, params, kernels, cancelled, warmStart).run()
+
+  /** A point to start from, in the caller's own coordinates, plus the adaptive
+    * state that got there.
+    *
+    * PDHG converges from anywhere, so none of this is required — but starting
+    * near the answer saves the iterations it would take to get back there.
+    *
+    * Carrying `stepSize` and `primalWeight` is not an optimisation but a
+    * correctness-of-intent matter: handing over the point alone measurably
+    * *hurts* on large instances. The adaptive rules take thousands of
+    * iterations to settle, and a solve that resumes near the optimum with
+    * freshly-initialised step size and primal weight spends longer unwinding
+    * that mismatch than a cold solve spends converging. Both are expressed in
+    * the equilibrated space, which is identical across passes over the same
+    * problem, so they transfer.
+    */
+  final case class WarmStart(
+      primal: IArray[Double],
+      dual: IArray[Double],
+      stepSize: Option[Double] = None,
+      primalWeight: Option[Double] = None,
+  )
+
+  object WarmStart:
+    /** Resume from a previous solve, adaptive state included. */
+    def apply(solution: LpSolution): WarmStart =
+      WarmStart(
+        primal = solution.primal,
+        dual = solution.dual,
+        stepSize = Some(solution.finalStepSize).filter(v => v.isFinite && v > 0.0),
+        primalWeight = Some(solution.finalPrimalWeight).filter(v => v.isFinite && v > 0.0),
+      )
 
   /** A solver bound to a set of parameters, for use behind [[LpSolver]]. */
   final class Solver(params: PdhgParams = PdhgParams.default) extends LpSolver:
@@ -74,6 +107,7 @@ object Pdhg:
       params: PdhgParams,
       k: Kernels,
       cancelled: () => Boolean,
+      warmStart: Option[WarmStart],
   ):
 
     private val n   = problem.numVariables
@@ -201,23 +235,50 @@ object Pdhg:
       // it from there; starting too large would put the opening iterations
       // outside the region where the method converges.
       val bound = sp.constraintMatrix.spectralNormBound
-      stepSize = if bound > 0.0 then 1.0 / bound else 1.0
+      stepSize = warmStart.flatMap(_.stepSize).getOrElse(if bound > 0.0 then 1.0 / bound else 1.0)
 
       // Balance the two blocks by the scale of the data each one sees.
       val cNorm = Kkt.norm2(sp.objectiveRaw)
       val qNorm = Kkt.norm2(sp.rhsRaw)
-      primalWeight = if cNorm > 0.0 && qNorm > 0.0 then cNorm / qNorm else 1.0
+      primalWeight = warmStart
+        .flatMap(_.primalWeight)
+        .getOrElse(if cNorm > 0.0 && qNorm > 0.0 then cNorm / qNorm else 1.0)
 
-      // x starts at zero projected into the box, since zero itself need not be
-      // feasible for the bounds; y starts at zero, which is always in the cone.
-      val start = new Array[Double](n)
-      var i     = 0
+      // Without a warm start, x begins at zero projected into the box — zero
+      // itself need not satisfy the bounds — and y at zero, which is always in
+      // the cone. A warm start is given in the caller's coordinates and has to
+      // be scaled in, then projected, since a point from a different precision
+      // or a parent subproblem is not guaranteed to be feasible here.
+      val startPrimal = warmStart match
+        case Some(ws) =>
+          require(
+            ws.primal.length == n,
+            s"warm start has ${ws.primal.length} primal entries, expected $n",
+          )
+          scaled.scalePrimal(Unsafe.raw(ws.primal).clone())
+        case None => new Array[Double](n)
+
+      var i = 0
       while i < n do
         val l = sp.lowerRaw(i)
         val u = sp.upperRaw(i)
-        start(i) = if 0.0 < l then l else if 0.0 > u then u else 0.0
+        val v = startPrimal(i)
+        startPrimal(i) = if v < l then l else if v > u then u else v
         i += 1
-      k.copy(k.upload(start), x)
+      k.copy(k.upload(startPrimal), x)
+
+      warmStart.foreach { ws =>
+        require(ws.dual.length == m, s"warm start has ${ws.dual.length} dual entries, expected $m")
+        val startDual = new Array[Double](m)
+        var r         = 0
+        while r < m do
+          val v = Unsafe.raw(ws.dual)(r) / rowScale(r)
+          // Equality multipliers are free; inequality multipliers must be in
+          // the cone, and a warm start may not respect that.
+          startDual(r) = if r >= nEq && v < 0.0 then 0.0 else v
+          r += 1
+        k.copy(k.upload(startDual), y)
+      }
 
       k.spmv(matrix, x, kx)
       k.spmv(matrixTranspose, y, ktY)
@@ -444,6 +505,8 @@ object Pdhg:
         restarts = restarts,
         solveTimeMillis = elapsedMillis,
         kkt = error,
+        finalStepSize = stepSize,
+        finalPrimalWeight = primalWeight,
       )
 
   end Solve

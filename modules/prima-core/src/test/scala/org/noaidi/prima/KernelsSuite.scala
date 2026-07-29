@@ -1,14 +1,20 @@
 package org.noaidi.prima
 
-import org.noaidi.prima.kernels.ScalaKernels
+import org.noaidi.prima.kernels.{Float32Kernels, ScalaKernels}
 
 /** Behavioural contract for a [[org.noaidi.prima.kernels.Kernels]] backend.
   *
   * Written against the trait rather than against `ScalaKernels`, so that the
   * Cyfra, CUDA and FPGA backends can be held to exactly the same expectations
-  * by subclassing this and supplying their own instance. Tolerances are loose
-  * enough to admit a different reduction order, which any parallel backend will
-  * have, but not loose enough to admit a wrong answer.
+  * by subclassing this and supplying their own instance.
+  *
+  * Tolerances come from the backend's own declared precision rather than being
+  * fixed. Every accelerator worth having is float32-only — Cyfra's DSL has no
+  * double type, and Apple GPUs expose none through Vulkan or Metal — so a
+  * contract that demanded double-precision agreement would be one no real
+  * backend could satisfy, and would get loosened for everyone the first time
+  * one was written. Asking each backend for what it claims to offer keeps the
+  * contract honest for both.
   */
 abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
 
@@ -20,7 +26,16 @@ abstract class KernelContractSuite(backendName: String) extends munit.FunSuite:
     try f(k)
     finally k.close()
 
-  private val tol = 1e-12
+  /** Relative tolerance the backend is held to, from its declared precision.
+    *
+    * A little looser than the raw epsilon in each case, because a backend is
+    * free to reduce in a different order — a GPU reduces in tree order and will
+    * not match any host's sequential accumulation bit for bit.
+    */
+  private val tol: Double =
+    val k = newKernels()
+    try if k.capabilities.supportsFloat64 then 1e-12 else 1e-6
+    finally k.close()
 
   test(s"$backendName: upload and download round-trip") {
     withKernels { k =>
@@ -158,4 +173,52 @@ class ScalaKernelsSuite extends KernelContractSuite("scala-reference"):
     val k = ScalaKernels()
     assert(k.capabilities.supportsFloat64)
     assert(!k.capabilities.requiresDoublePrecisionRefinement)
+  }
+
+class Float32KernelsSuite extends KernelContractSuite("scala-float32"):
+  def newKernels(): kernels.Kernels = Float32Kernels()
+
+  test("the float32 backend asks for double-precision refinement") {
+    val k = Float32Kernels()
+    assert(!k.capabilities.supportsFloat64)
+    assert(k.capabilities.requiresDoublePrecisionRefinement)
+  }
+
+  test("results are genuinely narrowed to single precision") {
+    // The whole point of this backend is that it loses precision where a real
+    // device would. If it did not, it would be a pointless copy of the
+    // reference and would silently stop testing the mixed-precision path.
+    val k = Float32Kernels()
+    try
+      // 1 + 2^-30 is representable in float64 and rounds to exactly 1 in float32.
+      val epsilon = math.pow(2.0, -30)
+      val x       = k.upload(Array(1.0 + epsilon))
+      val host    = new Array[Double](1)
+      k.download(x, host)
+      assertEquals(host(0), 1.0, "value was not narrowed to float32")
+
+      // And the reference backend keeps it, so the two really do differ.
+      val ref     = ScalaKernels()
+      val exact   = ref.upload(Array(1.0 + epsilon))
+      val refHost = new Array[Double](1)
+      ref.download(exact, refHost)
+      assertNotEquals(refHost(0), 1.0)
+      ref.close()
+    finally k.close()
+  }
+
+  test("infinite bounds survive the narrowing") {
+    // Variable bounds pass through `upload`, and an infinity that became
+    // Float.MaxValue would silently turn a free variable into a bounded one.
+    val k = Float32Kernels()
+    try
+      val v    = k.upload(Array(Double.NegativeInfinity, Double.PositiveInfinity, 1e300))
+      val host = new Array[Double](3)
+      k.download(v, host)
+      assert(host(0).isNegInfinity)
+      assert(host(1).isPosInfinity)
+      // 1e300 exceeds float32's range and legitimately overflows; the point is
+      // that the two infinities above were preserved deliberately, not by luck.
+      assert(host(2).isPosInfinity)
+    finally k.close()
   }

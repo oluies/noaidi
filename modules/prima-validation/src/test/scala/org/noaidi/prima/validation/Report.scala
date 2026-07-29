@@ -1,6 +1,7 @@
 package org.noaidi.prima
 package validation
 
+import org.noaidi.prima.kernels.Float32Kernels
 import org.noaidi.prima.ojalgo.OjAlgoSolver
 
 /** Prints a side-by-side run of Prima and ojAlgo over the validation ladder.
@@ -79,5 +80,54 @@ object Report:
 
     val worst = rows.filter(_.primaStatus == "Optimal").map(_.relativeGap).maxOption.getOrElse(0.0)
     println(f"%nworst relative objective gap against the oracle: $worst%.3e")
+
+    // Two tolerance regimes, because they give opposite answers. At 1e-9 the
+    // float32 device can only deliver a starting point and the double-precision
+    // tail dominates; at 1e-6 it can deliver the whole answer.
+    reportMixedPrecision(instances, 1e-9)
+    reportMixedPrecision(instances, 1e-6)
+
+  /** Reduced precision followed by a double-precision finish, against a cold
+    * double-precision solve.
+    *
+    * Every accelerator backend in prospect is float32-only, so this is the
+    * arrangement a GPU would actually run under. The number that matters is the
+    * last column: how much of the expensive double-precision work the device
+    * removes. Iterations rather than milliseconds, because the float32 pass is
+    * running on a CPU here and its wall time says nothing about a GPU's.
+    */
+  private def reportMixedPrecision(instances: Seq[(String, LpProblem)], tolerance: Double): Unit =
+    val params = PdhgParams(epsAbs = tolerance, epsRel = tolerance, maxIterations = 500_000)
+
+    println(f"%n%nMixed precision at tolerance $tolerance%.0e (float32 pass, then float64 refinement)")
+    println(
+      f"${"instance"}%-20s ${"status"}%-17s ${"cold fp64"}%10s ${"fp32 pass"}%10s " +
+        f"${"refine"}%8s ${"obj delta"}%11s ${"fp64 work saved"}%16s"
+    )
+    println("-" * 100)
+
+    instances.foreach { (name, problem) =>
+      val device = Float32Kernels()
+      val result =
+        try MixedPrecision.solve(problem, params, device)
+        finally device.close()
+      val cold = Pdhg.solve(problem, params)
+
+      val delta =
+        if result.solution.status == SolveStatus.Optimal && cold.status == SolveStatus.Optimal then
+          f"${math.abs(result.solution.objectiveValue - cold.objectiveValue) /
+              math.max(1.0, math.abs(cold.objectiveValue))}%11.2e"
+        else f"${"-"}%11s"
+
+      val saved =
+        if result.refined && cold.iterations > 0 then
+          f"${100.0 * (1.0 - result.refinementIterations.toDouble / cold.iterations)}%15.1f%%"
+        else f"${"n/a"}%16s"
+
+      println(
+        f"$name%-20s ${result.solution.status}%-17s ${cold.iterations}%10d " +
+          f"${result.reducedIterations}%10d ${result.refinementIterations}%8d $delta $saved"
+      )
+    }
 
 end Report

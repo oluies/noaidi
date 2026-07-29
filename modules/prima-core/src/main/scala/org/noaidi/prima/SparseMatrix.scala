@@ -268,6 +268,21 @@ object SparseMatrix:
     }
     fromTriplets(data.length, cols, entries)
 
+  /** Wrap CSR arrays directly, trusting the caller for the invariants.
+    *
+    * For rebuilding a matrix whose sparsity pattern is already known correct
+    * and only whose values have changed — narrowing them to a device's
+    * precision, for instance. The arrays must not be mutated afterwards.
+    */
+  private[prima] def fromCsrUnsafe(
+      rows: Int,
+      cols: Int,
+      rowPtr: Array[Int],
+      colIndices: Array[Int],
+      values: Array[Double],
+  ): SparseMatrix =
+    new SparseMatrix(rows, cols, rowPtr, colIndices, values)
+
   def zeros(rows: Int, cols: Int): SparseMatrix =
     new SparseMatrix(rows, cols, new Array[Int](rows + 1), Array.emptyIntArray, Array.emptyDoubleArray)
 

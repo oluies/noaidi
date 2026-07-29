@@ -115,21 +115,88 @@ not forty.
 products per evaluation, which is the better trade at any realistic evaluation
 frequency.
 
+## Reduced precision: what the measurements say
+
+This is the most consequential result so far, and it complicates the GPU plan.
+
+**Cyfra has no double type.** Version 0.1.0-RC1 exposes `Float32`, `Int32` and
+`UInt32` and nothing else. That is not an Apple limitation being inherited — the
+DSL has no fp64 on any target, so a Cyfra backend runs single precision on
+NVIDIA hardware that could do better. Combined with Apple GPUs offering no fp64
+through Vulkan or Metal either, **every accelerator backend in prospect is
+float32-only**, which makes reduced precision the default case rather than a
+special one.
+
+To measure the consequences without first writing a Vulkan backend,
+`Float32Kernels` runs the same arithmetic on the CPU with every operation
+rounded to float32. That isolates the algorithm's precision sensitivity from
+SPIR-V correctness and driver behaviour, which a GPU experiment would confound.
+Reductions accumulate in float32 too — pessimistic, since a real GPU reduces in
+tree order and is typically more accurate than sequential float32.
+
+`MixedPrecision` then runs the reduced pass to a tolerance float32 can support
+and refines on the CPU in double precision from that warm start. The reported
+result always comes from the double-precision pass, so accuracy does not depend
+on which device did the bulk of the work.
+
+Iterations of double-precision work removed, against a cold fp64 solve:
+
+| instance | at 1e-9 | at 1e-6 |
+| --- | --- | --- |
+| economic-dispatch | **75%** | **100%** |
+| equality-split | 13% | 100% |
+| range-row | 22% | 100% |
+| random-60x30 | 35% | 70% |
+| random-200x120 | 55% | 65% |
+| random-600x400 | **−14%** | **−621%** |
+
+Three things follow.
+
+**Carrying the adaptive state is not optional.** Handing over only the point
+made the worst case −71% at 1e-9; also carrying the settled step size and primal
+weight brought it to −14%. The adaptive rules take thousands of iterations to
+converge, and a solve resuming near the optimum with freshly-initialised state
+spends longer unwinding that mismatch than a cold solve spends converging. This
+is why `WarmStart` carries `stepSize` and `primalWeight`.
+
+**The expensive part is the tail, and float32 cannot reach it.** On
+random-600x400 the float32 pass reaches 1e-5 in 1,792 iterations while the cold
+solve needs 35,392 for 1e-9. The first few digits are nearly free and the last
+few cost everything. A float32 device therefore removes only the cheap prefix,
+unless the caller's tolerance is loose enough that float32 can deliver the whole
+answer — which at 1e-6 it does for most of the ladder.
+
+**On dense random LPs at tight tolerance the float32 point is worse than
+starting from zero.** At 1e-6, random-600x400 costs 2,752 iterations cold and
+19,840 refining. Not merely unhelpful — actively harmful, and not yet explained.
+Dense random LPs are close to the worst case for a first-order method and are
+not representative of power-system LPs, but this is unresolved and is the reason
+`MixedPrecision` is opt-in rather than the default path.
+
+Regenerate both tables with the validation report; it prints the 1e-9 and 1e-6
+regimes side by side.
+
 ## Known gaps
+
+**Why the float32 warm start hurts on dense instances is unexplained.** The
+prime suspects are the restart schedule — `errorAtRestart` is seeded from an
+already-small error, so the sufficient-decay test needs a fivefold reduction
+from a low base and rarely fires — and a step size the adaptive rule settled on
+while measuring float32 noise. Neither has been confirmed. Until it is, do not
+enable mixed precision by default.
 
 **No GPU backend yet.** `Kernels` is the seam, and `KernelContractSuite` is
 written against the trait so a new backend inherits the whole contract by
 supplying one method. Cyfra 0.1.0-RC1 is on Maven Central
 (`io.computenode::cyfra-{core,dsl,runtime,foton}`, built for Scala 3.6.4, which
-3.7.4 reads). Two things to settle before adopting it: it is LGPL-2.1 where the
-rest of this stack is Apache-2.0, and the CSR SpMV kernel will have to be
-hand-written in its DSL, since its demonstrated use is dense arrays.
+3.7.4 reads). Four things to settle before adopting it: it is float32-only, as
+above; it is LGPL-2.1 where the rest of this stack is Apache-2.0; the CSR SpMV
+kernel will have to be hand-written in its DSL, whose demonstrated use is dense
+arrays; and running it on macOS needs MoltenVK, which is not a dependency the
+build can supply.
 
-**No fp32 path or refinement pass.** `KernelCapabilities.supportsFloat64` is
-declared and `requiresDoublePrecisionRefinement` is derived from it, but nothing
-consumes them yet. Apple GPUs offer no fp64 through either Vulkan/MoltenVK or
-Metal, so an Apple backend will need fp32 iterations finished by a CPU
-double-precision pass. The hook exists; the pass does not.
+**Mixed precision helps on structured problems and hurts on dense random ones.**
+See the section below; this is the main open question in the GPU strategy.
 
 **No presolve.** Empty rows, fixed variables, singleton rows and duplicate
 columns are all passed straight to the iteration. PDLP gets a substantial part

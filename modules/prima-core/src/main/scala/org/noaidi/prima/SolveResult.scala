@@ -41,6 +41,19 @@ final case class LpSolution(
     restarts: Int,
     solveTimeMillis: Long,
     kkt: KktError,
+    /** Step size the adaptive rule had settled on, in the equilibrated space.
+      *
+      * Reported so it can be handed to a warm-started solve. Both passes over a
+      * problem derive the same scaling, so the value transfers between them —
+      * and it represents real work, since the rule takes thousands of
+      * iterations to converge on a large instance.
+      */
+    finalStepSize: Double = 1.0,
+
+    /** Primal weight the restart schedule had settled on, likewise in the
+      * equilibrated space and likewise worth carrying across a warm start.
+      */
+    finalPrimalWeight: Double = 1.0,
 ):
   def dualityGap: Double = kkt.absoluteGap
 

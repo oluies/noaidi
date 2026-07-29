@@ -26,8 +26,13 @@ commitment — depends on it.
 | `prima-ojalgo` | ojAlgo behind the common solver interface — CPU fallback and correctness oracle. |
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
 
-105 tests pass. Worst relative objective disagreement with ojAlgo across the
+137 tests pass. Worst relative objective disagreement with ojAlgo across the
 validation ladder is 4.9e-10.
+
+Reduced precision is handled too: every accelerator backend in prospect is
+float32-only — Cyfra's DSL has no double type on any target — so `Float32Kernels`
+and `MixedPrecision` make that path measurable and testable on the CPU, ahead of
+any GPU work. The results are mixed and the numbers are in NOTES.md.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
 - [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) — the numbers,

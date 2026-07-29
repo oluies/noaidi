@@ -1,0 +1,3252 @@
+{
+ "Bus": {
+  "attributes": {
+   "carrier": {
+    "default": "AC",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "control": {
+    "default": "PQ",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "generator": {
+    "default": "",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "location": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "marginal_price": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "sub_network": {
+    "default": "",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "unit": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "v_ang": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "radians",
+    "varying": true
+   },
+   "v_mag_pu": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "v_mag_pu_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "v_mag_pu_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "v_mag_pu_set": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "v_nom": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "kV",
+    "varying": false
+   },
+   "x": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "y": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "nan",
+  "description": "Fundamental node where all components attach.",
+  "list_name": "buses"
+ },
+ "Carrier": {
+  "attributes": {
+   "co2_emissions": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "tonnes/MWh",
+    "varying": false
+   },
+   "color": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "max_growth": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "max_relative_growth": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "nice_name": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "nan",
+  "description": "Energy carriers of buses (e.g. \"AC\" for alternating current, \"DC\" for direct current, \"hydrogen\", or \"heat\") or technologies of other components (e.g. \"wind\", \"gas turbine\", \"electrolyser\", or \"heat pump\")",
+  "list_name": "carriers"
+ },
+ "Generator": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "committable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "control": {
+    "default": "PQ",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "down_time_before": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "e_sum_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_sum_min": {
+    "default": {
+     "$inf": "-"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "efficiency": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "marginal_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_quadratic": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "min_down_time": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "min_up_time": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "mu_lower": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_ramp_limit_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_ramp_limit_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_init": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "p_min_pu": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "p_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "p_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "q_set": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "ramp_limit_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "ramp_limit_shut_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "ramp_limit_start_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "ramp_limit_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "shut_down": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "shut_down_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency",
+    "varying": false
+   },
+   "sign": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "stand_by_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/h",
+    "varying": true
+   },
+   "start_up": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "start_up_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency",
+    "varying": false
+   },
+   "status": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "up_time_before": {
+    "default": "1",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "weight": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "controllable_one_port",
+  "description": "Power generator for the bus carrier it attaches to.",
+  "list_name": "generators"
+ },
+ "GlobalConstraint": {
+  "attributes": {
+   "bus": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "carrier_attribute": {
+    "default": "co2_emissions",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "constant": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "investment_period": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "mu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/constant",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "sense": {
+    "default": "==",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "type": {
+    "default": "primary_energy",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "nan",
+  "description": "Constraints in the optimisation problem that apply to multiple components at once.",
+  "list_name": "global_constraints"
+ },
+ "Line": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "b": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Siemens",
+    "varying": false
+   },
+   "b_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus0": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "bus1": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
+   "g": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Siemens",
+    "varying": false
+   },
+   "g_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "length": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "km",
+    "varying": false
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "mu_lower": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MVA",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MVA",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "num_parallel": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
+   "p0": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p1": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q0": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "q1": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "r": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Ohm",
+    "varying": false
+   },
+   "r_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "r_pu_eff": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "s_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "s_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "s_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "sub_network": {
+    "default": "",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "terrain_factor": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "v_ang_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "degrees",
+    "varying": false
+   },
+   "v_ang_min": {
+    "default": {
+     "$inf": "-"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "degrees",
+    "varying": false
+   },
+   "x": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Ohm",
+    "varying": false
+   },
+   "x_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "x_pu_eff": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   }
+  },
+  "category": "passive_branch",
+  "description": "Lines include distribution and transmission lines, overhead lines and cables.",
+  "list_name": "lines"
+ },
+ "LineType": {
+  "attributes": {
+   "c_per_length": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nF per km",
+    "varying": false
+   },
+   "cross_section": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "mm2",
+    "varying": false
+   },
+   "f_nom": {
+    "default": 50.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Hz",
+    "varying": false
+   },
+   "i_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "kA",
+    "varying": false
+   },
+   "mounting": {
+    "default": "ol",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "r_per_length": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Ohm per km",
+    "varying": false
+   },
+   "references": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "x_per_length": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Ohm per km",
+    "varying": false
+   }
+  },
+  "category": "standard_type",
+  "description": "Standard line types with per length values for impedances.",
+  "list_name": "line_types"
+ },
+ "Link": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus0": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "bus1": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "committable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "cyclic_delay": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "delay": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshot weighting units",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "down_time_before": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "efficiency": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "length": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "km",
+    "varying": false
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "marginal_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_quadratic": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "min_down_time": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "min_up_time": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "mu_lower": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MW",
+    "varying": true
+   },
+   "mu_p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_ramp_limit_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_ramp_limit_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MW",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p0": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p1": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_init": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit of p_nom",
+    "varying": true
+   },
+   "p_min_pu": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit of p_nom",
+    "varying": true
+   },
+   "p_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "p_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "ramp_limit_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "ramp_limit_shut_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "ramp_limit_start_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "ramp_limit_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "shut_down": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "shut_down_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency",
+    "varying": false
+   },
+   "stand_by_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/h",
+    "varying": true
+   },
+   "start_up": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "start_up_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency",
+    "varying": false
+   },
+   "status": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "terrain_factor": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "up_time_before": {
+    "default": "1",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   }
+  },
+  "category": "controllable_branch",
+  "description": "Links are used for controllable directed flows between two or more buses with arbitrary energy carriers (e.g. HVDC links, converters, conversions between carriers).",
+  "list_name": "links"
+ },
+ "Load": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "bus": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_set": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "q_set": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "sign": {
+    "default": -1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "controllable_one_port",
+  "description": "Loads represent a demand at the bus they are connected to (e.g. PQ power consumer).",
+  "list_name": "loads"
+ },
+ "Process": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus0": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "bus1": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "committable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "cyclic_delay0": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "cyclic_delay1": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "delay0": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshot weighting units",
+    "varying": false
+   },
+   "delay1": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshot weighting units",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "down_time_before": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "length": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "km",
+    "varying": false
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "marginal_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_quadratic": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "min_down_time": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "min_up_time": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   },
+   "mu_lower": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MW",
+    "varying": true
+   },
+   "mu_p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_ramp_limit_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_ramp_limit_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MW",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p0": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p1": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_init": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit of p_nom",
+    "varying": true
+   },
+   "p_min_pu": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit of p_nom",
+    "varying": true
+   },
+   "p_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "p_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "ramp_limit_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "ramp_limit_shut_down": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "ramp_limit_start_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "ramp_limit_up": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "rate0": {
+    "default": -1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "rate1": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "shut_down": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "shut_down_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency",
+    "varying": false
+   },
+   "stand_by_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/h",
+    "varying": true
+   },
+   "start_up": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "start_up_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency",
+    "varying": false
+   },
+   "status": {
+    "default": 1.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "nan",
+    "varying": true
+   },
+   "terrain_factor": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "up_time_before": {
+    "default": "1",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "snapshots",
+    "varying": false
+   }
+  },
+  "category": "controllable_branch",
+  "description": "Processes are used for controllable conversion processes involving two or more buses with arbitrary energy carriers (e.g. conversions between carriers).",
+  "list_name": "processes"
+ },
+ "Shape": {
+  "attributes": {
+   "component": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "geometry": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "geometry",
+    "unit": "nan",
+    "varying": false
+   },
+   "idx": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "shape",
+  "description": "Geographical shapes of network components.",
+  "list_name": "shapes"
+ },
+ "ShuntImpedance": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "b": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Siemens",
+    "varying": false
+   },
+   "b_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "bus": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "g": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Siemens",
+    "varying": false
+   },
+   "g_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "sign": {
+    "default": -1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "passive_one_port",
+  "description": "Shunt with voltage-dependent admittance.",
+  "list_name": "shunt_impedances"
+ },
+ "StorageUnit": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "control": {
+    "default": "PQ",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "cyclic_state_of_charge": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "cyclic_state_of_charge_per_period": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "efficiency_dispatch": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "efficiency_store": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "inflow": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "marginal_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_quadratic": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_storage": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh/h",
+    "varying": true
+   },
+   "max_hours": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "hours",
+    "varying": false
+   },
+   "mu_energy_balance": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_lower": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_state_of_charge_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_dispatch": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_dispatch_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "p_min_pu": {
+    "default": -1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "p_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "p_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MW",
+    "varying": false
+   },
+   "p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_store": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_store_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "q_set": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "sign": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "spill": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "spill_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "standing_loss": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "state_of_charge": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "MWh",
+    "varying": true
+   },
+   "state_of_charge_initial": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "state_of_charge_initial_per_period": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "state_of_charge_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MWh",
+    "varying": true
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "controllable_one_port",
+  "description": "Storage units enable inter-temporal energy shifting with fixed nominal-energy-to-nominal-power ratio.",
+  "list_name": "storage_units"
+ },
+ "Store": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MWh",
+    "varying": false
+   },
+   "carrier": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "e": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MWh",
+    "varying": true
+   },
+   "e_cyclic": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "e_cyclic_per_period": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "e_initial": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_initial_per_period": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "e_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "e_min_pu": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "e_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "e_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MWh",
+    "varying": false
+   },
+   "e_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MWh",
+    "varying": true
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MWh",
+    "varying": false
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "marginal_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_quadratic": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_storage": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "currency/MWh/h",
+    "varying": true
+   },
+   "mu_energy_balance": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_lower": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MWh",
+    "varying": false
+   },
+   "p": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MW",
+    "varying": true
+   },
+   "q": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "q_set": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "sign": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "standing_loss": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "controllable_one_port",
+  "description": "Stores provide fundamental inter-temporal storage functionality not limited in charging or discharging power.",
+  "list_name": "stores"
+ },
+ "SubNetwork": {
+  "attributes": {
+   "carrier": {
+    "default": "AC",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "slack_bus": {
+    "default": "",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   }
+  },
+  "category": "nan",
+  "description": "Subsets of buses and passive branches (i.e. lines and transformers) that are connected (i.e. synchronous areas).",
+  "list_name": "sub_networks"
+ },
+ "Transformer": {
+  "attributes": {
+   "active": {
+    "default": true,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "b": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "b_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "build_year": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "year",
+    "varying": false
+   },
+   "bus0": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "bus1": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "capital_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
+   "discount_rate": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "fom_cost": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
+   "g": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "g_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "lifetime": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "years",
+    "varying": false
+   },
+   "model": {
+    "default": "t",
+    "status": " Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "mu_lower": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MVA",
+    "varying": true
+   },
+   "mu_upper": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "currency/MVA",
+    "varying": true
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "num_parallel": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "nan",
+    "varying": false
+   },
+   "overnight_cost": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
+   "p0": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "p1": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MW",
+    "varying": true
+   },
+   "phase_shift": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Degrees",
+    "varying": false
+   },
+   "q0": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "q1": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "MVar",
+    "varying": true
+   },
+   "r": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "r_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "r_pu_eff": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "s_max_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "per unit",
+    "varying": true
+   },
+   "s_nom": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_extendable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": "nan",
+    "varying": false
+   },
+   "s_nom_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_mod": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "s_nom_set": {
+    "default": {
+     "$nan": true
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "sub_network": {
+    "default": "",
+    "status": "Output",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "tap_position": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "nan",
+    "varying": false
+   },
+   "tap_ratio": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "tap_side": {
+    "default": "0",
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": "nan",
+    "varying": false
+   },
+   "type": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "v_ang_max": {
+    "default": {
+     "$inf": "+"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Degrees",
+    "varying": false
+   },
+   "v_ang_min": {
+    "default": {
+     "$inf": "-"
+    },
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Degrees",
+    "varying": false
+   },
+   "x": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "x_pu": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "x_pu_eff": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   }
+  },
+  "category": "passive_branch",
+  "description": "2-winding transformer.",
+  "list_name": "transformers"
+ },
+ "TransformerType": {
+  "attributes": {
+   "f_nom": {
+    "default": 50.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Hz",
+    "varying": false
+   },
+   "i0": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Percent",
+    "varying": false
+   },
+   "name": {
+    "default": "",
+    "status": "Input (required)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "pfe": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "kW",
+    "varying": false
+   },
+   "phase_shift": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Degrees",
+    "varying": false
+   },
+   "references": {
+    "default": "",
+    "status": "Input (optional)",
+    "type": "string",
+    "unit": "nan",
+    "varying": false
+   },
+   "s_nom": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "MVA",
+    "varying": false
+   },
+   "tap_max": {
+    "default": "0",
+    "status": "Input (required)",
+    "type": "int",
+    "unit": "nan",
+    "varying": false
+   },
+   "tap_min": {
+    "default": "0",
+    "status": "Input (required)",
+    "type": "int",
+    "unit": "nan",
+    "varying": false
+   },
+   "tap_neutral": {
+    "default": "0",
+    "status": "Input (required)",
+    "type": "int",
+    "unit": "nan",
+    "varying": false
+   },
+   "tap_side": {
+    "default": "0",
+    "status": "Input (required)",
+    "type": "int",
+    "unit": "nan",
+    "varying": false
+   },
+   "tap_step": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Percent",
+    "varying": false
+   },
+   "v_nom_0": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "kV",
+    "varying": false
+   },
+   "v_nom_1": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "kV",
+    "varying": false
+   },
+   "vsc": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Percent",
+    "varying": false
+   },
+   "vscr": {
+    "default": 0.0,
+    "status": "Input (required)",
+    "type": "float",
+    "unit": "Percent",
+    "varying": false
+   }
+  },
+  "category": "standard_type",
+  "description": "Standard 2-winding transformer types.",
+  "list_name": "transformer_types"
+ }
+}

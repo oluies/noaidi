@@ -166,7 +166,8 @@ graph TD
     iface["Kernels<br/><b>8 operations</b><br/>spmv, axpby, scale, copy,<br/>dot, squaredNorm,<br/>primalStep, dualStep"]
 
     ref["ScalaKernels<br/>fp64 reference oracle"]
-    cyfra["CyfraKernels<br/>SPIR-V / Vulkan"]:::todo
+    f32["Float32Kernels<br/>reduced-precision CPU"]
+    cyfra["CyfraKernels<br/>SPIR-V / Vulkan<br/><i>SpMV proven, rest pending</i>"]:::todo
     mlx["MlxKernels<br/>Metal, via Panama"]:::todo
     cuda["Nd4jKernels<br/>CUDA"]:::todo
     spatial["SpatialKernels<br/>Chisel to Verilog"]:::todo
@@ -175,6 +176,7 @@ graph TD
 
     loop --> iface
     iface --> ref
+    iface --> f32
     iface --> cyfra
     iface --> mlx
     iface --> cuda

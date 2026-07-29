@@ -59,6 +59,45 @@ lazy val primaOjalgo = project
     libraryDependencies += "org.ojalgo" % "ojalgo" % ojalgoVersion,
   )
 
+// GPU backend spike. Cyfra compiles a Scala 3 DSL to SPIR-V and runs it on
+// Vulkan, which on macOS means MoltenVK translating to Metal.
+//
+// Not aggregated into the root project: it needs a working Vulkan loader and an
+// ICD at runtime, which no CI runner is guaranteed to have, and Cyfra is
+// LGPL-2.1 where the rest of this build is Apache-2.0. Keeping it a separate,
+// opt-in module contains both.
+val cyfraVersion = "0.1.0-RC1"
+val lwjglVersion = "3.4.0"
+
+lazy val primaCyfra = project
+  .in(file("modules/prima-cyfra"))
+  .dependsOn(primaCore % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name := "prima-cyfra",
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "io.computenode" %% "cyfra-core"    % cyfraVersion,
+      "io.computenode" %% "cyfra-dsl"     % cyfraVersion,
+      "io.computenode" %% "cyfra-runtime" % cyfraVersion,
+    ),
+    // LWJGL resolves its native bindings by classifier, and Cyfra's own
+    // dependencies declare only the Java side.
+    libraryDependencies ++= Seq("lwjgl", "lwjgl-vma").map { lib =>
+      "org.lwjgl" % lib % lwjglVersion classifier "natives-macos-arm64"
+    },
+    // The Vulkan loader and MoltenVK ICD come from Homebrew rather than from
+    // the build, so the tests have to be told where to find them.
+    Test / fork := true,
+    Test / envVars ++= Map(
+      "VK_ICD_FILENAMES" -> "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json",
+      "DYLD_LIBRARY_PATH" -> "/opt/homebrew/lib",
+    ),
+    // Deliberately no -Dorg.lwjgl.librarypath: LWJGL ships its own natives and
+    // pointing it at Homebrew's makes it report a version mismatch. Only the
+    // Vulkan loader and ICD come from outside, via the env vars above.
+  )
+
 // Cross-backend validation: Prima vs ojAlgo on a ladder of LP instances.
 lazy val primaValidation = project
   .in(file("modules/prima-validation"))

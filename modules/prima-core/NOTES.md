@@ -187,15 +187,50 @@ from a low base and rarely fires — and a step size the adaptive rule settled o
 while measuring float32 noise. Neither has been confirmed. Until it is, do not
 enable mixed precision by default.
 
-**No GPU backend yet.** `Kernels` is the seam, and `KernelContractSuite` is
-written against the trait so a new backend inherits the whole contract by
-supplying one method. Cyfra 0.1.0-RC1 is on Maven Central
-(`io.computenode::cyfra-{core,dsl,runtime,foton}`, built for Scala 3.6.4, which
-3.7.4 reads). Four things to settle before adopting it: it is float32-only, as
-above; it is LGPL-2.1 where the rest of this stack is Apache-2.0; the CSR SpMV
-kernel will have to be hand-written in its DSL, whose demonstrated use is dense
-arrays; and running it on macOS needs MoltenVK, which is not a dependency the
-build can supply.
+**No GPU backend yet, but the gating question is answered.** `Kernels` is the
+seam, and `KernelContractSuite` is written against the trait so a new backend
+inherits the whole contract by supplying one method. What was unknown was
+whether Cyfra's DSL could express the one kernel PDHG cannot do without.
+
+`modules/prima-cyfra` is a spike that settles it: **CSR SpMV runs on the GPU and
+matches the CPU reference.** Verified on Apple M5 Pro through MoltenVK, on a
+4x4 case including an empty row and on a 500x300 random matrix with ~3000
+non-zeros and widely varying row lengths, agreeing to float32.
+
+The construction that works:
+
+```scala
+val sum = GSeq.gen(start, p => p + 1)      // start = rowPtr(row)
+  .takeWhile(p => p < end)                 // end   = rowPtr(row+1), runtime bound
+  .limit(maxRowNnz)                        // static cap SPIR-V needs
+  .map(p => GIO.read(values, p) * GIO.read(x, GIO.read(colIndices, p)))
+  .fold[Float32](0.0f, _ + _)
+```
+
+`GIO.read` supports the indexed gather — a column index read from one buffer
+used to address another — which is the operation a dense-array DSL has no
+reason to provide, and the one this whole question hung on.
+
+Three constraints the spike surfaced, none fatal:
+
+- **The kernel is specialised per matrix shape.** The DSL body cannot read a
+  runtime dispatch parameter, so `rows`, `cols` and `maxRowNnz` are captured
+  when the program is built. A solve holds its matrix fixed, so this means one
+  SPIR-V compilation per solve rather than per iteration.
+- **`limit` needs a static cap**, satisfied by the maximum row non-zero count,
+  which is a plain Scala `Int` at construction time. A pathological matrix with
+  one very long row makes every invocation's loop bound that long, though
+  `takeWhile` still exits early.
+- **The environment is not self-contained.** LWJGL's natives need explicit
+  classifier dependencies, and the Vulkan loader and MoltenVK ICD come from
+  Homebrew via `VK_ICD_FILENAMES`. `prima-cyfra` is therefore not aggregated
+  into the root build — `sbt testFull` does not run it — since no CI runner is
+  guaranteed a working Vulkan stack.
+
+Still open: a full `CyfraKernels` implementing all eight operations, and any
+performance measurement at all. The spike establishes feasibility, not value.
+And the licensing question stands: Cyfra is LGPL-2.1 where the rest of this
+build is Apache-2.0, which is why the backend lives in its own module.
 
 **No presolve.** Empty rows, fixed variables, singleton rows and duplicate
 columns are all passed straight to the iteration. PDLP gets a substantial part

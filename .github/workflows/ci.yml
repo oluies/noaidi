@@ -79,15 +79,25 @@ jobs:
   # cross-check against ojAlgo is surfaced as its own job rather than buried in
   # the test output.
   validation-report:
-    name: Solver validation report
+    name: Solver validation report (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two JDKs on the same OS, so the reported objective gap has a second
+        # data point holding platform fixed. The gap differs between the macOS
+        # and Linux configurations and the natural explanation is summation
+        # order, but the two configurations differ in JDK as well as
+        # architecture — this at least separates those.
+        java: ["21", "25"]
+
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: ${{ matrix.java }}
           cache: sbt
 
       - uses: sbt/setup-sbt@v1
@@ -107,7 +117,7 @@ jobs:
           body=$(sed -n '/instance .*size .*status/,$p' report.txt)
           [ -n "$body" ] || body=$(cat report.txt)
           {
-            echo '## Prima vs ojAlgo'
+            echo "## Prima vs ojAlgo (JDK ${{ matrix.java }})"
             echo
             echo '```'
             echo "$body"

@@ -28,9 +28,10 @@ commitment — depends on it.
 | `prima-cyfra` | GPU spike. Not in the root build — see below. |
 
 147 tests pass. Worst relative objective disagreement with ojAlgo across the
-validation ladder is 4.9e-10 on macOS/aarch64 and 5.9e-10 on Linux/x86_64 — a
-platform difference in summation order, not a difference in either solver's
-answer, and unchanged across two major versions of ojAlgo.
+validation ladder is 4.9e-10 on macOS/aarch64/JDK 26 and 5.9e-10 on
+Linux/x86_64/JDK 25 — a difference between configurations rather than between
+solvers, unchanged across two major versions of ojAlgo, and asserted not to
+exceed 1e-8.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
 - [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) — the numbers,

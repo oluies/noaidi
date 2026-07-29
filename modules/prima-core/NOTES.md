@@ -61,16 +61,23 @@ random-600x400       600v/400c/9529nz       Optimal               -5285.522448  
 Worst relative objective gap against the oracle: **4.9e-10** here, **5.9e-10**
 on CI's Linux x86_64 runners.
 
-That gap is platform-dependent and version-independent, which is worth knowing
-before reading anything into a change in it. Both figures were reproduced under
-ojAlgo 55.2.0 and 57.1.0 — two major versions apart — and neither moved; run the
-same version on the other platform and it does. The cause is almost certainly
-summation order, in ojAlgo's simplex and in its hardware-profile-dependent
-blocking, not a difference in either solver's answer.
+That difference is configuration-dependent and ojAlgo-version-independent,
+which is worth knowing before reading anything into a change in it. Both figures
+were reproduced under ojAlgo 55.2.0 and 57.1.0 — two major versions apart — and
+neither figure moved; running either version on the other configuration does
+move it.
 
-The practical consequence: a shift in this number across a dependency bump is
-not evidence about the bump unless both measurements came from the same
-machine.
+Stated carefully, because the two configurations differ in more than one way:
+macOS/aarch64/JDK 26 against Linux/x86_64/JDK 25. Architecture is the leading
+hypothesis, via summation order in ojAlgo's simplex and its
+hardware-profile-dependent blocking, but the JDK differs too and that has not
+been separated. CI now reports the figure on two JDKs on the same OS, which will
+settle whether the JVM version moves it.
+
+The practical consequence stands either way: a shift in this number across a
+dependency bump is not evidence about the bump unless both measurements came
+from the same machine. The bound is enforced by
+`OracleAgreementSuite`, which fails if the worst gap exceeds 1e-8.
 
 Regenerate with `sbt "primaValidation/Test/runMain org.noaidi.prima.validation.Report"`.
 

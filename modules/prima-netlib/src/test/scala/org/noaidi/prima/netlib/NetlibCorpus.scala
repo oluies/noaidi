@@ -94,9 +94,13 @@ object NetlibCorpus:
         val statusCol = columnOf("status")
         val objCol    = columnOf("pobj")
 
+        val widest = math.max(nameCol, math.max(statusCol, objCol))
         lines.tail.flatMap { line =>
           val f = line.split(",", -1).map(_.trim)
-          if f.length > objCol && f(statusCol) == "OPTIMAL" then
+          // Guarded on the widest column used, not just `pobj`: a header that
+          // puts `name` or `status` after it would otherwise throw, and the
+          // enclosing Try would turn that into a silently empty map.
+          if f.length > widest && f(statusCol) == "OPTIMAL" then
             f(objCol).toDoubleOption.map(f(nameCol) -> _)
           else None
         }.toMap

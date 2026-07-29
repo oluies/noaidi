@@ -182,15 +182,35 @@ object MpsReader:
               // region solved cleanly to the wrong answer, so the name is read
               // from its field position instead.
               val valueless = Set("FR", "MI", "PL", "BV")
-              val colName =
-                if valueless.contains(kind) then (if tokens.length >= 3 then tokens(2) else tokens(1))
-                else if tokens.length >= 4 then tokens(2)
-                else tokens(1)
-              // Unknown columns were previously invented on demand, unlike
-              // unknown rows which are rejected. That asymmetry is what made the
-              // failure above silent.
-              if !cols.contains(colName) then
-                throw MpsParseException(s"BOUNDS refers to unknown column '$colName' in: '$line'")
+
+              // Field position alone cannot resolve this: the bound-set name is
+              // optional and the valueless kinds may still carry an ignored
+              // value, so `MI BND X 0.0` and `MI X 0.0` put the column in
+              // different places. RHS and RANGES settle the same ambiguity by
+              // parity; here the column names are already known, so membership
+              // settles it exactly.
+              val candidates =
+                if valueless.contains(kind) then tokens.drop(1)
+                else tokens.slice(1, math.max(2, tokens.length - 1))
+              val colName = candidates.find(cols.contains).getOrElse {
+                // Unknown columns used to be invented on demand, unlike unknown
+                // rows which are rejected. That asymmetry is what made a
+                // misresolved name silent rather than loud.
+                throw MpsParseException(
+                  s"BOUNDS names no column declared in COLUMNS (tried ${candidates.mkString(", ")}) in: '$line'"
+                )
+              }
+
+              // One entry per line. Four fields is the widest legitimate form for
+              // either kind — type, set name, column, value — where the value is
+              // ignored for the valueless types. Anything beyond that is a
+              // second entry, which would otherwise take the value slot and
+              // silently give this column the other entry's bound.
+              if tokens.length > 4 then
+                throw MpsParseException(
+                  s"BOUNDS entry carries more fields than one bound uses: '$line'"
+                )
+
               val col = column(colName)
               def value: Double =
                 parseNumber(tokens.last, line)

@@ -69,10 +69,16 @@ object Presolve:
       private val columnMap: Array[Int],
       private val rowMap: Array[Int],
       val provenInfeasible: Boolean,
-      val provenUnbounded: Boolean,
+      val unboundedIfFeasible: Boolean,
   ):
 
-    /** A status presolve established on its own, if any.
+    /** A status presolve established on its own.
+      *
+      * Only infeasibility qualifies. An improving direction along a removed
+      * column is '''not''' a proof of unboundedness by itself: unboundedness is
+      * a statement about the objective over a '''non-empty''' feasible set, and
+      * presolve never establishes that the rest of the problem is feasible.
+      * See [[unboundedIfFeasible]], which the reduced solve resolves.
       *
       * When this is set the reduced problem is not a usable stand-in for the
       * original — the evidence lives in the reduction, not in anything a solver
@@ -80,9 +86,7 @@ object Presolve:
       * hand back something that looks solvable.
       */
     def provenStatus: Option[SolveStatus] =
-      if provenInfeasible then Some(SolveStatus.PrimalInfeasible)
-      else if provenUnbounded then Some(SolveStatus.DualInfeasible)
-      else None
+      Option.when(provenInfeasible)(SolveStatus.PrimalInfeasible)
 
     /** The reduced problem, when there is one to solve. */
     def reduced: LpProblem =
@@ -167,8 +171,19 @@ object Presolve:
         if reduced0(i).isNaN then reduced0(i) = original.objectiveRaw(i) - ktY(i)
         i += 1
 
+      // An improving direction was removed with its column, so the reduced
+      // problem cannot express the unboundedness. It can, however, settle the
+      // question the direction left open: if the remaining rows are feasible
+      // then the original is unbounded, and if they are not then the original
+      // is simply infeasible and the direction proved nothing.
+      val status =
+        if unboundedIfFeasible && solution.status == SolveStatus.Optimal then
+          SolveStatus.DualInfeasible
+        else solution.status
+
       val restoredPrimal = Unsafe.wrap(primal)
       solution.copy(
+        status = status,
         primal = restoredPrimal,
         dual = Unsafe.wrap(dual),
         reducedCosts = Unsafe.wrap(reduced0),
@@ -203,7 +218,7 @@ object Presolve:
     var emptyRows     = 0
     var singletonRows = 0
     var infeasible    = false
-    var unbounded     = false
+    var unboundedIfFeasible = false
 
     val matrix    = problem.constraintMatrix
     val transpose = matrix.transpose
@@ -227,20 +242,20 @@ object Presolve:
 
     var pass    = 0
     var changed = true
-    while changed && pass < maxPasses && !infeasible && !unbounded do
+    while changed && pass < maxPasses && !infeasible do
       changed = false
       pass += 1
 
       // Variables pinned by their own bounds carry no freedom.
       var c = 0
-      while c < n && !infeasible && !unbounded do
+      while c < n && !infeasible do
         if colAlive(c) && lower(c) == upper(c) && lower(c).isFinite then
           fixColumn(c, lower(c))
           changed = true
         c += 1
 
       var r = 0
-      while r < m && !infeasible && !unbounded do
+      while r < m && !infeasible do
         if rowAlive(r) then
           val entries  = rowEntries(r)
           val adjusted = rhs(r) - fixedShift(r)
@@ -254,7 +269,8 @@ object Presolve:
             // magnitude. At the 1e6-1e7 coefficients common in Netlib, an
             // absolute 1e-9 would be inside the cancellation error, and a false
             // positive here declares a feasible problem infeasible.
-            val scale = 1e-9 * math.max(1.0, math.max(math.abs(rhs(r)), math.abs(fixedShift(r))))
+            val magnitude = math.max(math.abs(rhs(r)), math.abs(fixedShift(r)))
+            val scale     = if magnitude.isFinite then 1e-9 * math.max(1.0, magnitude) else 1e-9
             val holds = if isEquality then math.abs(adjusted) <= scale else adjusted <= scale
             if !holds then infeasible = true
             else
@@ -274,8 +290,13 @@ object Presolve:
             else if a > 0.0 then lo = math.max(lo, bound)
             else hi = math.min(hi, bound)
 
-            if lo > hi + 1e-9 * math.max(1.0, math.max(math.abs(lo), math.abs(hi))) then
-              infeasible = true
+            // Scaling by a non-finite magnitude yields NaN, and NaN comparisons
+            // are false -- which would silently widen the box instead of proving
+            // infeasibility. Infinite operands are compared directly.
+            val contradictory =
+              if !lo.isFinite || !hi.isFinite then lo > hi
+              else lo > hi + 1e-9 * math.max(1.0, math.max(math.abs(lo), math.abs(hi)))
+            if contradictory then infeasible = true
             else
               lower(col) = lo
               upper(col) = math.max(hi, lo)
@@ -287,7 +308,7 @@ object Presolve:
 
       // Variables in no surviving row are decided by their cost alone.
       c = 0
-      while c < n && !infeasible && !unbounded do
+      while c < n && !infeasible do
         if colAlive(c) && colEntries(c).isEmpty then
           val cost = problem.objectiveRaw(c)
           val at =
@@ -298,11 +319,11 @@ object Presolve:
             else 0.0
           if !at.isFinite then
             // The objective runs away along this variable and no surviving row
-            // stops it. That is a proof of unboundedness, and it has to be
-            // recorded here: once the column is removed the solver can never
-            // rediscover it, and the reduced problem would report a spurious
-            // optimum.
-            unbounded = true
+            // stops it. That is unboundedness *if the rest of the problem is
+            // feasible* -- nothing here establishes that it is, and on an
+            // infeasible problem the correct answer is still infeasible. The
+            // reduction proceeds and the reduced solve resolves the flag.
+            unboundedIfFeasible = true
             colAlive(c) = false
             emptyColumns += 1
             undo.prepend(Undo.EmptyColumn(c, 0.0, cost))
@@ -316,11 +337,11 @@ object Presolve:
 
     val stats = Stats(fixedColumns, emptyColumns, emptyRows, singletonRows)
 
-    if infeasible || unbounded then
+    if infeasible then
       new PresolveResult(
         problem, problem, stats, Nil, Array.empty, Array.empty,
-        provenInfeasible = infeasible,
-        provenUnbounded = !infeasible && unbounded,
+        provenInfeasible = true,
+        unboundedIfFeasible = false,
       )
     else
       // Renumber what survives, keeping a map back to the original indices.
@@ -383,7 +404,7 @@ object Presolve:
         java.util.Arrays.copyOf(columnMap, nextCol),
         java.util.Arrays.copyOf(rowMap, nextRow),
         provenInfeasible = false,
-        provenUnbounded = false,
+        unboundedIfFeasible = unboundedIfFeasible,
       )
 
 end Presolve

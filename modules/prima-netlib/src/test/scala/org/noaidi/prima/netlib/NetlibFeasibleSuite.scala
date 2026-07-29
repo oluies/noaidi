@@ -70,7 +70,12 @@ class NetlibFeasibleSuite extends munit.FunSuite:
         NetlibCorpus.referenceObjectives.nonEmpty,
         "corpus is available but reference objectives are missing or unparseable",
       )
+      // Every name in the ladder is expected to have a published optimum, so a
+      // missing one is a defect rather than a reason to skip the comparison.
+      // Asserting only that the map is non-empty catches total loss but not the
+      // loss of a single entry, which reads identically at the call site.
       val reference = NetlibCorpus.referenceObjectives.get(name)
+      assert(reference.isDefined, s"$name has no published optimum in the reference CSV")
 
       // Presolve then solve then restore, which is how a caller would use it.
       // The measured claim is that this converges on instances the raw solver

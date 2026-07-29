@@ -96,13 +96,45 @@ class PresolveSuite extends munit.FunSuite:
     }
   }
 
-  test("an unbounded objective survives presolve as a proof") {
+  test("an unbounded objective survives presolve") {
     // min -x with x >= 0 and no upper bound: the row folds into a bound, x is
     // left in no row, and its cost drives it to infinity. Removing the column
     // without recording that would leave an empty problem reporting Optimal.
     val result = Presolve(LpFixtures.unbounded.problem)
-    assert(result.provenUnbounded, s"unboundedness was lost: ${result.stats}")
-    assertEquals(result.provenStatus, Some(SolveStatus.DualInfeasible))
+    assert(result.unboundedIfFeasible, s"the improving direction was lost: ${result.stats}")
+    // Not a proof on its own -- the remaining rows must also be feasible.
+    assertEquals(result.provenStatus, None)
+    val restored = result.restore(Pdhg.solve(result.reduced, params))
+    assertEquals(restored.status, SolveStatus.DualInfeasible, s"$restored")
+  }
+
+  test("an improving direction on an infeasible problem is not unboundedness") {
+    // `min -x` with x free of every row, alongside two rows that contradict each
+    // other. x gives an improving direction to infinity, but the problem has no
+    // feasible point at all, so the answer is infeasible -- not unbounded.
+    // Treating the direction as a proof reports the wrong conclusive status.
+    val b = LpProblem.builder(3)
+    b.objectiveCoefficient(0, -1.0)
+    b.bounds(0, 0.0, Double.PositiveInfinity)
+    b.bounds(1, 0.0, Double.PositiveInfinity)
+    b.bounds(2, 0.0, Double.PositiveInfinity)
+    b.greaterThan(Seq(1 -> 1.0, 2 -> 1.0), 10.0)
+    b.lessThan(Seq(1 -> 1.0, 2 -> 1.0), 1.0)
+    val problem = b.build()._1
+
+    val direct = Pdhg.solve(problem, params)
+    assertEquals(direct.status, SolveStatus.PrimalInfeasible, s"$direct")
+
+    val result = Presolve(problem)
+    assert(result.unboundedIfFeasible, "the improving direction should still be noticed")
+    assertEquals(result.provenStatus, None, "an improving direction is not a proof by itself")
+
+    val restored = result.restore(Pdhg.solve(result.reduced, params))
+    assertEquals(
+      restored.status,
+      SolveStatus.PrimalInfeasible,
+      s"an infeasible problem was reported as unbounded: $restored",
+    )
   }
 
   test("a slack singleton row is priced at zero, not from the reduced cost") {

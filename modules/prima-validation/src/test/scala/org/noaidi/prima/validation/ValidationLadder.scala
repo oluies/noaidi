@@ -19,13 +19,25 @@ object ValidationLadder:
     * fixtures appear in the report; consumers that need only the optimal ones
     * filter on status rather than on a second list.
     */
-  val instances: Seq[(String, LpProblem)] =
-    LpFixtures.conclusive.map(i => (i.name, i.problem)) ++
+  final case class Entry(name: String, problem: LpProblem, expected: SolveStatus)
+
+  /** Each instance carries the status it is expected to reach.
+    *
+    * Without it, a gap test can only filter on the *observed* status — and an
+    * instance that regressed to `IterationLimit` would then vanish from the
+    * comparison rather than fail it, leaving the published figure quietly
+    * measured over fewer instances. The random ones have no other coverage at
+    * these sizes, so that would go unnoticed.
+    */
+  val entries: Seq[Entry] =
+    LpFixtures.conclusive.map(i => Entry(i.name, i.problem, i.expectedStatus)) ++
       Seq(
-        ("random-60x30", LpFixtures.randomFeasible(1, 60, 10, 20, 0.25)),
-        ("random-200x120", LpFixtures.randomFeasible(2, 200, 40, 80, 0.10)),
-        ("random-600x400", LpFixtures.randomFeasible(3, 600, 120, 280, 0.04)),
+        Entry("random-60x30", LpFixtures.randomFeasible(1, 60, 10, 20, 0.25), SolveStatus.Optimal),
+        Entry("random-200x120", LpFixtures.randomFeasible(2, 200, 40, 80, 0.10), SolveStatus.Optimal),
+        Entry("random-600x400", LpFixtures.randomFeasible(3, 600, 120, 280, 0.04), SolveStatus.Optimal),
       )
+
+  val instances: Seq[(String, LpProblem)] = entries.map(e => (e.name, e.problem))
 
   /** Relative objective disagreement, scaled so an optimum near zero does not
     * make the ratio meaningless.

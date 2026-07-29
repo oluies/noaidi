@@ -189,6 +189,25 @@ class MpsReaderSuite extends munit.FunSuite:
     assertEquals(boundsOf(" BV BND       X"), (0.0, 1.0))
   }
 
+  test("a valueless bound type tolerates an ignored value field") {
+    // Writers that emit a value on FR/MI/PL/BV are not rare. Reading the column
+    // name off the last token would invent a variable named "0.0" and leave the
+    // real one at its defaults -- a different feasible region, solved cleanly to
+    // the wrong answer.
+    assertEquals(boundsOf(" MI BND       X         0.0"), (Double.NegativeInfinity, Double.PositiveInfinity))
+    assertEquals(boundsOf(" FR BND       X         0.0"), (Double.NegativeInfinity, Double.PositiveInfinity))
+  }
+
+  test("a BOUNDS entry for a column that never appeared is rejected") {
+    // Unknown rows were already rejected; unknown columns used to be invented
+    // on demand, which is what made the failure above silent.
+    intercept[MpsParseException] {
+      MpsReader.fromString(
+        "ROWS\n N  C\n G  R1\nCOLUMNS\n    X    R1   1.0\nBOUNDS\n UP BND  NOSUCHCOL  4.0\nENDATA\n"
+      )
+    }
+  }
+
   test("MI leaves the upper bound alone rather than forcing it to zero") {
     // Older readers set the upper bound to zero here. The difference is
     // invisible until an instance relies on it.

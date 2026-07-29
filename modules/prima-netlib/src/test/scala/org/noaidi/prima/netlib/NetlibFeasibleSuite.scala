@@ -15,13 +15,14 @@ import org.noaidi.prima.mps.MpsReader
   *   - '''Whenever Prima claims an optimum, it must be the right one.''' This
   *     holds for every instance, always. A wrong answer is a defect.
   *   - '''A named subset must reach an optimum at all.''' This is a regression
-  *     gate, not a statement about the algorithm. PDHG without presolve does not
-  *     converge on all of Netlib within a sane budget, and asserting that it
+  *     gate, not a statement about the algorithm. Even with presolve, PDHG does
+  *     not converge on all of Netlib within a sane budget, and asserting that it
   *     should would produce a permanently red build that everyone learns to
   *     ignore.
   *
-  * Instances outside the subset are reported, not asserted. When presolve
-  * lands, the subset should grow and the report is how that gets noticed.
+  * Instances outside the subset are reported, not asserted. Presolve grew the
+  * subset by two; the approximate reductions should grow it further, and the
+  * report is how that gets noticed.
   */
 class NetlibFeasibleSuite extends munit.FunSuite:
 
@@ -62,16 +63,25 @@ class NetlibFeasibleSuite extends munit.FunSuite:
       val instance = MpsReader.fromFile(path.get)
       assume(!instance.isMixedInteger, s"$name has integer columns")
 
+      // Once the corpus is reachable the references must be too. Letting them
+      // degrade to empty would silently delete every optimum comparison -- the
+      // one assertion this module exists for -- while the suite stayed green.
+      assert(
+        NetlibCorpus.referenceObjectives.nonEmpty,
+        "corpus is available but reference objectives are missing or unparseable",
+      )
       val reference = NetlibCorpus.referenceObjectives.get(name)
 
       // Presolve then solve then restore, which is how a caller would use it.
       // The measured claim is that this converges on instances the raw solver
       // cannot reach, so the suite has to exercise the same path.
       val presolved = Presolve(instance.problem)
-      val solution =
-        if presolved.provenInfeasible then
-          Pdhg.solve(instance.problem, params) // let the solver speak for itself
-        else presolved.restore(Pdhg.solve(presolved.reduced, params))
+      // A known-feasible instance must never be *proven* infeasible. Falling
+      // back to solving the original would paper over exactly that error.
+      assert(!presolved.provenInfeasible, s"$name is feasible but presolve proved it infeasible")
+      val solution = presolved.provenStatus match
+        case Some(proven) => fail(s"$name is feasible but presolve proved $proven")
+        case None         => presolved.restore(Pdhg.solve(presolved.reduced, params))
 
       val note = reference match
         case Some(expected) if solution.status == SolveStatus.Optimal =>
@@ -86,7 +96,10 @@ class NetlibFeasibleSuite extends munit.FunSuite:
       // to converge today.
       reference.foreach { expected =>
         if solution.status == SolveStatus.Optimal then
-          val tolerance = 1e-5 * math.max(1.0, math.abs(expected))
+          // Tight enough to hold the published figure honest. NOTES and README
+          // advertise 2.2e-08; a 1e-5 bound would let that drift three orders of
+          // magnitude with the suite still green.
+          val tolerance = 1e-7 * math.max(1.0, math.abs(expected))
           assertEqualsDouble(
             solution.objectiveValue,
             expected,

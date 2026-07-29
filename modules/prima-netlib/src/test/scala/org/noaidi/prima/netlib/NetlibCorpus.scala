@@ -81,17 +81,25 @@ object NetlibCorpus:
     if !ensure(s"$baseUrl/feasible_gurobi_1e-8.csv", dest) then Map.empty
     else
       Try {
-        Files
-          .readAllLines(dest)
-          .asScala
-          .drop(1)
-          .flatMap { line =>
-            line.split(",", -1).toList match
-              case name :: status :: _ :: objective :: Nil if status.trim == "OPTIMAL" =>
-                objective.trim.toDoubleOption.map(name.trim -> _)
-              case _ => None
-          }
-          .toMap
+        val lines = Files.readAllLines(dest).asScala.toList
+        val header = lines.headOption.getOrElse("").split(",", -1).map(_.trim).toIndexedSeq
+        // Read by column name, not by position. A column added upstream would
+        // otherwise stop every row matching and empty the whole map, taking the
+        // correctness assertions with it and leaving the suite green.
+        def columnOf(name: String): Int =
+          val i = header.indexOf(name)
+          if i < 0 then sys.error(s"reference CSV has no '$name' column; header was ${header.mkString(",")}")
+          i
+        val nameCol   = columnOf("name")
+        val statusCol = columnOf("status")
+        val objCol    = columnOf("pobj")
+
+        lines.tail.flatMap { line =>
+          val f = line.split(",", -1).map(_.trim)
+          if f.length > objCol && f(statusCol) == "OPTIMAL" then
+            f(objCol).toDoubleOption.map(f(nameCol) -> _)
+          else None
+        }.toMap
       }.getOrElse(Map.empty)
 
   /** Whether the corpus is reachable at all. Everything is skipped rather than

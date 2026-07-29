@@ -173,13 +173,25 @@ object MpsReader:
               }
 
             case "BOUNDS" =>
-              if tokens.length < 3 then throw MpsParseException(s"malformed BOUNDS entry: '$line'")
+              if tokens.length < 2 then throw MpsParseException(s"malformed BOUNDS entry: '$line'")
               val kind = tokens(0).toUpperCase
-              // `FR`, `MI`, `PL` and `BV` take no value, so the column name is
-              // the last token in those cases and the second-to-last otherwise.
+              // `FR`, `MI`, `PL` and `BV` carry no value — but writers that emit
+              // an ignored one anyway are not rare, and taking the last token as
+              // the column name then invents a variable called "0.0" and leaves
+              // the real one at its defaults. That is a different feasible
+              // region solved cleanly to the wrong answer, so the name is read
+              // from its field position instead.
               val valueless = Set("FR", "MI", "PL", "BV")
-              val colName   = if valueless.contains(kind) then tokens.last else tokens(tokens.length - 2)
-              val col       = column(colName)
+              val colName =
+                if valueless.contains(kind) then (if tokens.length >= 3 then tokens(2) else tokens(1))
+                else if tokens.length >= 4 then tokens(2)
+                else tokens(1)
+              // Unknown columns were previously invented on demand, unlike
+              // unknown rows which are rejected. That asymmetry is what made the
+              // failure above silent.
+              if !cols.contains(colName) then
+                throw MpsParseException(s"BOUNDS refers to unknown column '$colName' in: '$line'")
+              val col = column(colName)
               def value: Double =
                 parseNumber(tokens.last, line)
 

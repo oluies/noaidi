@@ -25,9 +25,7 @@ object Report:
       oracleObjective: Double,
       oracleMillis: Long,
   ):
-    def relativeGap: Double =
-      val scale = math.max(1.0, math.abs(oracleObjective))
-      math.abs(primaObjective - oracleObjective) / scale
+    def relativeGap: Double = ValidationLadder.relativeGap(primaObjective, oracleObjective)
 
   def main(args: Array[String]): Unit =
     // Numbers here get pasted into notes and compared across machines, so the
@@ -37,13 +35,7 @@ object Report:
     val prima  = Pdhg.Solver(PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 500_000))
     val oracle = OjAlgoSolver()
 
-    val instances =
-      LpFixtures.conclusive.map(i => (i.name, i.problem)) ++
-        Seq(
-          ("random-60x30", LpFixtures.randomFeasible(1, 60, 10, 20, 0.25)),
-          ("random-200x120", LpFixtures.randomFeasible(2, 200, 40, 80, 0.10)),
-          ("random-600x400", LpFixtures.randomFeasible(3, 600, 120, 280, 0.04)),
-        )
+    val instances = ValidationLadder.instances
 
     val rows = instances.map { (name, problem) =>
       val mine   = prima.solve(problem)

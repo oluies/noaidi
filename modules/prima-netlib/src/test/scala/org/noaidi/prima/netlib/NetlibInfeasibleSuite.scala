@@ -13,9 +13,9 @@ import org.noaidi.prima.mps.MpsReader
   *
   * The assertion is deliberately asymmetric. Reporting `Optimal` on any of them
   * is a hard failure — it means the solver invented a feasible point. Failing to
-  * prove infeasibility within the iteration budget is not: PDHG has no presolve
-  * here, and some of these need one before a certificate emerges. That is
-  * recorded rather than asserted.
+  * prove infeasibility within the iteration budget is not: presolve settles some
+  * of these outright, and the rest need the approximate reductions before a
+  * certificate emerges. That is recorded rather than asserted.
   */
 class NetlibInfeasibleSuite extends munit.FunSuite:
 
@@ -44,21 +44,24 @@ class NetlibInfeasibleSuite extends munit.FunSuite:
       // an empty row that cannot hold, or bounds driven into contradiction, is
       // a proof rather than a numerical judgement.
       val presolved = Presolve(instance.problem)
-      val onReduced = Option.unless(presolved.provenInfeasible)(Pdhg.solve(presolved.reduced, params))
-      val solution =
-        onReduced match
-          case Some(s) => presolved.restore(s)
-          case None    => Pdhg.solve(instance.problem, params).copy(status = SolveStatus.PrimalInfeasible)
-      results(name) = solution.status
-      if presolved.provenInfeasible then provenByPresolve += name
+      val onReduced = Option.when(presolved.provenStatus.isEmpty)(Pdhg.solve(presolved.reduced, params))
+
+      // When presolve settles it, nothing is solved at all — which is the claim
+      // being measured. Previously this ran a full 20k-iteration solve of the
+      // original purely to obtain an LpSolution and then overwrote its status,
+      // which both contradicted the claim and made the assertion below vacuous
+      // for exactly those instances.
+      val status = presolved.provenStatus.getOrElse(onReduced.get.status)
+      results(name) = status
+      if presolved.provenStatus.isDefined then provenByPresolve += name
 
       // The hard assertion. A first-order method that has not proven anything
       // should say so; claiming an optimum on an infeasible problem means it
       // produced a primal point that does not exist.
       assertNotEquals(
-        solution.status,
+        status,
         SolveStatus.Optimal,
-        s"$name is infeasible but was reported optimal with objective ${solution.objectiveValue}",
+        s"$name is infeasible but was reported optimal",
       )
 
       // And when the solver claims infeasibility, the claim must survive an

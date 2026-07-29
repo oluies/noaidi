@@ -62,39 +62,29 @@ class OracleAgreementSuite extends munit.FunSuite:
   }
 
   test("the worst objective gap across the ladder stays within its documented bound") {
-    // README and NOTES quote a worst relative gap of 4.9e-10 (macOS/aarch64)
-    // and 5.9e-10 (Linux/x86_64). Nothing enforced those: the per-instance
-    // assertions above run at 1e-6, roughly three orders of magnitude looser,
-    // and the CI report only prints. A regression widening the worst gap to
-    // 1e-7 would have left CI green while both documents still advertised
-    // 1e-10.
+    // The per-instance assertions above run at 1e-6, three orders of magnitude
+    // looser than the figure both documents publish, and the CI report only
+    // prints. This is what actually holds that number.
     //
-    // The bound is 1e-8 rather than the observed figure: tight enough to catch
-    // an order-of-magnitude regression, loose enough to absorb the platform
-    // variation the documented numbers already show.
-    val instances = LpFixtures.optimal.map(i => (i.name, i.problem)) ++
-      Seq(
-        ("random-60x30", LpFixtures.randomFeasible(1, 60, 10, 20, 0.25)),
-        ("random-200x120", LpFixtures.randomFeasible(2, 200, 40, 80, 0.10)),
-        ("random-600x400", LpFixtures.randomFeasible(3, 600, 120, 280, 0.04)),
-      )
-
-    val gaps = instances.map { (name, problem) =>
+    // Ladder, formula and bound all come from ValidationLadder, which Report
+    // also uses. Sharing them is what makes "the assertion enforces the
+    // published number" structurally true rather than a claim in a comment.
+    val gaps = ValidationLadder.instances.flatMap { (name, problem) =>
       val mine   = prima.solve(problem)
       val theirs = oracle.solve(problem)
-      assertEquals(mine.status, SolveStatus.Optimal, s"$name: prima did not converge: $mine")
-      assertEquals(theirs.status, SolveStatus.Optimal, s"$name: oracle did not converge: $theirs")
-      // Same definition the report prints, so the assertion and the published
-      // number cannot drift apart.
-      val gap = math.abs(mine.objectiveValue - theirs.objectiveValue) /
-        math.max(1.0, math.abs(theirs.objectiveValue))
-      (name, gap)
+      // The ladder carries the infeasible and unbounded fixtures too; a gap is
+      // only meaningful where both solvers reached an optimum.
+      Option.when(mine.status == SolveStatus.Optimal && theirs.status == SolveStatus.Optimal) {
+        (name, ValidationLadder.relativeGap(mine.objectiveValue, theirs.objectiveValue))
+      }
     }
 
+    assert(gaps.nonEmpty, "no instance produced a comparable optimum")
     val (worstName, worst) = gaps.maxBy(_._2)
     assert(
-      worst <= 1e-8,
-      f"worst relative objective gap $worst%.3e on $worstName exceeds the documented bound of 1e-8",
+      worst <= ValidationLadder.worstGapBound,
+      f"worst relative objective gap $worst%.3e on $worstName exceeds " +
+        f"the documented bound of ${ValidationLadder.worstGapBound}%.0e",
     )
   }
 

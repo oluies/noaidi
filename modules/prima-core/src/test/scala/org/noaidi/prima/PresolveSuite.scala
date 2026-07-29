@@ -20,37 +20,103 @@ class PresolveSuite extends munit.FunSuite:
     val direct = Pdhg.solve(problem, params)
     val result = Presolve(problem)
 
-    if result.provenInfeasible then
-      assertEquals(direct.status, SolveStatus.PrimalInfeasible, s"$hint: presolve claimed infeasible")
-    else
-      val restored = result.restore(Pdhg.solve(result.reduced, params))
-      assertEquals(restored.status, direct.status, s"$hint: status differs")
+    result.provenStatus match
+      case Some(proven) =>
+        assertEquals(proven, direct.status, s"$hint: presolve proved a different status")
+        // A proof means there is nothing to solve, and both entry points must
+        // refuse rather than hand back something that looks usable.
+        intercept[IllegalStateException](result.reduced)
+        intercept[IllegalStateException](result.restore(direct))
+      case None =>
+        val restored = result.restore(Pdhg.solve(result.reduced, params))
+        assertEquals(restored.status, direct.status, s"$hint: status differs")
 
-      if direct.status == SolveStatus.Optimal then
-        assertEqualsDouble(
-          restored.objectiveValue,
-          direct.objectiveValue,
-          1e-6 * math.max(1.0, math.abs(direct.objectiveValue)),
-          s"$hint: objective differs",
-        )
-        // The restored point must satisfy the *original* constraints, not the
-        // reduced ones — that is what postsolve is for.
-        val kx = problem.constraintMatrix.multiply(restored.primal)
-        for r <- 0 until problem.numConstraints do
-          if r < problem.numEqualities then
-            assertEqualsDouble(kx(r), problem.rhs(r), 1e-6, s"$hint: equality row $r")
-          else assert(kx(r) >= problem.rhs(r) - 1e-6, s"$hint: inequality row $r violated")
-        for i <- 0 until problem.numVariables do
+        if direct.status == SolveStatus.Optimal then
+          assertEqualsDouble(
+            restored.objectiveValue,
+            direct.objectiveValue,
+            1e-6 * math.max(1.0, math.abs(direct.objectiveValue)),
+            s"$hint: objective differs",
+          )
+          // The restored point must satisfy the *original* constraints, not the
+          // reduced ones — that is what postsolve is for.
+          val kx = problem.constraintMatrix.multiply(restored.primal)
+          for r <- 0 until problem.numConstraints do
+            if r < problem.numEqualities then
+              assertEqualsDouble(kx(r), problem.rhs(r), 1e-6, s"$hint: equality row $r")
+            else assert(kx(r) >= problem.rhs(r) - 1e-6, s"$hint: inequality row $r violated")
+          for i <- 0 until problem.numVariables do
+            assert(
+              restored.primal(i) >= problem.variableLower(i) - 1e-6 &&
+                restored.primal(i) <= problem.variableUpper(i) + 1e-6,
+              s"$hint: variable $i outside its original bounds",
+            )
+
+          // The dual side, which is where postsolve actually goes wrong. Duals
+          // are not unique on degenerate instances so they are not compared
+          // elementwise against the direct solve; what is asserted is that the
+          // restored dual is a valid dual of the ORIGINAL problem.
+          for r <- problem.numEqualities until problem.numConstraints do
+            assert(
+              restored.dual(r) >= -1e-6,
+              s"$hint: row $r has dual ${restored.dual(r)}, outside the cone for a >= row",
+            )
+
+          // Reduced costs must still be c - K'y against the original data.
+          val ktY = problem.constraintMatrix.transpose.multiply(restored.dual)
+          for i <- 0 until problem.numVariables do
+            assertEqualsDouble(
+              restored.reducedCosts(i),
+              problem.objective(i) - ktY(i),
+              1e-6,
+              s"$hint: reduced cost $i is not c - K'y",
+            )
+
+          // And the pair must actually be optimal for the original, not merely
+          // well-formed. This is the assertion that would have caught a slack row
+          // being priced.
+          val convergence = Kkt.convergence(
+            restored.kkt,
+            Kkt.norm2(problem.rhsRaw),
+            Kkt.norm2(problem.objectiveRaw),
+            1e-6,
+            1e-6,
+          )
           assert(
-            restored.primal(i) >= problem.variableLower(i) - 1e-6 &&
-              restored.primal(i) <= problem.variableUpper(i) + 1e-6,
-            s"$hint: variable $i outside its original bounds",
+            convergence.converged,
+            s"$hint: restored pair is not optimal for the original: ${restored.kkt}",
           )
 
-  LpFixtures.optimal.foreach { instance =>
+  // `conclusive`, not `optimal`: the infeasible and unbounded fixtures are
+  // exactly the ones presolve can silently mishandle, by proving nothing or by
+  // deleting the column the unboundedness lived on.
+  LpFixtures.conclusive.foreach { instance =>
     test(s"presolve preserves the answer on ${instance.name}") {
       agrees(instance.problem, instance.name)
     }
+  }
+
+  test("an unbounded objective survives presolve as a proof") {
+    // min -x with x >= 0 and no upper bound: the row folds into a bound, x is
+    // left in no row, and its cost drives it to infinity. Removing the column
+    // without recording that would leave an empty problem reporting Optimal.
+    val result = Presolve(LpFixtures.unbounded.problem)
+    assert(result.provenUnbounded, s"unboundedness was lost: ${result.stats}")
+    assertEquals(result.provenStatus, Some(SolveStatus.DualInfeasible))
+  }
+
+  test("a slack singleton row is priced at zero, not from the reduced cost") {
+    // `rangeRow` splits into two singleton rows on the same column once y is
+    // fixed. Only the binding one may carry a price; pricing both gives the
+    // second a negative dual on a `>=` row.
+    val problem  = LpFixtures.rangeRow.problem
+    val result   = Presolve(problem)
+    val restored = result.restore(Pdhg.solve(result.reduced, params))
+
+    assertEqualsDouble(restored.objectiveValue, 2.0, 1e-6)
+    for r <- problem.numEqualities until problem.numConstraints do
+      assert(restored.dual(r) >= -1e-9, s"row $r priced at ${restored.dual(r)}")
+    assertEqualsDouble(restored.kkt.absoluteGap, 0.0, 1e-5, s"duality gap: ${restored.kkt}")
   }
 
   test("presolve preserves the answer on random sparse instances") {

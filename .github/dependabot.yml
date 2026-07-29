@@ -1,0 +1,36 @@
+version: 2
+
+# Dependabot covers GitHub Actions only. Scala dependencies belong to Scala
+# Steward (.github/workflows/scala-steward.yml), which understands sbt builds,
+# cross-versioned artifacts and Scala's binary-compatibility rules.
+#
+# The split is clean by construction rather than by configuration: Dependabot
+# has no sbt ecosystem at all, so it cannot see anything in build.sbt or
+# project/build.properties even if asked. There is consequently nothing to
+# exclude here and no risk of the two bots opening competing pull requests —
+# which is also why this file lists one ecosystem rather than listing many and
+# ignoring most.
+#
+# The one thing Dependabot does that Steward does not is keep the `uses:` pins
+# in the workflows current, including Steward's own action.
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    # Same slot as Scala Steward, so all dependency noise lands together and
+    # can be reviewed in one pass rather than trickling through the week.
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "Update"
+    groups:
+      # Actions move together often enough that separate PRs are mostly noise;
+      # a single grouped PR either builds or does not.
+      actions:
+        patterns:
+          - "*"

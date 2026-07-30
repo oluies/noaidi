@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
 import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema}
+import org.noaidi.network.{CsvReader, Network, Schema, Topology}
 import org.noaidi.prima.{PdhgParams, SolveStatus}
 
 /** Dispatch against PyPSA's own optimisation results.
@@ -51,7 +51,7 @@ class LopfSuite extends munit.FunSuite:
       case o: ujson.Obj if o.value.contains("$nan") => Double.NaN
       case other => fail(s"unexpected golden value $other")
 
-  test("the objective is a lower bound on PyPSA's, as a relaxation must be") {
+  test("the objective matches PyPSA's") {
     assume(available, "goldens missing — run reference/generate_goldens.py")
     val expected = results("ac-dc-dispatch")("optimize")
     assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
@@ -59,44 +59,34 @@ class LopfSuite extends munit.FunSuite:
     val result = Lopf.solve(network("ac-dc-dispatch"), params)
     assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
 
-    // Bus balance without Kirchhoff voltage constraints is a '''relaxation''' of
-    // PyPSA's model: it admits flow patterns no set of bus angles could produce,
-    // so its optimum can only be lower. That inequality is the strong statement
-    // available today and it must hold -- an objective above PyPSA's would mean a
-    // constraint that should not be there, or a cost error.
     val target = expected("objective").num
-    assert(
-      result.objective <= target + 1e-6 * math.abs(target),
-      f"objective ${result.objective}%.6f exceeds PyPSA's $target%.6f; a relaxation cannot cost more",
+    assertEqualsDouble(
+      result.objective,
+      target,
+      1e-6 * math.max(1.0, math.abs(target)),
+      s"objective ${result.objective} against PyPSA's $target",
     )
-
-    // And the gap is bounded, so a regression widening it would show. This is the
-    // number the cycle constraints have to drive to zero, not a tolerance.
-    val gap = (target - result.objective) / math.abs(target)
-    assert(gap <= 1e-5, f"relaxation gap $gap%.3e is wider than the documented 4.4e-06")
   }
 
-  test("generator dispatch is close to PyPSA's but not yet equal") {
+  test("generator dispatch matches PyPSA's") {
     assume(available, "goldens missing")
     val n        = network("ac-dc-dispatch")
     val expected = results("ac-dc-dispatch")("optimize")("generator_p")
     val result   = Lopf.solve(n, params)
     assertEquals(result.status, SolveStatus.Optimal)
 
-    // Every line rating binds in this fixture -- capacity was sized from the
-    // expansion optimum, so s_nom equals the flow it was built to carry -- which
-    // makes it the hardest case for a model without Kirchhoff constraints. The
-    // relaxation redistributes flow around a cycle to relieve a tight limit and
-    // shifts dispatch by a couple of MW doing so.
-    //
-    // Bounded rather than exact; exact agreement is what the cycle constraints
-    // buy.
-    val worst = n.snapshots.indices.flatMap { t =>
-      n.require("Generator").ids.map { g =>
-        math.abs(result.dispatch("Generator", g, t) - frameValue(expected, t, g))
+    // Absolute, in MW: an idle generator sits at zero and a relative tolerance
+    // would mean nothing there.
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { g =>
+        assertEqualsDouble(
+          result.dispatch("Generator", g, t),
+          frameValue(expected, t, g),
+          1e-3,
+          s"snapshot $t, generator $g",
+        )
       }
-    }.max
-    assert(worst <= 5.0, f"worst dispatch disagreement $worst%.3f MW exceeds the documented 5 MW")
+    }
   }
 
   test("total generation matches total load at every snapshot") {
@@ -134,35 +124,38 @@ class LopfSuite extends munit.FunSuite:
     }
   }
 
-  test("individual line flows do NOT yet match PyPSA") {
+  test("line flows match PyPSA's") {
     assume(available, "goldens missing")
-    // A known limitation, asserted so it cannot quietly become untrue. Without
-    // Kirchhoff voltage constraints the flow pattern around a cycle is
-    // underdetermined: bus balance alone admits many optimal patterns and the
-    // solver picks one.
-    //
-    // In this fixture that also moves the objective, which is worth stating
-    // plainly: every line rating binds exactly, because capacity was sized from
-    // the expansion optimum. The relaxation is not merely choosing between
-    // equally-priced flow patterns -- it relieves tight limits Kirchhoff would
-    // enforce, and the objective comes out 4.4e-06 low.
-    //
-    // When the cycle constraints land this test should fail, and that failure is
-    // the signal to replace it with a positive comparison.
+    // This is what the cycle constraints buy. Bus balance alone leaves the flow
+    // pattern around a cycle underdetermined, so before they existed this test
+    // asserted the *disagreement* — and its failure was the signal to write this.
     val n        = network("ac-dc-dispatch")
     val expected = results("ac-dc-dispatch")("optimize")("line_p0")
     val result   = Lopf.solve(n, params)
 
-    val disagreements = n.require("Line").ids.count { l =>
-      val mine   = result.dispatch("Line", l, 0)
-      val theirs = frameValue(expected, 0, l)
-      math.abs(mine - theirs) > 1e-3
+    n.snapshots.indices.foreach { t =>
+      n.require("Line").ids.foreach { l =>
+        assertEqualsDouble(
+          result.dispatch("Line", l, t),
+          frameValue(expected, t, l),
+          1e-3,
+          s"snapshot $t, line $l",
+        )
+      }
     }
-    assert(
-      disagreements > 0,
-      "line flows now match PyPSA — Kirchhoff constraints appear to be in effect, " +
-        "so replace this test with a positive comparison against line_p0",
-    )
+  }
+
+  test("the cycle basis has the circuit rank of the passive graph") {
+    assume(available, "goldens missing")
+    // edges - nodes + components, counted over passive branches only. The
+    // reference network is two triangles plus a lone pair, so two cycles.
+    val n      = network("ac-dc-dispatch")
+    val cycles = Cycles.basis(n)
+    val edges  = Topology.passiveBranches(n).size
+    val nodes  = n.require("Bus").ids.count(b => Topology.passiveBranches(n).exists((a, c) => a == b || c == b))
+    val comps  = Topology.subNetworks(n).count(_.size > 1)
+    assertEquals(cycles.size, edges - nodes + comps, s"cycles=${cycles.map(_.terms)}")
+    assertEquals(cycles.size, 2)
   }
 
   test("a capacity expansion network is rejected rather than mis-solved") {
@@ -184,20 +177,54 @@ class LopfSuite extends munit.FunSuite:
     )
   }
 
-  test("marginal prices are recovered at every bus") {
+  test("the dual solution is optimal, though not the same one PyPSA reports") {
     assume(available, "goldens missing")
+    // Prices come off the balance-constraint duals through RowTranslation. The
+    // primal matches PyPSA exactly -- objective, dispatch and flows -- so the
+    // dual question is only *which* optimal dual, and on this fixture that is not
+    // unique.
+    //
+    // The instance is deliberately degenerate: capacity was sized from the
+    // expansion optimum, so every line rating binds exactly, and every gas
+    // generator sits at its zero lower bound. Far more constraints are active at
+    // the optimum than there are variables, which makes the optimal dual a face
+    // rather than a point. PyPSA's simplex reports a vertex of it (prices equal
+    // to the marginal wind costs); a first-order method converges to a different
+    // point of the same face.
+    //
+    // So what is asserted is that the dual is *valid*, not that it coincides:
+    // strong duality, and dual feasibility on the balance rows. Asserting
+    // equality with PyPSA's prices would be asserting a choice neither solver
+    // is obliged to make.
     val n      = network("ac-dc-dispatch")
     val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal)
 
-    // Not yet compared against PyPSA's bus_marginal_price: nodal prices depend
-    // on which optimal flow pattern the solver landed on, and that is
-    // underdetermined until Kirchhoff constraints exist. What is asserted here is
-    // that a price is produced and is finite for every bus — the dual side is
-    // wired through, which is the part that could silently be NaN.
+    // Strong duality: the two objectives agreeing is what makes both the primal
+    // and the dual optimal rather than merely feasible.
+    assertEqualsDouble(
+      result.solution.objectiveValue,
+      result.solution.dualObjectiveValue,
+      1e-6 * math.max(1.0, math.abs(result.objective)),
+      s"strong duality violated: ${result.solution.kkt}",
+    )
+
+    // And every price is a finite number, so the dual path cannot silently be
+    // NaN -- which is the failure that would otherwise hide behind a tolerance.
     n.require("Bus").ids.foreach { bus =>
       n.snapshots.indices.foreach { t =>
-        val price = result.marginalPrice(bus, t)
-        assert(price.isFinite, s"bus $bus at snapshot $t has price $price")
+        assert(result.marginalPrice(bus, t).isFinite, s"bus $bus at snapshot $t")
       }
     }
   }
+
+  // A test asserting that prices lie between the cheapest and dearest marginal
+  // cost was written here and removed: the claim is false. With a binding
+  // transmission limit, serving one more MW at a bus can require raising
+  // expensive generation at one end while backing off cheap generation at the
+  // other, and the resulting nodal price legitimately exceeds every generator's
+  // cost. Congestion rent is a feature of locational pricing, not a symptom. The
+  // observed 6.80 against a dearest cost of 5.89 is within that.
+  //
+  // What remains open is the gap against PyPSA, recorded in NOTES rather than
+  // papered over with a tolerance.

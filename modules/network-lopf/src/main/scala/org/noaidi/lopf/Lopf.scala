@@ -20,14 +20,13 @@ import scala.collection.mutable
   * than silently solving a different problem. The reference `ac-dc-meshed` is
   * such a network, which is why the goldens carry an `ac-dc-dispatch` variant.
   *
-  * '''No Kirchhoff voltage constraints yet.''' Flows are constrained only by bus
-  * balance and by line ratings, so in a meshed network the flow pattern is
-  * underdetermined — any pattern satisfying balance is feasible. The objective
-  * and the dispatch are therefore reproducible, but individual line flows are
-  * not, and this is checked rather than assumed: see `LopfSuite`. Adding the
-  * cycle constraints is the next step, and the brief is specific that PyPSA's
-  * cycle-based formulation is the one to match rather than a bus-angle DC-OPF,
-  * because equivalence is judged against PyPSA's own output.
+  * '''Kirchhoff voltage law is enforced''' over a cycle basis of the passive
+  * branches, which is PyPSA's own formulation rather than a bus-angle DC-OPF —
+  * the brief is specific about that, because equivalence is judged against
+  * PyPSA's output and the two formulations differ in their duals. Without these
+  * the model is a relaxation: bus balance alone admits flow patterns no set of
+  * voltage angles could produce, and on a network whose line ratings bind it
+  * finds a cheaper answer than exists.
   *
   * ==Sign conventions==
   *
@@ -171,6 +170,27 @@ object Lopf:
         builder.equalityConstraint(terms.toSeq, demand)
         balanceRows((bus, t)) = rowIndex
         rowIndex += 1
+      }
+    }
+
+    // Kirchhoff's voltage law, one constraint per independent cycle per snapshot.
+    //
+    // This is what makes flow a consequence of impedance rather than a free
+    // variable. Bus balance alone leaves the pattern around a cycle
+    // underdetermined, and where a rating binds it lets the model route around
+    // the limit and undercut the true cost.
+    val cycles = Cycles.basis(network)
+    snapshots.foreach { t =>
+      cycles.foreach { cycle =>
+        val terms = cycle.terms.map { (component, id, orientation) =>
+          val z = Cycles.impedance(network, component, id, cycle.subNetwork)
+          (columns((component, id, t)), orientation * z)
+        }
+        // A cycle whose branches are all zero-impedance would give a vacuous
+        // constraint; skipping it keeps the matrix free of empty rows.
+        if terms.exists((_, coefficient) => coefficient != 0.0) then
+          builder.equalityConstraint(terms, 0.0)
+          rowIndex += 1
       }
     }
 

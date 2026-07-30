@@ -244,6 +244,47 @@ tolerance regimes as separate tables covering all twelve ladder instances, and
 the six rows here are the ones worth carrying. Run it to regenerate the
 underlying numbers, then merge.
 
+## L2: what LOPF reproduces, and what it does not
+
+`network-lopf` builds a dispatch LP from a `Network` and solves it with Prima.
+Against PyPSA on `ac-dc-dispatch`:
+
+| | |
+| --- | --- |
+| Objective | matches to 1e-6 relative |
+| Generator dispatch | matches to 1e-3 MW |
+| Line flows | matches to 1e-3 MW |
+| Nodal prices | **does not match** |
+
+The primal is exact. Adding Kirchhoff voltage constraints over a cycle basis is
+what achieved that: without them the model is a relaxation, and because capacity
+in this fixture was sized from the expansion optimum every line rating binds, so
+the relaxation actively relieved tight limits and undercut the true cost by
+4.4e-06.
+
+Two details of that formulation are load-bearing. The cycle impedance is
+'''reactance for an AC sub-network and resistance for a DC one''' — the reference
+network's DC lines carry `x = 0` with `r` non-zero, so using reactance
+unconditionally gives every DC cycle a vacuous all-zero constraint. And the
+orientation of each branch around the cycle must be right: getting it backwards
+does not perturb the flows, it makes the LP infeasible, because the cycle
+equation then contradicts bus balance.
+
+**Nodal prices remain open.** Strong duality holds and the primal matches
+exactly, so the dual is optimal for the LP as built. But the prices differ
+substantially from PyPSA's — PyPSA reports the marginal wind costs
+(0.09–0.11) where this reports values up to 6.8. Degeneracy is the likely
+explanation: every line rating binds and every gas generator sits at its zero
+lower bound, so far more constraints are active than there are variables and the
+optimal dual is a face rather than a point, with simplex reporting a vertex and a
+first-order method converging elsewhere. That is a hypothesis, not an
+established fact, and it should be settled before nodal prices are relied on —
+they are a headline output of the model, not a diagnostic.
+
+Also not yet implemented: capacity expansion (rejected rather than mis-solved),
+storage (its energy balance couples snapshots), and transformers with
+off-nominal tap ratios.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

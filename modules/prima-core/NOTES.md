@@ -22,7 +22,7 @@ trusting a number that came out of this module.
 | ojAlgo backend, doubling as the correctness oracle | complete |
 | ZIO effect boundary with cooperative interruption and streaming | complete |
 | Cyfra GPU backend | **not started** |
-| MILP / branch-and-bound | **not started** |
+| MILP: branch-and-bound over the LP relaxation | complete |
 | Presolve: exact reductions with dual postsolve | complete |
 
 ## How the answers were checked
@@ -439,6 +439,44 @@ start and the Jacobian is singular.
 
 The linear flow does handle DC islands, since `lpf` supports them. The asymmetry
 is PyPSA's, not this port's.
+
+## Branch-and-bound on an inexact bound
+
+`BranchAndBound` solves mixed-integer problems by branching over Prima's own LP
+relaxation. The textbook algorithm assumes an **exact** bound, and every
+published correctness argument rests on one. Prima is a first-order method: it
+returns a point converged to a tolerance, not a vertex, so a node's reported
+objective is accurate only to roughly that tolerance. Two consequences, both
+handled explicitly rather than hoped past.
+
+**Pruning needs a margin.** A node whose true bound sits just below the incumbent
+can report just above it, and pruning on that discards the subtree holding the
+optimum — silently, returning a suboptimal answer labelled `Optimal`. So a node
+is pruned only when its bound exceeds the incumbent by more than a multiple of
+*that node's own duality gap*: the accuracy achieved, not the accuracy requested.
+The cost is exploring some nodes an exact solver would have cut.
+
+**A non-conclusive relaxation is not a bound at all.** If a node's LP hits its
+iteration limit, pruning on its objective is unsound and so is declaring its
+solution integral. Such a node is branched rather than pruned, and counted in
+`MilpSolution.unprovenNodes`; an incumbent found while any exist is reported
+`Feasible`, never `Optimal`, because optimality was not proven.
+
+The search is depth-first on the most fractional variable. Depth-first because it
+reaches an incumbent early — which is what makes pruning possible at all — and
+because a child differs from its parent in exactly one bound, so the parent's
+iterate warm-starts it well. That warm-start property is the reason a first-order
+method is attractive inside branch-and-bound in the first place, and it is
+asserted to leave the answer unchanged rather than assumed to, given the
+unexplained dense-instance warm-start regression recorded above.
+
+**Checked against ojAlgo's mixed-integer solver**, whose bound *is* exact, over
+random mixed instances with deliberately fractional relaxations. That cross-check
+matters more than the LP one it mirrors: the pruning rule is a judgement about
+how much slack to leave rather than a theorem, and the failure it guards against
+is invisible from inside. The suite also asserts the asymmetric half — Prima must
+never report an objective *better* than the true optimum, which would mean its
+reported point is not integer-feasible at all.
 
 ## Known gaps
 

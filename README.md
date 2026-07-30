@@ -25,7 +25,7 @@ optimisation.
 
 | Module | What it is |
 | --- | --- |
-| `prima-core` | LP model, sparse matrix, kernel interface, restarted PDHG solver. No third-party dependencies. |
+| `prima-core` | LP model, sparse matrix, kernel interface, restarted PDHG solver, branch-and-bound for MILP. No third-party dependencies. |
 | `prima-zio` | Effect boundary: solves on the blocking pool, cooperative interruption, ZStream fan-out over scenario sweeps. |
 | `prima-ojalgo` | ojAlgo behind the common solver interface — CPU fallback and correctness oracle. |
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
@@ -36,7 +36,7 @@ optimisation.
 | `network-lopf` | L2: linear optimal power flow — turns a Network into an LP and solves it with Prima. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-316 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+328 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.

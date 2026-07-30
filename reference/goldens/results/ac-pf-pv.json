@@ -124,6 +124,17 @@
     ]
    ]
   },
+  "generator_status": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
   "global_constraint_mu": {},
   "line_p0": {
    "columns": [

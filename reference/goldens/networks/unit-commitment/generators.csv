@@ -1,0 +1,4 @@
+name,bus,control,p_nom,p_min_pu,marginal_cost,committable,start_up_cost,shut_down_cost,min_up_time,min_down_time
+base,bus,Slack,150.0,0.4,10.0,True,500.0,200.0,3,2
+mid,bus,PQ,100.0,0.3,30.0,True,200.0,100.0,1,2
+peak,bus,PQ,80.0,0.0,80.0,False,0.0,0.0,0,0

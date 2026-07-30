@@ -519,6 +519,52 @@ of reach, the gap tolerance tightened to 1e-12 and parallelism set to one; four
 consecutive runs then agree bit-for-bit. An oracle that is sometimes right is
 worse than no oracle, because a disagreement stops meaning anything.
 
+## L3: unit commitment
+
+`UnitCommitment` reproduces PyPSA's mixed-integer commitment solve on the
+`unit-commitment` fixture: objective, dispatch and the commitment schedule
+itself. It runs on `BranchAndBound` over Prima, so nothing leaves this project's
+own solver.
+
+The formulation is the standard one — a binary status per unit per snapshot, the
+disjunctive output bound `p_min_pu · p_nom · u <= p <= p_max_pu · p_nom · u`, and
+start-up/shut-down variables linked by `su − sd = u[t] − u[t−1]` with rolling
+windows for minimum up and down time. Start-up and shut-down are left
+**continuous**: the linking equality and the non-negative costs drive them to 0
+or 1 whenever the status is integral, so declaring them integer would multiply
+the search tree for decisions already determined.
+
+`up_time_before` defaults to **1**, meaning a unit counts as having run before
+the horizon. Not cosmetic: with the opposite convention every unit that starts
+the horizon committed is charged a spurious start-up at `t = 0`, and the
+objective is wrong by the sum of those costs while the schedule looks identical.
+
+### What the fixture does and does not prove
+
+Built deliberately, and checked before anything was written against it:
+
+- `mid` is off at snapshots 3–5, so the golden's status frame is **not**
+  all-ones. An implementation that never switched anything off would reproduce an
+  all-ones frame and prove nothing.
+- `min_down_time` on `mid` **binds**: PyPSA gives 16700 without it and 17000 with
+  it, so an implementation that dropped it comes out 300 *cheap* — the direction
+  that cannot be caught downstream.
+- `base`'s `min_up_time` does **not** bind; it runs throughout. Said here rather
+  than left for a reader to infer coverage that is not there.
+- `peak` is **inert**: it produces nothing at any snapshot and deleting it leaves
+  the objective at 17000. It exists so a non-committable generator sits in the
+  same model as committable ones, which take different treatment — ordinary
+  bounds against a status variable. It exercises a code path, not the economics.
+
+PyPSA's `generators_t.status` spans every generator and reports 0 for a
+non-committable one, which is a placeholder rather than a decision — `peak` has
+no status to report. `UcResult.committed` reports `true` for such a unit instead,
+since that is what the model does with it. The two are not compared.
+
+Ramp limits and time-dependent start-up costs are not modelled and are rejected
+rather than ignored, since either would yield a schedule the network cannot
+actually follow, at a cost lower than the truth.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

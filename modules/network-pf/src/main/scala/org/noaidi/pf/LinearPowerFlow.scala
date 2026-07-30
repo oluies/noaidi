@@ -9,13 +9,22 @@ import scala.collection.mutable
   * unknown key rather than returning a default: a missing entry means the caller
   * and the solver disagree about what the network contains, and a zero would make
   * that look like a valid answer.
+  *
+  * A plain class rather than a case class, because the synthesised `copy`,
+  * `apply` and `productElement` would hand out the maps and bypass that
+  * discipline entirely — and `toString` on a year-long result would print every
+  * entry.
+  *
+  * `dispatch` is PyPSA's `p`, not an injection: a 1000 MW load reports +1000. The
+  * `sign` that turns a setpoint into a signed injection is applied only inside
+  * the flow calculation.
   */
-final case class LpfResult(
+final class LpfResult private[pf] (
     private val angles: Map[(String, Int), Double],
     private val flows: Map[(String, String, Int), Double],
     private val busPowers: Map[(String, Int), Double],
     private val dispatches: Map[(String, String, Int), Double],
-    slacks: IndexedSeq[Slack.Choice],
+    val slacks: IndexedSeq[Slack.Choice],
 ):
   def voltageAngle(bus: String, snapshot: Int): Double =
     angles.getOrElse((bus, snapshot), missing(s"angle for bus '$bus' at snapshot $snapshot"))
@@ -53,9 +62,9 @@ final case class LpfResult(
   *
   * Three conventions here were established by solving the reference network
   * rather than read off documentation, and each would have been got wrong
-  * otherwise. They are called out at their definitions: [[injection]] for the
-  * `p_set`-is-NaN rule, [[susceptance]] for resistance-on-DC, and [[Slack]] for
-  * the slack rule.
+  * otherwise. They are called out at their definitions: `rawSetpoint` for the
+  * `p_set`-is-NaN rule, `susceptance` for resistance-on-DC, and [[Slack]] for the
+  * slack rule.
   */
 object LinearPowerFlow:
 
@@ -74,11 +83,17 @@ object LinearPowerFlow:
     val dispatch  = mutable.Map.empty[(String, String, Int), Double]
 
     // Non-slack dispatch is just p_set, so it does not depend on the flow at all.
+    //
+    // Stored *raw*, not sign-multiplied. `sign` is a convention for turning a
+    // setpoint into an injection, and it belongs in `injection` alone: PyPSA's
+    // `loads_t.p` for a 1000 MW load is +1000, not -1000, so folding the sign in
+    // here would make this accessor disagree with the frame it is compared to and
+    // with the sibling accessor in Lopf.
     network.tables.values.foreach { table =>
       if Role.of(table.spec) == Role.Attached then
         table.ids.foreach { id =>
           network.snapshots.indices.foreach { t =>
-            dispatch((table.spec.name, id, t)) = setpoint(table, id, t)
+            dispatch((table.spec.name, id, t)) = rawSetpoint(table, id, t)
           }
         }
     }
@@ -86,64 +101,79 @@ object LinearPowerFlow:
     slacks.foreach { choice =>
       val sub      = choice.subNetwork
       val branches = internalBranches(network, sub)
-      // Angle ordering is the sub-network's own bus order minus the slack, so the
-      // matrix index of a bus is stable across snapshots and the factorisation
-      // could later be reused.
+
+      // Everything below is invariant across snapshots: susceptance reads only
+      // static x/r/v_nom, so the matrix and its factorisation are built once per
+      // sub-network rather than once per sub-network per snapshot. On a year-long
+      // network that is the difference between one O(n^3) factorisation and 8760.
       val free  = sub.buses.filterNot(_ == choice.bus)
       val index = free.zipWithIndex.toMap
       val n     = free.length
 
-      network.snapshots.indices.foreach { t =>
-        val b = new Array[Double](n * n)
-        branches.foreach { edge =>
-          val y = susceptance(network, edge, sub.carrier)
-          // A bus at the slack contributes only to the other end's diagonal,
-          // which is exactly what striking out the slack row and column means.
-          (index.get(edge.bus0), index.get(edge.bus1)) match
-            case (Some(i), Some(j)) =>
-              b(i * n + i) += y
-              b(j * n + j) += y
-              b(i * n + j) -= y
-              b(j * n + i) -= y
-            case (Some(i), None) => b(i * n + i) += y
-            case (None, Some(j)) => b(j * n + j) += y
-            case (None, None)    => ()
-        }
+      val susceptances = branches.map(edge => (edge.component, edge.id) -> susceptance(network, edge, sub.carrier)).toMap
 
-        val rhs   = IArray.from(free.map(injection(network, _, t)))
-        val theta =
-          try Cholesky.solve(n, IArray.unsafeFromArray(b), rhs)
-          catch
-            case e: Cholesky.NotPositiveDefinite =>
-              // Restated in the network's own terms. A caller cannot act on
-              // "pivot 3 is 0.0" but can act on knowing which island failed.
-              throw new UnsupportedNetwork(
-                s"sub-network ${sub.buses.mkString("{", ", ", "}")} (carrier ${sub.carrier}) " +
-                  s"has no unique power flow at snapshot $t: ${e.getMessage}"
-              )
+      val b = new Array[Double](n * n)
+      branches.foreach { edge =>
+        val y = susceptances((edge.component, edge.id))
+        // A bus at the slack contributes only to the other end's diagonal, which
+        // is exactly what striking out the slack row and column means.
+        (index.get(edge.bus0), index.get(edge.bus1)) match
+          case (Some(i), Some(j)) =>
+            b(i * n + i) += y
+            b(j * n + j) += y
+            b(i * n + j) -= y
+            b(j * n + i) -= y
+          case (Some(i), None) => b(i * n + i) += y
+          case (None, Some(j)) => b(j * n + j) += y
+          case (None, None)    => ()
+      }
+
+      val factorisation =
+        try Cholesky.factor(n, IArray.unsafeFromArray(b))
+        catch
+          case e: Cholesky.NotPositiveDefinite =>
+            // Restated in the network's own terms. A caller cannot act on
+            // "pivot 3 is 0.0" but can act on knowing which island failed.
+            throw new UnsupportedNetwork(
+              s"sub-network ${sub.buses.mkString("{", ", ", "}")} (carrier ${sub.carrier}) " +
+                s"has no unique power flow: ${e.getMessage}"
+            )
+
+      network.snapshots.indices.foreach { t =>
+        // One walk over the network per snapshot, not one per bus per use. This
+        // was previously computed three times over -- for the right-hand side, for
+        // the slack power and for the recorded bus powers -- each walking every
+        // table and entity.
+        val injected = injectionsOf(network, sub, t)
+
+        val theta = factorisation.solve(IArray.from(free.map(injected)))
 
         angles((choice.bus, t)) = 0.0
         free.zipWithIndex.foreach { (bus, i) => angles((bus, t)) = theta(i) }
 
         branches.foreach { edge =>
-          val y = susceptance(network, edge, sub.carrier)
           flows((edge.component, edge.id, t)) =
-            y * (angles((edge.bus0, t)) - angles((edge.bus1, t)))
+            susceptances((edge.component, edge.id)) * (angles((edge.bus0, t)) - angles((edge.bus1, t)))
         }
 
         // The slack bus takes whatever closes the balance. Summing the *free*
-        // injections rather than recomputing from the flows keeps this exact:
-        // a lossless linear flow has total injection zero by construction.
-        val slackPower = -free.map(injection(network, _, t)).sum
-        free.foreach(bus => busPowers((bus, t)) = injection(network, bus, t))
+        // injections rather than recomputing from the flows keeps this exact: a
+        // lossless linear flow has total injection zero by construction.
+        val slackPower = -free.map(injected).sum
+        free.foreach(bus => busPowers((bus, t)) = injected(bus))
         busPowers((choice.bus, t)) = slackPower
 
         // Attributed to the slack generator, on top of its own p_set. With no
         // generator in the island there is nowhere to put it; that is legal when
         // the island is balanced, and `slacks` exposes the case either way.
         choice.generator.foreach { g =>
-          val others = injection(network, choice.bus, t) - setpoint(network.require("Generator"), g, t)
-          dispatch(("Generator", g, t)) = slackPower - others
+          val generators = network.require("Generator")
+          val sign       = signOf(generators, g, t)
+          // Solves `others + sign * p = slackPower` for p. Dividing rather than
+          // assuming sign = 1 keeps the stored value a dispatch rather than an
+          // injection, consistent with how the map is filled above.
+          val others = injected(choice.bus) - sign * rawSetpoint(generators, g, t)
+          dispatch(("Generator", g, t)) = (slackPower - others) / sign
         }
       }
     }
@@ -154,9 +184,11 @@ object LinearPowerFlow:
 
   /** Passive branches with both ends inside one sub-network.
     *
-    * Both ends by definition — a passive branch is what forms the island — but
-    * checked rather than assumed, because a branch leaking across islands would
-    * silently make the matrix non-symmetric.
+    * Both ends by definition: an island is the union-find closure of exactly
+    * these edges, so a passive branch with one end outside cannot arise. The
+    * membership test selects this island's edges out of the network's; it is not
+    * a validation, and it is documented as such rather than as a check it does
+    * not perform.
     */
   private def internalBranches(network: Network, sub: SubNetwork): IndexedSeq[Edge] =
     val members = sub.buses.toSet
@@ -194,20 +226,41 @@ object LinearPowerFlow:
         s"${edge.component} '${edge.id}' has ${if carrier == "DC" then "r" else "x"} = $z in a " +
           s"$carrier sub-network; a branch needs a positive impedance to carry a linear flow"
       )
-    if vNom > 0.0 then vNom * vNom / z else 1.0 / z
+    // A missing or zero v_nom used to fall back to a different per-unit base.
+    // That is the same class of bad data the impedance guard above refuses, and
+    // worse in effect: v_nom² does not cancel, so the offending branch ends up
+    // scaled differently from every other branch in its island and every angle in
+    // that island comes out wrong.
+    if !(vNom > 0.0) then
+      throw new UnsupportedNetwork(
+        s"bus '${edge.bus0}' has v_nom = $vNom, so ${edge.component} '${edge.id}' has no per-unit " +
+          "base; every branch in a sub-network must share one"
+      )
+    vNom * vNom / z
 
-  /** Net injection at a bus, in MW, from everything whose flow is '''fixed'''.
+  /** Net injection at every bus of a sub-network, in MW, from everything whose
+    * flow is fixed.
     *
     * Passive branches are excluded — their flow is the answer, not an input.
+    *
+    * One walk over the network's components. The per-bus version this replaced
+    * re-walked every table and every entity for each bus asked about, and was
+    * called three times per snapshot — for the right-hand side, the slack power
+    * and the recorded bus powers — so the cost was O(snapshots × buses ×
+    * entities) for something one pass produces.
     */
-  private def injection(network: Network, bus: String, snapshot: Int): Double =
-    var total = 0.0
+  private def injectionsOf(network: Network, sub: SubNetwork, snapshot: Int): Map[String, Double] =
+    val members = sub.buses.toSet
+    val total   = mutable.Map.from(sub.buses.map(_ -> 0.0))
+
+    def add(bus: String, amount: Double): Unit =
+      if members.contains(bus) then total(bus) = total(bus) + amount
 
     network.tables.values.foreach { table =>
       Role.of(table.spec) match
         case Role.Attached =>
           table.ids.foreach { id =>
-            if table.string("bus", id) == bus then total += setpoint(table, id, snapshot)
+            add(table.string("bus", id), setpoint(table, id, snapshot))
           }
 
         case Role.ControllableBranch =>
@@ -218,15 +271,15 @@ object LinearPowerFlow:
           table.ids.foreach { id =>
             val p = rawSetpoint(table, id, snapshot)
             ports.foreach { port =>
-              if table.string(port, id) == bus then
-                if port == "bus0" then total -= p
-                else total += p * Topology.portEfficiency(table, id, port, snapshot)
+              val bus = table.string(port, id)
+              if port == "bus0" then add(bus, -p)
+              else add(bus, p * Topology.portEfficiency(table, id, port, snapshot))
             }
           }
 
         case _ => ()
     }
-    total
+    total.toMap
 
   /** `sign × p_set`, with an absent setpoint read as zero.
     *
@@ -245,9 +298,17 @@ object LinearPowerFlow:
     * upstream — the same reason branch roles come off `category`.
     */
   private def setpoint(table: ComponentTable, id: String, snapshot: Int): Double =
-    val sign =
-      if table.spec.attribute("sign").isDefined then table.valueAt("sign", id, snapshot) else 1.0
-    sign * rawSetpoint(table, id, snapshot)
+    signOf(table, id, snapshot) * rawSetpoint(table, id, snapshot)
+
+  /** A one-port's `sign`, defaulting to +1 where the schema declares none.
+    *
+    * Guarded against zero because the slack attribution divides by it.
+    */
+  private def signOf(table: ComponentTable, id: String, snapshot: Int): Double =
+    if table.spec.attribute("sign").isEmpty then 1.0
+    else
+      val sign = table.valueAt("sign", id, snapshot)
+      if sign != 0.0 && sign.isFinite then sign else 1.0
 
   private def rawSetpoint(table: ComponentTable, id: String, snapshot: Int): Double =
     if !table.spec.attribute("p_set").isDefined && !table.static.contains("p_set") then 0.0
@@ -282,6 +343,10 @@ object LinearPowerFlow:
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
 
-    Topology.danglingReferences(network).headOption.foreach { (component, id, port, bus) =>
+    // Branches *and* one-ports. A Load with a stale bus matches no bus by string
+    // equality in `injection`, so it silently vanishes: the island's demand drops,
+    // the slack generator picks up less, and the angles are those of a different
+    // network. The sibling LOPF module rejected this and this one did not.
+    Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
       throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")
     }

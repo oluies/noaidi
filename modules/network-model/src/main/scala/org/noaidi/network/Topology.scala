@@ -168,17 +168,8 @@ object Topology:
   def controllableBranches(network: Network): IndexedSeq[(String, String)] =
     branchesWhere(network, _ == Role.ControllableBranch)
 
-  /** Port columns present on a branch table, in order.
-    *
-    * Not fixed at `bus0`/`bus1`. PyPSA's controllable branches are precisely the
-    * multi-port ones — Link is documented as "controllable directed flows
-    * between two or more buses" — and the extra ports arrive as `bus2`, `bus3`
-    * and so on. The schema declares only the first two, so the rest are custom
-    * columns; the reader preserves them, and reading only the declared pair
-    * would drop endpoints that are present in the data.
-    */
   /** Public alias for [[portsOf]], for callers outside this package that need to
-    * enumerate a branch's endpoints -- the LP builder above all, which must agree
+    * enumerate a branch's endpoints — the L2 modules above all, which must agree
     * with the topology about how many ports a branch has.
     */
   def branchPorts(table: ComponentTable): IndexedSeq[String] = portsOf(table)
@@ -196,9 +187,24 @@ object Topology:
     */
   def portEfficiency(table: ComponentTable, id: String, port: String, snapshot: Int): Double =
     val attribute = if port == "bus1" then "efficiency" else s"efficiency${port.drop(3)}"
-    // Declared attributes and custom columns both count: `efficiency2` is not in
-    // the schema, so a multi-port link carries it as an extra column.
-    if table.spec.attribute(attribute).isDefined || table.static.contains(attribute) then
+
+    // Three places a value can live, and all three have to be checked.
+    // `efficiency2` and later are not schema attributes, so a multi-port link
+    // carries them as custom columns — and a custom column can arrive as a series
+    // with no static counterpart, which is the normal export shape when the
+    // static value sits at its 1.0 default and only the time series is
+    // non-default. Checking only `spec` and `static` reads such a port as
+    // lossless, putting power at the receiving bus that the network never
+    // produced.
+    val declared = table.spec.attribute(attribute).isDefined || table.static.contains(attribute)
+    val varying  = table.series.get(attribute).exists(_.covers(id))
+
+    if varying then
+      val value = table.series(attribute).get(id, snapshot).getOrElse(Double.NaN)
+      if value.isFinite then value else 1.0
+    else if declared then
+      // Not `valueAt`: for a series-only custom column it would fall through to
+      // `float`, which requires a declared attribute and throws.
       val value = table.valueAt(attribute, id, snapshot)
       if value.isFinite then value else 1.0
     else 1.0
@@ -270,6 +276,34 @@ object Topology:
     */
   def danglingReferences(network: Network): IndexedSeq[(String, String, String, String)] =
     danglingIn(branchEndpoints(network), network)
+
+  /** Every bus reference that names a bus which does not exist — branches '''and'''
+    * one-ports.
+    *
+    * [[danglingReferences]] covers only branches, because that is all a
+    * decomposition over branches can be affected by. A consumer that reads
+    * injections needs more: a Load whose bus is stale or misspelt matches no bus
+    * by string equality, so it simply vanishes. The island's demand drops, the
+    * answer is the answer for a different network, and nothing reports it.
+    *
+    * Lifted here rather than duplicated because both L2 modules need exactly this
+    * and one of them had it while the other did not, which made the same broken
+    * network loud through one entry point and silently wrong through the other.
+    */
+  def danglingBusReferences(network: Network): IndexedSeq[(String, String, String, String)] =
+    val known = network.table("Bus").map(_.ids.toSet).getOrElse(Set.empty)
+
+    val attached = network.tables.values.toIndexedSeq.flatMap { table =>
+      if Role.of(table.spec) != Role.Attached || table.spec.attribute("bus").isEmpty then
+        IndexedSeq.empty
+      else
+        table.ids.flatMap { id =>
+          val bus = table.string("bus", id)
+          if known.contains(bus) then None else Some((table.spec.name, id, "bus", bus))
+        }
+    }
+
+    danglingReferences(network) ++ attached
 
   /** As [[danglingReferences]], restricted to the branches a caller consumes. */
   private def danglingIn(

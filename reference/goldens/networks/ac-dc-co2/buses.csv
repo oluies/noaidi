@@ -6,5 +6,5 @@ Manchester,380.0,-2.2,53.47,AC,Slack,Manchester Wind,0,UK
 Bremen,380.0,8.8,53.08,AC,PQ,,2,DE
 Bremen DC,200.0,8.8,52.98,DC,PQ,,1,DE
 Frankfurt,380.0,8.7,50.12,AC,Slack,Frankfurt Wind,2,DE
-Norway,380.0,10.75,60.0,AC,PQ,,3,NO
+Norway,380.0,10.75,60.0,AC,Slack,Norway Wind,3,NO
 Norway DC,200.0,10.75,60.0,DC,PQ,,1,NO

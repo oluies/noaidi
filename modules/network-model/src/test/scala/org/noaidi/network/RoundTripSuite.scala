@@ -61,7 +61,16 @@ class RoundTripSuite extends munit.FunSuite:
       }
     }
 
-  List("ac-dc-meshed", "storage-hvdc").foreach { name =>
+  /** Every golden network.
+    *
+    * `ac-dc-dispatch` and `ac-dc-co2` were missing here, and they are the only two
+    * carrying solved output series and output columns -- exactly the shape the
+    * reader and writer had never been exercised on.
+    */
+  private val goldenNetworks =
+    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "storage-hvdc")
+
+  goldenNetworks.foreach { name =>
     test(s"$name round-trips to the same files PyPSA wrote") {
       assume(available, "goldens missing — run reference/generate_goldens.py")
       val source = goldens.resolve("networks").resolve(name)

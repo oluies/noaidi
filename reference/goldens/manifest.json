@@ -62,7 +62,6 @@
        "Bremen",
        "Bremen DC",
        "Frankfurt",
-       "Norway",
        "Norway DC"
       ]
      }
@@ -150,9 +149,7 @@
      "varying": {
       "p": [
        "Manchester Wind",
-       "Manchester Gas",
        "Norway Wind",
-       "Norway Gas",
        "Frankfurt Wind",
        "Frankfurt Gas"
       ],
@@ -320,20 +317,17 @@
       "p": [
        "Norwich Converter",
        "Norway Converter",
-       "Bremen Converter",
-       "DC link"
+       "Bremen Converter"
       ],
       "p0": [
        "Norwich Converter",
        "Norway Converter",
-       "Bremen Converter",
-       "DC link"
+       "Bremen Converter"
       ],
       "p1": [
        "Norwich Converter",
        "Norway Converter",
-       "Bremen Converter",
-       "DC link"
+       "Bremen Converter"
       ]
      }
     },
@@ -373,7 +367,7 @@
      }
     },
     "SubNetwork": {
-     "count": 3,
+     "count": 4,
      "exported_columns": [
       "name",
       "carrier",
@@ -499,7 +493,6 @@
        "Bremen",
        "Bremen DC",
        "Frankfurt",
-       "Norway",
        "Norway DC"
       ]
      }
@@ -587,9 +580,7 @@
      "varying": {
       "p": [
        "Manchester Wind",
-       "Manchester Gas",
        "Norway Wind",
-       "Norway Gas",
        "Frankfurt Wind",
        "Frankfurt Gas"
       ],
@@ -757,20 +748,17 @@
       "p": [
        "Norwich Converter",
        "Norway Converter",
-       "Bremen Converter",
-       "DC link"
+       "Bremen Converter"
       ],
       "p0": [
        "Norwich Converter",
        "Norway Converter",
-       "Bremen Converter",
-       "DC link"
+       "Bremen Converter"
       ],
       "p1": [
        "Norwich Converter",
        "Norway Converter",
-       "Bremen Converter",
-       "DC link"
+       "Bremen Converter"
       ]
      }
     },
@@ -810,7 +798,7 @@
      }
     },
     "SubNetwork": {
-     "count": 3,
+     "count": 4,
      "exported_columns": [
       "name",
       "carrier",
@@ -884,6 +872,9 @@
       "x",
       "y",
       "carrier",
+      "control",
+      "generator",
+      "sub_network",
       "country"
      ],
      "in_memory_columns": [
@@ -931,6 +922,7 @@
      "exported_columns": [
       "name",
       "bus",
+      "control",
       "p_nom",
       "p_nom_extendable",
       "p_nom_min",
@@ -1020,7 +1012,8 @@
       "s_nom",
       "s_nom_extendable",
       "capital_cost",
-      "carrier"
+      "carrier",
+      "sub_network"
      ],
      "in_memory_columns": [
       "bus0",
@@ -1145,6 +1138,21 @@
        "Manchester"
       ]
      }
+    },
+    "SubNetwork": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
     }
    },
    "name": "ac-dc-meshed",
@@ -1202,7 +1210,10 @@
      "count": 6,
      "exported_columns": [
       "name",
-      "v_nom"
+      "v_nom",
+      "control",
+      "generator",
+      "sub_network"
      ],
      "in_memory_columns": [
       "v_nom",
@@ -1241,6 +1252,7 @@
      "exported_columns": [
       "name",
       "bus",
+      "control",
       "p_nom",
       "p_nom_extendable",
       "p_nom_min",
@@ -1333,7 +1345,8 @@
       "x",
       "s_nom",
       "s_nom_extendable",
-      "capital_cost"
+      "capital_cost",
+      "sub_network"
      ],
      "in_memory_columns": [
       "bus0",
@@ -1523,6 +1536,20 @@
        "Storage 4"
       ]
      }
+    },
+    "SubNetwork": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
     }
    },
    "name": "storage-hvdc",

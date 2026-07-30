@@ -72,8 +72,10 @@ class LopfSuite extends munit.FunSuite:
     val dir = Files.createTempDirectory("noaidi-lopf-")
     temporaries += dir
     val source = goldens.resolve("networks").resolve(name)
-    Files.list(source).iterator.asScala.foreach { f =>
-      Files.copy(f, dir.resolve(f.getFileName.toString))
+    // Closed explicitly: `Files.list` is backed by an open directory handle, and
+    // this runs once per mutation test.
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.asScala.foreach(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
     }
     dir
 
@@ -96,7 +98,9 @@ class LopfSuite extends munit.FunSuite:
   override def afterAll(): Unit =
     temporaries.foreach { dir =>
       if Files.exists(dir) then
-        Files.walk(dir).sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        scala.util.Using.resource(Files.walk(dir)) { paths =>
+          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        }
     }
 
   /** A column of a golden frame, by entity name, with tagged NaN handled. */
@@ -249,10 +253,13 @@ class LopfSuite extends munit.FunSuite:
     // to the marginal wind costs); a first-order method converges to a different
     // point of the same face.
     //
-    // So what is asserted is that the dual is *valid*, not that it coincides:
-    // strong duality, and dual feasibility on the balance rows. Asserting
-    // equality with PyPSA's prices would be asserting a choice neither solver
-    // is obliged to make.
+    // So what is asserted here is strong duality -- the two objectives agreeing
+    // is what makes both the primal and the dual optimal rather than merely
+    // feasible -- plus finiteness of every price. The part of the dual that is
+    // *forced* rather than chosen is asserted separately, in "a generator
+    // strictly inside its bounds pins its bus price"; between them those two
+    // cover what any optimal dual must satisfy. Asserting equality with PyPSA's
+    // prices would be asserting a choice neither solver is obliged to make.
     val n      = network("ac-dc-dispatch")
     val result = Lopf.solve(n, params)
     assertEquals(result.status, SolveStatus.Optimal)
@@ -309,8 +316,12 @@ class LopfSuite extends munit.FunSuite:
     val emitted = n.snapshots.indices.map { t =>
       gens.ids.map { g =>
         val intensity = carriers.float("co2_emissions", gens.string("carrier", g))
+        // The `generators` weighting, which is what PyPSA scales emissions by --
+        // not `objective`, which scales cost. Reading the same column the builder
+        // reads would make this agree with the implementation rather than check
+        // it, so it is named here independently.
         result.dispatch("Generator", g, t) * intensity / gens.valueAt("efficiency", g, t) *
-          n.weighting("objective", t)
+          n.weighting("generators", t)
       }.sum
     }.sum
 

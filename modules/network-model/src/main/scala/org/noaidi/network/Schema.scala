@@ -81,6 +81,15 @@ final case class AttributeSpec(
 final case class ComponentSpec(
     name: String,
     listName: String,
+    /** PyPSA's own classification: `passive_branch`, `controllable_branch`,
+      * `controllable_one_port`, `passive_one_port`, `standard_type`, `shape`, or
+      * absent for Bus and the non-physical components.
+      *
+      * Carried through so topology can be derived rather than hardcoded against
+      * a list of component names — a component added upstream then lands in the
+      * right place without this code changing.
+      */
+    category: String,
     description: String,
     attributes: IndexedSeq[AttributeSpec],
 ):
@@ -153,6 +162,7 @@ object Schema:
         ComponentSpec(
           name = componentName,
           listName = o("list_name").str,
+          category = optionalText(o.get("category")).getOrElse(""),
           description = optionalText(o.get("description")).getOrElse(""),
           attributes = attrs,
         )

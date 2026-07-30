@@ -189,6 +189,24 @@ def capture_network(name: str, build) -> dict:
             },
         }
 
+    # Sub-network decomposition. PyPSA forms these from *passive* branches only
+    # -- lines and transformers -- grouped by carrier, which is why a meshed
+    # AC/DC network has separate AC and DC islands joined by links. Links are
+    # controllable and do not merge sub-networks. The component `category` field
+    # in schema.json encodes that distinction, so a reader can derive it rather
+    # than hardcoding a component list.
+    print(f"  {name}: topology")
+    topo = build()
+    topo.determine_network_topology()
+    summary["sub_networks"] = [
+        {
+            "carrier": str(row.carrier),
+            "slack_bus": str(row.slack_bus),
+            "buses": sorted(topo.sub_networks.obj[sn].buses_i().tolist()),
+        }
+        for sn, row in topo.sub_networks.iterrows()
+    ]
+
     results = {}
 
     print(f"  {name}: linear power flow")

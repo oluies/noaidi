@@ -285,6 +285,41 @@
     "2015-01-01T07:00:00",
     "2015-01-01T08:00:00",
     "2015-01-01T09:00:00"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "London",
+      "Manchester",
+      "Norwich"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Manchester"
+    },
+    {
+     "buses": [
+      "Bremen DC",
+      "Norway DC",
+      "Norwich DC"
+     ],
+     "carrier": "DC",
+     "slack_bus": "Norwich DC"
+    },
+    {
+     "buses": [
+      "Bremen",
+      "Frankfurt"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Frankfurt"
+    },
+    {
+     "buses": [
+      "Norway"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Norway"
+    }
    ]
   },
   "storage-hvdc": {
@@ -630,6 +665,26 @@
     "2015-01-01T09:00:00",
     "2015-01-01T10:00:00",
     "2015-01-01T11:00:00"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "0",
+      "1",
+      "2"
+     ],
+     "carrier": "AC",
+     "slack_bus": "0"
+    },
+    {
+     "buses": [
+      "3",
+      "4",
+      "5"
+     ],
+     "carrier": "AC",
+     "slack_bus": "3"
+    }
    ]
   }
  },

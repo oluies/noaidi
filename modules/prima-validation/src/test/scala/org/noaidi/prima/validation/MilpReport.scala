@@ -32,6 +32,7 @@ object MilpReport:
       primaMillis: Long,
       oracleMillis: Long,
       relaxation: Double,
+      relaxationStatus: SolveStatus,
   ):
     def relativeGap: Double =
       math.abs(primaObjective - oracleObjective) / math.max(1.0, math.abs(oracleObjective))
@@ -42,14 +43,20 @@ object MilpReport:
       * the instance barely needed branching, so it is weak evidence about the
       * search — worth showing rather than leaving the reader to assume.
       */
-    def integralityGap: Double =
-      math.abs(oracleObjective - relaxation) / math.max(1.0, math.abs(oracleObjective))
+    /** Only meaningful if the relaxation actually solved. This column is the one
+      * used to certify that an instance exercises the search, so a value taken
+      * from whatever an unconverged solve last held would be worse than no
+      * column at all.
+      */
+    def integralityGap: Option[Double] =
+      if relaxationStatus != SolveStatus.Optimal then None
+      else Some(math.abs(oracleObjective - relaxation) / math.max(1.0, math.abs(oracleObjective)))
 
   def main(args: Array[String]): Unit =
     java.util.Locale.setDefault(java.util.Locale.ROOT)
 
-    val lp     = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000)
-    val params = BnbParams(lp = lp, maxNodes = 50_000)
+    val params = MilpLadder.params
+    val lp     = params.lp
 
     val rows = MilpLadder.instances.map { instance =>
       val relaxed = Pdhg.solve(instance.problem, lp)
@@ -76,6 +83,7 @@ object MilpReport:
         primaMillis = mineMs,
         oracleMillis = theirsMs,
         relaxation = relaxed.objectiveValue,
+        relaxationStatus = relaxed.status,
       )
     }
 
@@ -90,7 +98,9 @@ object MilpReport:
       val mineObj    = if comparable then f"${r.primaObjective}%14.6f" else f"${"-"}%14s"
       val theirsObj  = if comparable then f"${r.oracleObjective}%14.6f" else f"${"-"}%14s"
       val gap        = if comparable then f"${r.relativeGap}%9.2e" else f"${"-"}%9s"
-      val intGap     = if comparable then f"${r.integralityGap}%9.2e" else f"${"-"}%9s"
+      val intGap     = r.integralityGap match
+        case Some(g) if comparable => f"$g%9.2e"
+        case _                     => f"${"-"}%9s"
       println(
         f"${r.name}%-18s ${r.size}%-16s ${r.integers}%4d ${r.primaStatus}%-9s ${r.oracleStatus}%-9s " +
           f"$mineObj $theirsObj $gap $intGap ${r.nodes}%7d ${r.unproven}%6d " +
@@ -107,11 +117,46 @@ object MilpReport:
       comparable.count(r => r.primaObjective < r.oracleObjective - 1e-6))
     println(f"total nodes explored: ${rows.map(_.nodes).sum}, of which unproven: ${rows.map(_.unproven).sum}")
 
-    // The report is a measurement, but a silent regression in it is worse than
-    // no report, so the two claims it exists to support are asserted here too.
-    if worst > 1e-5 then
-      System.err.println(f"FAIL: worst objective gap $worst%.3e exceeds 1e-5")
-      System.exit(1)
+    // The gate has to fail *because* Prima regressed, not go quiet.
+    //
+    // Rows only entered `comparable` when both solvers reported Optimal, so a
+    // regression that turned instances into Feasible or NoSolutionFound removed
+    // them from the check rather than failing it -- and in the limit where every
+    // instance degraded, `comparable` was empty, `worst` was 0.0 and the step
+    // exited 0 having compared nothing. Every status is now asserted directly.
+    var failed = false
+    def fail(message: String): Unit =
+      System.err.println(s"FAIL: $message")
+      failed = true
+
+    rows.filter(_.oracleStatus != MilpStatus.Optimal).foreach { r =>
+      fail(s"${r.name}: the oracle did not solve it (${r.oracleStatus}), so nothing was compared")
+    }
+    rows.filter(_.primaStatus != MilpStatus.Optimal).foreach { r =>
+      fail(s"${r.name}: Prima returned ${r.primaStatus} rather than Optimal")
+    }
+    rows.filter(_.unproven > 0).foreach { r =>
+      fail(s"${r.name}: ${r.unproven} node(s) ended without a provable bound")
+    }
+    // `primaObjective` is `MilpSolution.objectiveValue`, which is the objective
+    // of the returned point -- but only because BranchAndBound now computes it
+    // from the snapped vector. It used to come from the relaxation's fractional
+    // iterate instead, which meant this whole report was partly measuring the
+    // snap displacement rather than search quality. Checked here so the two
+    // cannot drift apart again unnoticed.
+    rows.zip(MilpLadder.instances).foreach { (r, instance) =>
+      if r.primaStatus == MilpStatus.Optimal then
+        val achieved = instance.problem.primalObjective(
+          BranchAndBound.solve(instance.problem, instance.integers, params).primal
+        )
+        if math.abs(achieved - r.primaObjective) > 1e-9 * math.max(1.0, math.abs(achieved)) then
+          fail(s"${r.name}: reported objective ${r.primaObjective} is not c'x = $achieved")
+    }
+    rows.filter(_.integralityGap.isEmpty).foreach { r =>
+      fail(s"${r.name}: the LP relaxation did not solve, so the instance cannot be certified")
+    }
+    if worst > 1e-5 then fail(f"worst objective gap $worst%.3e exceeds 1e-5")
     if comparable.exists(r => r.primaObjective < r.oracleObjective - 1e-6) then
-      System.err.println("FAIL: an objective better than the true optimum means the point is not feasible")
-      System.exit(1)
+      fail("an objective better than the true optimum means the point is not feasible")
+
+    if failed then System.exit(1)

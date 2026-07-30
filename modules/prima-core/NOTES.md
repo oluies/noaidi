@@ -449,8 +449,8 @@ returns a point converged to a tolerance, not a vertex, so a node's reported
 objective is accurate only to roughly that tolerance. Two consequences, both
 handled explicitly rather than hoped past.
 
-**Pruning needs a margin.** A node whose true bound sits just below the incumbent
-can report just above it, and pruning on that discards the subtree holding the
+**Pruning needs a margin, everywhere.** A node whose true bound sits just below
+the incumbent can report just above it, and pruning on that discards the subtree holding the
 optimum — silently, returning a suboptimal answer labelled `Optimal`. So a node
 is pruned only when its bound exceeds the incumbent by more than a multiple of
 *that node's own duality gap*: the accuracy achieved, not the accuracy requested.
@@ -461,6 +461,21 @@ iteration limit, pruning on its objective is unsound and so is declaring its
 solution integral. Such a node is branched rather than pruned, and counted in
 `MilpSolution.unprovenNodes`; an incumbent found while any exist is reported
 `Feasible`, never `Optimal`, because optimality was not proven.
+
+The margin has to apply at *both* pruning points. The pre-solve skip — where a
+node is discarded on its parent's bound without being solved — originally used an
+exact comparison, so it bypassed the entire argument above and could drop the
+subtree holding the optimum while the answer stayed labelled `Optimal`. Each node
+now carries its parent's bound with the margin already subtracted, and a node
+descended from an inconclusive relaxation carries `-infinity`, since such an
+objective is not a bound at all.
+
+The reported objective is `c'x` at the **returned** point, not the relaxation's
+value at the fractional iterate it was snapped from. Those differ by up to
+`integralityTolerance` times the integer columns' costs, which for
+unit-commitment-scale coefficients is far more than the gap the result claims to
+have closed — so reporting the wrong one would make every downstream comparison
+measure the snapping rather than the search.
 
 The search is depth-first on the most fractional variable. Depth-first because it
 reaches an incumbent early — which is what makes pruning possible at all — and
@@ -488,10 +503,10 @@ attributed to branch-and-bound rather than to the LP solver.
 instance           size              int prima     ojalgo         prima obj     ojalgo obj   rel gap   int gap   nodes  unprv
 fractional-pair    2v/2c/4nz           2 Optimal   Optimal       -20.000000     -20.000000  0.00e+00  5.00e-02       5      0
 knapsack-8         8v/1c/8nz           8 Optimal   Optimal       -59.000000     -59.000000  0.00e+00  5.65e-03      23      0
-knapsack-16        16v/1c/16nz        16 Optimal   Optimal      -271.000000    -271.000000  0.00e+00  1.26e-02     299      0
+knapsack-16        16v/1c/16nz        16 Optimal   Optimal      -271.000000    -271.000000  0.00e+00  1.26e-02     305      0
 set-cover-triangle 3v/3c/6nz           3 Optimal   Optimal         2.000000       2.000000  0.00e+00  2.50e-01       5      0
-set-cover-petersen 10v/5c/20nz        10 Optimal   Optimal         3.000000       3.000000  0.00e+00  1.67e-01      32      0
-random-mixed-1     8v/4c/22nz          4 Optimal   Optimal       -27.800000     -27.800000  1.01e-11  9.11e-02       4      0
+set-cover-k5-edges 10v/5c/20nz        10 Optimal   Optimal         3.000000       3.000000  0.00e+00  1.67e-01      59      0
+random-mixed-1     8v/4c/22nz          4 Optimal   Optimal       -27.800000     -27.800000  1.01e-11  9.11e-02       5      0
 random-mixed-9     10v/5c/35nz         5 Optimal   Optimal       -31.400000     -31.400000  2.81e-12  6.46e-02       7      0
 random-mixed-3     12v/6c/51nz         6 Optimal   Optimal       -14.000000     -14.000000  9.07e-12  2.07e-01       9      0
 random-mixed-4     14v/7c/61nz         7 Optimal   Optimal       -33.512820     -33.512821  7.28e-10  1.70e-02       5      0
@@ -499,6 +514,14 @@ random-mixed-4     14v/7c/61nz         7 Optimal   Optimal       -33.512820     
 
 Worst relative objective gap against the oracle: **7.3e-10**. No instance where
 Prima reported an objective better than the true optimum, and no unproven nodes.
+
+The report's exit code gates all of that, and it gates it directly. It previously
+dropped a row from the comparison unless *both* solvers reported `Optimal`, so a
+regression that turned instances into `Feasible` removed them from the check
+rather than failing it — and had every instance degraded, the gap would have come
+out 0.0 over an empty set and the step would have exited green having compared
+nothing. Every status, every unproven node and every unsolved relaxation now
+fails it by name.
 
 The `int gap` column is there to stop the table flattering itself. It is the
 distance from the LP relaxation to the integer optimum, so a near-zero entry

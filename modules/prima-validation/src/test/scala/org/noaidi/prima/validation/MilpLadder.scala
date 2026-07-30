@@ -54,7 +54,11 @@ object MilpLadder:
     }
     (0 until elements).foreach { e =>
       val covering = sets.indices.filter(j => sets(j).contains(e)).map(j => (j, 1.0))
-      if covering.nonEmpty then b.greaterThan(covering, 1.0)
+      // An uncovered element used to produce no row at all, so a typo in a set
+      // literal silently yielded an easier problem -- fewer constraints, possibly
+      // an integral relaxation -- rather than an error.
+      require(covering.nonEmpty, s"$name: element $e is covered by no set")
+      b.greaterThan(covering, 1.0)
     }
     Instance(name, b.build()._1, sets.indices.toSet)
 
@@ -84,6 +88,16 @@ object MilpLadder:
     * `MilpAgreementSuite` asserts that every instance here is fractional, so a
     * future edit cannot quietly reintroduce one that tests nothing.
     */
+  /** The settings both the report and the agreement suite use.
+    *
+    * Shared so the node counts and gaps pinned in NOTES describe the same
+    * configuration CI's suite verifies. They were previously different --
+    * 50,000 nodes and 200,000 LP iterations in the report against 20,000 and the
+    * 100,000 default in the suite.
+    */
+  val params: BnbParams =
+    BnbParams(lp = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000), maxNodes = 50_000)
+
   val instances: Seq[Instance] = Seq(
     fractionalPair,
     knapsack("knapsack-8", Seq(10, 13, 18, 31, 7, 15, 22, 9), Seq(3, 4, 5, 9, 2, 5, 7, 3), 17.0),
@@ -100,8 +114,11 @@ object MilpLadder:
     // one node -- it agreed with the oracle without ever branching, which says
     // nothing about the search.
     setCover("set-cover-triangle", Seq(Set(0, 1), Set(1, 2), Set(0, 2)), 3),
+    // Every 2-subset of {0..4}: the edge set of K5, not the Petersen graph,
+    // which this was briefly and wrongly called. The relaxation takes half of
+    // each edge for 2.5 against an integer optimum of 3.
     setCover(
-      "set-cover-petersen",
+      "set-cover-k5-edges",
       Seq(Set(0, 1), Set(1, 2), Set(2, 3), Set(3, 4), Set(4, 0),
           Set(0, 2), Set(1, 3), Set(2, 4), Set(3, 0), Set(4, 1)),
       5,

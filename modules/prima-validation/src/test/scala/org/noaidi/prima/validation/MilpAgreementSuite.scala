@@ -18,28 +18,19 @@ import scala.util.Random
   */
 class MilpAgreementSuite extends munit.FunSuite:
 
-  private val params = BnbParams(lp = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9), maxNodes = 20_000)
+  // Shared with the report, so the figures recorded in NOTES describe the same
+  // configuration this suite verifies.
+  private val params = MilpLadder.params
 
-  /** A random MILP with a fractional relaxation.
+  /** Delegates to the ladder's generator rather than copying it.
     *
-    * Bounded by construction — every variable has finite bounds and the rows are
-    * `<=` with positive right-hand sides — so an unbounded or infeasible
-    * instance cannot slip in and make agreement vacuous.
+    * There were two line-for-line identical generators in this package. Two
+    * copies drift, and the ladder's asserted fractionality would then say
+    * nothing about the instances this suite actually runs.
     */
   private def randomMilp(seed: Int, n: Int, m: Int): (LpProblem, Set[Int]) =
-    val rng = new Random(seed)
-    val b   = LpProblem.builder(n)
-    (0 until n).foreach { j =>
-      b.objectiveCoefficient(j, -(1.0 + rng.nextInt(9)))
-      b.bounds(j, 0.0, 1.0 + rng.nextInt(3))
-    }
-    (0 until m).foreach { _ =>
-      val terms = (0 until n).filter(_ => rng.nextDouble() < 0.6).map(j => (j, 1.0 + rng.nextInt(5).toDouble))
-      if terms.nonEmpty then b.lessThan(terms, 3.0 + rng.nextInt(10))
-    }
-    // Every other variable integer, so the mixed case is exercised rather than
-    // only the pure-integer one.
-    (b.build()._1, (0 until n).filter(_ % 2 == 0).toSet)
+    val instance = MilpLadder.randomMixed(seed, n, m)
+    (instance.problem, instance.integers)
 
   test("Prima and ojAlgo agree on every random mixed-integer instance") {
     var checked    = 0
@@ -60,10 +51,10 @@ class MilpAgreementSuite extends munit.FunSuite:
       if theirs.status == MilpStatus.Optimal then
         assertEquals(mine.status, MilpStatus.Optimal, s"seed $seed: $mine vs ${theirs.status}")
         assertEqualsDouble(
-          mine.objectiveValue,
+          problem.primalObjective(mine.primal),
           theirs.objectiveValue,
           1e-5 * math.max(1.0, math.abs(theirs.objectiveValue)),
-          s"seed $seed: prima=${mine.objectiveValue} ojalgo=${theirs.objectiveValue}",
+          s"seed $seed: prima=${problem.primalObjective(mine.primal)} ojalgo=${theirs.objectiveValue}",
         )
         checked += 1
       else if theirs.status == MilpStatus.Infeasible then
@@ -85,9 +76,13 @@ class MilpAgreementSuite extends munit.FunSuite:
       val mine   = BranchAndBound.solve(problem, integers, params)
       val theirs = OjAlgoMilp.solve(problem, integers)
       if theirs.status == MilpStatus.Optimal && mine.primal.nonEmpty then
+        // The objective of the returned point, not the reported number. Those
+        // were computed from different things, so comparing the reported one
+        // could not support the inference this test exists to make.
+        val achieved = problem.primalObjective(mine.primal)
         assert(
-          mine.objectiveValue >= theirs.objectiveValue - 1e-5,
-          s"seed $seed: prima claims ${mine.objectiveValue}, better than the true ${theirs.objectiveValue}",
+          achieved >= theirs.objectiveValue - 1e-5,
+          s"seed $seed: prima claims $achieved, better than the true ${theirs.objectiveValue}",
         )
     }
   }
@@ -121,5 +116,50 @@ class MilpAgreementSuite extends munit.FunSuite:
         1e-5 * math.max(1.0, math.abs(theirs.objectiveValue)),
         s"${instance.name}: prima=${mine.objectiveValue} ojalgo=${theirs.objectiveValue}",
       )
+    }
+  }
+
+  test("the returned point is integral and satisfies the constraints") {
+    // Nothing checked `mine.primal` itself -- not its integrality, not its
+    // residuals -- so a search returning a fractional or infeasible point while
+    // reporting a plausible objective would have passed everything. This is what
+    // makes "Prima never beats the true optimum" mean anything: an objective
+    // below the optimum is only impossible if the point is genuinely feasible.
+    MilpLadder.instances.foreach { instance =>
+      val mine = BranchAndBound.solve(instance.problem, instance.integers, params)
+      assertEquals(mine.status, MilpStatus.Optimal, s"${instance.name}: $mine")
+
+      instance.integers.foreach { j =>
+        val v = mine.primal(j)
+        assertEqualsDouble(
+          v,
+          math.round(v).toDouble,
+          0.0,
+          s"${instance.name}: column $j came back at $v",
+        )
+      }
+
+      val bounds = instance.problem
+      mine.primal.indices.foreach { j =>
+        assert(
+          mine.primal(j) >= bounds.variableLower(j) - 1e-6 &&
+            mine.primal(j) <= bounds.variableUpper(j) + 1e-6,
+          s"${instance.name}: column $j = ${mine.primal(j)} outside its bounds",
+        )
+      }
+
+      // Row residuals: equalities first, then `Kx >= q`.
+      val m = instance.problem.constraintMatrix
+      (0 until instance.problem.numConstraints).foreach { r =>
+        var value = 0.0
+        var p     = m.rowPtr(r)
+        while p < m.rowPtr(r + 1) do
+          value += m.values(p) * mine.primal(m.colIndices(p))
+          p += 1
+        val q = instance.problem.rhs(r)
+        if r < instance.problem.numEqualities then
+          assertEqualsDouble(value, q, 1e-5, s"${instance.name}: equality row $r")
+        else assert(value >= q - 1e-5, s"${instance.name}: row $r gives $value < $q")
+      }
     }
   }

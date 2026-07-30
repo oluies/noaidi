@@ -184,15 +184,22 @@ object BranchAndBound:
       // short-circuiting rather than running one node, so a caller can hand this
       // a pure LP without paying for the machinery.
       val root = Pdhg.solveWith(problem, params.lp, kernels)
+      val status = root.status match
+        case SolveStatus.Optimal          => MilpStatus.Optimal
+        case SolveStatus.PrimalInfeasible => MilpStatus.Infeasible
+        case SolveStatus.DualInfeasible   => MilpStatus.Unbounded
+        case _                            => MilpStatus.NoSolutionFound
+      // The same invariant the main path keeps: `primal` is empty unless there
+      // is an answer, and the objective is not a number a caller can use when
+      // there is not. Returning the relaxation's iterate for an infeasible
+      // problem would contradict the scaladoc and mislead any caller that
+      // branches on `primal.nonEmpty`.
+      val solved = status == MilpStatus.Optimal
       return MilpSolution(
-        status = root.status match
-          case SolveStatus.Optimal          => MilpStatus.Optimal
-          case SolveStatus.PrimalInfeasible => MilpStatus.Infeasible
-          case SolveStatus.DualInfeasible   => MilpStatus.Unbounded
-          case _                            => MilpStatus.NoSolutionFound,
-        primal = root.primal,
-        objectiveValue = root.objectiveValue,
-        bestBound = root.objectiveValue,
+        status = status,
+        primal = if solved then root.primal else IArray.empty,
+        objectiveValue = if solved then root.objectiveValue else Double.PositiveInfinity,
+        bestBound = if solved then root.objectiveValue else Double.NegativeInfinity,
         nodesExplored = 1,
         unprovenNodes = if root.status.isConclusive then 0 else 1,
         solveTimeMillis = System.currentTimeMillis() - started,
@@ -203,7 +210,14 @@ object BranchAndBound:
     final case class Node(
         lower: IArray[Double],
         upper: IArray[Double],
-        parentBound: Double,
+        /** The parent's bound with its own safety margin already subtracted, so
+          * comparing it against the incumbent is sound without re-deriving the
+          * margin here.
+          *
+          * `-infinity` when the parent's relaxation was not conclusive, because
+          * such an objective is not a bound at all and must never prune.
+          */
+        safeBound: Double,
         warm: Option[Pdhg.WarmStart],
     )
 
@@ -216,11 +230,14 @@ object BranchAndBound:
     var unproven                  = 0
     var rootUnbounded             = false
 
-    // Bounds of nodes still on the stack, so the global bound is the best thing
-    // any unexplored subtree could still deliver.
+    // The best any unexplored subtree could still deliver, using the same
+    // margin-corrected bounds the pruning test uses. A node whose parent was
+    // inconclusive contributes `-infinity`, which is the honest statement that
+    // nothing is known about that subtree — and it correctly prevents `Optimal`
+    // being concluded from a gap that was never established.
     def openBound: Double =
       if stack.isEmpty then incumbentValue
-      else math.min(incumbentValue, stack.map(_.parentBound).min)
+      else math.min(incumbentValue, stack.map(_.safeBound).min)
 
     def outOfTime: Boolean =
       params.timeLimitMillis.exists(System.currentTimeMillis() - started > _)
@@ -228,8 +245,17 @@ object BranchAndBound:
     while stack.nonEmpty && nodes < params.maxNodes && !outOfTime do
       val node = stack.pop()
 
-      // Prune before solving: the parent's bound already exceeds the incumbent.
-      if node.parentBound <= incumbentValue - 0.0 || incumbent.isEmpty then
+      // Prune before solving, against the *margin-corrected* parent bound.
+      //
+      // This test used to be exact — `parentBound <= incumbentValue - 0.0`, with
+      // the `- 0.0` a placeholder that was never filled in — which bypassed the
+      // entire correctness argument this module rests on. A node whose true
+      // bound sat just below the incumbent but reported a fraction above it was
+      // discarded unsolved, and the post-solve margin below never ran for it, so
+      // the subtree holding the optimum could be dropped and the answer still
+      // labelled `Optimal`. Skipping a node here has to meet exactly the bar
+      // that pruning one after solving does.
+      if incumbent.isEmpty || node.safeBound < incumbentValue then
         val sub = LpProblem(
           objective = problem.objective,
           constraintMatrix = problem.constraintMatrix,
@@ -251,9 +277,14 @@ object BranchAndBound:
 
           case SolveStatus.DualInfeasible =>
             // An unbounded relaxation at the root says the integer problem is
-            // unbounded or infeasible; deeper it means the bounds have not
-            // pinned it down, which cannot happen for a bounded formulation.
-            if nodes == 1 then rootUnbounded = true
+            // unbounded or infeasible. Deeper it should be impossible for a
+            // bounded formulation — but "should be" is a statement about
+            // mathematics and this is a numerical method: PDHG declares dual
+            // infeasibility on a Farkas certificate that passed a tolerance
+            // test, so a spurious one deeper in the tree would silently drop a
+            // subtree that might hold the optimum. Counted, so the status is
+            // downgraded rather than the loss going unrecorded.
+            if nodes == 1 then rootUnbounded = true else unproven += 1
 
           case status =>
             val conclusive = status.isConclusive
@@ -268,7 +299,11 @@ object BranchAndBound:
               params.pruningSafetyFactor *
                 math.max(math.abs(relaxation.kkt.absoluteGap), params.lp.epsAbs)
 
-            val prunable = conclusive && incumbent.nonEmpty && bound - slack >= incumbentValue
+            // What children may prune against: the bound less its margin, or
+            // nothing at all if this relaxation was not conclusive.
+            val safe = if conclusive then bound - slack else Double.NegativeInfinity
+
+            val prunable = conclusive && incumbent.nonEmpty && safe >= incumbentValue
 
             if !prunable then
               val fractional = mostFractional(relaxation.primal, ordered, params.integralityTolerance)
@@ -276,9 +311,22 @@ object BranchAndBound:
               fractional match
                 case None if conclusive =>
                   // Integral, and the bound is trustworthy: a candidate.
-                  if bound < incumbentValue then
-                    incumbentValue = bound
-                    incumbent = snap(relaxation.primal, ordered)
+                  //
+                  // The incumbent's value is the objective of the point actually
+                  // returned, not the relaxation's. Those differ: each integer
+                  // coordinate moves by up to `integralityTolerance` when
+                  // snapped, so the discrepancy is bounded by that times the sum
+                  // of the integer columns' costs — which for
+                  // unit-commitment-scale coefficients is orders of magnitude
+                  // above the `gapAbs` the result claims to have closed. Reporting
+                  // an objective that is not `c'x` at the reported `x` would make
+                  // every downstream comparison measure the snap rather than the
+                  // answer.
+                  val snapped = snap(relaxation.primal, ordered)
+                  val value   = problem.primalObjective(snapped)
+                  if value < incumbentValue then
+                    incumbentValue = value
+                    incumbent = snapped
 
                 case None =>
                   // Integral but the relaxation never converged, so neither its
@@ -291,15 +339,24 @@ object BranchAndBound:
                   val value = relaxation.primal(j)
                   val floor  = math.floor(value)
                   val ceil   = math.ceil(value)
-                  val warm   = if params.warmStart then Some(Pdhg.WarmStart(relaxation)) else None
+                  // `Pdhg.WarmStart` throws on a non-finite primal or dual, and
+                  // a NumericalError node can have a primal finite enough to
+                  // yield a branching variable while its dual is poisoned. That
+                  // would abort the whole search from inside a branch the design
+                  // says should merely be counted -- and silently, since warm
+                  // starting is on by default. Such a node degrades to a
+                  // cold-started child instead.
+                  val usable =
+                    relaxation.primal.forall(_.isFinite) && relaxation.dual.forall(_.isFinite)
+                  val warm = if params.warmStart && usable then Some(Pdhg.WarmStart(relaxation)) else None
 
                   // Pushed ceiling-first so the floor branch is explored first,
                   // which on a minimisation with mostly-zero binaries reaches a
                   // feasible incumbent sooner.
                   if ceil <= node.upper(j) then
-                    stack.push(Node(raise(node.lower, j, ceil), node.upper, bound, warm))
+                    stack.push(Node(raise(node.lower, j, ceil), node.upper, safe, warm))
                   if floor >= node.lower(j) then
-                    stack.push(Node(node.lower, lowerTo(node.upper, j, floor), bound, warm))
+                    stack.push(Node(node.lower, lowerTo(node.upper, j, floor), safe, warm))
 
     val elapsed = System.currentTimeMillis() - started
     val bound   = if stack.isEmpty then incumbentValue else openBound

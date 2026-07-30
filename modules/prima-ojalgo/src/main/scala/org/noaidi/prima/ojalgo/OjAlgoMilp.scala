@@ -86,7 +86,12 @@ object OjAlgoMilp:
       i += 1
 
     val status = result.getState match
-      case Optimisation.State.OPTIMAL     => MilpStatus.Optimal
+      // DISTINCT means a proven *unique* optimum, which small integer models
+      // reach often. Omitting it mapped those to NoSolutionFound, and the
+      // agreement suite then skipped the seed instead of failing -- an oracle
+      // quietly weakening itself. `OjAlgoSolver.mapState` already treats it as
+      // optimal, so this now matches.
+      case Optimisation.State.OPTIMAL | Optimisation.State.DISTINCT => MilpStatus.Optimal
       case Optimisation.State.INFEASIBLE  => MilpStatus.Infeasible
       case Optimisation.State.UNBOUNDED   => MilpStatus.Unbounded
       case Optimisation.State.FEASIBLE    => MilpStatus.Feasible

@@ -108,6 +108,17 @@ jobs:
           sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.Report" \
             | tee report.txt
 
+      # The mixed-integer counterpart. Kept as a separate step so a MILP
+      # regression is attributed to branch-and-bound rather than to the LP
+      # solver, and because this report exits non-zero on disagreement -- the
+      # search rests on an inexact bound, so a silent divergence from an exact
+      # oracle is the failure that matters most.
+      - name: Prima vs ojAlgo (mixed-integer)
+        run: |
+          set -euo pipefail
+          sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
+            | tee milp-report.txt
+
       - name: Publish report to the job summary
         if: always()
         run: |

@@ -2,6 +2,8 @@ package org.noaidi.prima.ojalgo
 
 import org.noaidi.prima.{LpProblem, MilpStatus}
 import org.ojalgo.optimisation.{ExpressionsBasedModel, Optimisation}
+import org.ojalgo.optimisation.integer.IntegerStrategy
+import org.ojalgo.`type`.context.NumberContext
 
 /** ojAlgo's mixed-integer solver, as an oracle for [[org.noaidi.prima.BranchAndBound]].
   *
@@ -22,6 +24,33 @@ object OjAlgoMilp:
 
   def solve(problem: LpProblem, integers: Set[Int]): Result =
     val model = new ExpressionsBasedModel()
+
+    // The oracle has to be exact and deterministic, and by default it is
+    // neither. ojAlgo's integer solver stops on `time_suffice` once it holds a
+    // solution it considers good enough, and reports that incumbent with state
+    // OPTIMAL -- so under load it can return a *worse* objective than Prima and
+    // still claim optimality. That was not hypothetical: the same ladder run
+    // twice gave a worst gap of 7.3e-10 and then 1.7e-2, with the report
+    // flagging Prima for having "claimed a better objective than the oracle"
+    // when what had actually happened was the oracle giving up early.
+    //
+    // These instances are small enough that an exact search costs milliseconds,
+    // so the time limits are pushed out of reach and the MIP gap tightened to
+    // well below the 1e-5 the comparison asserts. An oracle that is sometimes
+    // right is worse than no oracle, because a disagreement stops meaning
+    // anything.
+    model.options.time_abort = Long.MaxValue
+    model.options.time_suffice = Long.MaxValue
+
+    // Single-threaded with a tight gap tolerance. Parallelism is the other half
+    // of the non-determinism: a multi-threaded branch-and-bound races to an
+    // incumbent, so which node closes the search -- and therefore what it holds
+    // when a time or gap check fires -- varies between runs on the same input.
+    model.options.integer(
+      IntegerStrategy.newConfigurable()
+        .withGapTolerance(NumberContext.ofScale(12))
+        .withParallelism(() => 1)
+    ): Unit
 
     val variables = Array.tabulate(problem.numVariables) { i =>
       val v = model.newVariable(s"x$i")

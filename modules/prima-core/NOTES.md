@@ -478,6 +478,47 @@ is invisible from inside. The suite also asserts the asymmetric half — Prima m
 never report an objective *better* than the true optimum, which would mean its
 reported point is not integer-feasible at all.
 
+### The MILP ladder, and a flaky oracle
+
+`MilpReport` runs the same comparison for mixed-integer problems that `Report`
+does for LPs, and CI runs it as a separate step so a MILP regression is
+attributed to branch-and-bound rather than to the LP solver.
+
+```
+instance           size              int prima     ojalgo         prima obj     ojalgo obj   rel gap   int gap   nodes  unprv
+fractional-pair    2v/2c/4nz           2 Optimal   Optimal       -20.000000     -20.000000  0.00e+00  5.00e-02       5      0
+knapsack-8         8v/1c/8nz           8 Optimal   Optimal       -59.000000     -59.000000  0.00e+00  5.65e-03      23      0
+knapsack-16        16v/1c/16nz        16 Optimal   Optimal      -271.000000    -271.000000  0.00e+00  1.26e-02     299      0
+set-cover-triangle 3v/3c/6nz           3 Optimal   Optimal         2.000000       2.000000  0.00e+00  2.50e-01       5      0
+set-cover-petersen 10v/5c/20nz        10 Optimal   Optimal         3.000000       3.000000  0.00e+00  1.67e-01      32      0
+random-mixed-1     8v/4c/22nz          4 Optimal   Optimal       -27.800000     -27.800000  1.01e-11  9.11e-02       4      0
+random-mixed-9     10v/5c/35nz         5 Optimal   Optimal       -31.400000     -31.400000  2.81e-12  6.46e-02       7      0
+random-mixed-3     12v/6c/51nz         6 Optimal   Optimal       -14.000000     -14.000000  9.07e-12  2.07e-01       9      0
+random-mixed-4     14v/7c/61nz         7 Optimal   Optimal       -33.512820     -33.512821  7.28e-10  1.70e-02       5      0
+```
+
+Worst relative objective gap against the oracle: **7.3e-10**. No instance where
+Prima reported an objective better than the true optimum, and no unproven nodes.
+
+The `int gap` column is there to stop the table flattering itself. It is the
+distance from the LP relaxation to the integer optimum, so a near-zero entry
+means the instance barely needed branching and its agreement says little about
+the search. Two instances in the first version of the ladder had an integrality
+gap of exactly zero and solved in one node; they are gone, and
+`MilpAgreementSuite` now asserts that every instance has a fractional relaxation
+so the same thing cannot creep back.
+
+**The oracle had to be pinned before it could be an oracle.** ojAlgo's integer
+solver stops on `time_suffice` once it holds a solution it considers good enough
+and reports that incumbent with state `OPTIMAL`, and its branch-and-bound is
+multi-threaded, so which node closes the search varies between runs. The same
+ladder on the same input gave a worst gap of 7.3e-10 and then 1.7e-2, with the
+report accusing Prima of "claiming a better objective than the oracle" — when
+what had happened was the oracle giving up early. Time limits are now pushed out
+of reach, the gap tolerance tightened to 1e-12 and parallelism set to one; four
+consecutive runs then agree bit-for-bit. An oracle that is sometimes right is
+worse than no oracle, because a disagreement stops meaning anything.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

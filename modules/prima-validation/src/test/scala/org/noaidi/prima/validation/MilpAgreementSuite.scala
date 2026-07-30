@@ -91,3 +91,35 @@ class MilpAgreementSuite extends munit.FunSuite:
         )
     }
   }
+
+  test("every ladder instance actually requires branching") {
+    // The property the ladder's value rests on, asserted rather than asserted in
+    // prose. An instance whose relaxation is already integral is solved by
+    // returning it, so it would agree with the oracle while exercising none of
+    // the search -- and two such instances were in the ladder until the report's
+    // integrality-gap column exposed them solving in a single node.
+    MilpLadder.instances.foreach { instance =>
+      val relaxed = Pdhg.solve(instance.problem, params.lp)
+      assertEquals(relaxed.status, SolveStatus.Optimal, s"${instance.name} relaxation")
+      val fractional = instance.integers.count { j =>
+        val v = relaxed.primal(j)
+        math.abs(v - math.round(v).toDouble) > 1e-4
+      }
+      assert(fractional > 0, s"${instance.name}: relaxation is already integral, so it tests nothing")
+    }
+  }
+
+  test("Prima matches ojAlgo across the whole ladder") {
+    MilpLadder.instances.foreach { instance =>
+      val mine   = BranchAndBound.solve(instance.problem, instance.integers, params)
+      val theirs = OjAlgoMilp.solve(instance.problem, instance.integers)
+      assertEquals(theirs.status, MilpStatus.Optimal, s"${instance.name}: oracle did not solve it")
+      assertEquals(mine.status, MilpStatus.Optimal, s"${instance.name}: $mine")
+      assertEqualsDouble(
+        mine.objectiveValue,
+        theirs.objectiveValue,
+        1e-5 * math.max(1.0, math.abs(theirs.objectiveValue)),
+        s"${instance.name}: prima=${mine.objectiveValue} ojalgo=${theirs.objectiveValue}",
+      )
+    }
+  }

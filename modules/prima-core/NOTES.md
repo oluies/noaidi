@@ -387,6 +387,59 @@ Transformers are refused: they would decompose correctly, but their per-unit bas
 involves `s_nom` and an off-nominal `tap_ratio` shifts the angle across them, so
 reusing the line formula would put a plausible number on a wrong model.
 
+## L2: Newton-Raphson AC power flow
+
+`network-pf` also solves the non-linear power flow, matching PyPSA's `n.pf()` on
+both fixtures that have one: voltage magnitudes and angles to 1e-9, and bus P and
+Q to 1e-5.
+
+The tolerance asymmetry is physics, not slack. On `storage-hvdc` the voltages
+agree with PyPSA to **3e-12**, but P and Q are computed *from* those voltages
+through admittances of order 1e5, so agreement to 1e-12 in per-unit voltage is
+agreement to a few times 1e-6 in MVAr. Asserting P and Q at 1e-9 would be
+asserting that two implementations round identically.
+
+The admittance conventions were taken from PyPSA's own `Y` matrix rather than
+from a formula, and reproducing a three-bus matrix to six significant figures is
+a much stronger check than a derivation that looks right:
+
+- `r_pu = r / v_nom²` and `x_pu = x / v_nom²` — impedance is **divided**.
+- `g_pu = g · v_nom²` and `b_pu = b · v_nom²` — admittance is **multiplied**.
+  Getting this backwards reads as plausible, since both are "per unit".
+- The shunt term is halved at each end: `(g_pu + j·b_pu) / 2` into each of the
+  branch's two diagonal entries. Dropping the halving doubles the charging
+  current.
+
+**The default tolerance of 1e-6 MW is a floor, not a preference.** Every snapshot
+of `storage-hvdc` converges within three iterations at 1e-6; at 1e-7 three of
+them do not converge in sixty. Injections are of order 1000 MW and admittances of
+order 1e5, so a 1e-7 MW mismatch is about 1e-13 relative and the iteration is
+chasing round-off. Newton's quadratic convergence leaves nothing in between: an
+iterate either lands inside the noise or bounces around in it.
+
+Partial pivoting in `Lu` is likewise not defensive. At a flat start `∂P/∂|V|`
+vanishes for a lossless branch, so structural zeros on the Jacobian's diagonal
+are the *expected* first iteration.
+
+### Why there is no DC power flow
+
+The brief asks for "Newton-Raphson AC/DC" and the DC half is not implemented,
+because **PyPSA 1.2.4 does not implement it either** and this project gates every
+physics module on agreeing with it. `SubNetwork.calculate_Y` is documented as
+"Calculate bus admittance matrices for AC sub-networks" and returns early for any
+other carrier, logging `Non-AC networks not supported for Y!`; `Y` is then never
+assigned and `pf()` raises `AttributeError`. That is why the three ac-dc fixtures
+record an error where their power flow should be, and it holds for a pure DC
+network too — checked directly rather than inferred from the mixed case failing.
+
+A DC sub-network is therefore refused with that reason rather than solved with
+the AC equations. Doing the latter would not even fail cleanly: a DC line has
+`x = 0`, so every off-diagonal susceptance is zero, `∂P/∂θ` vanishes at a flat
+start and the Jacobian is singular.
+
+The linear flow does handle DC islands, since `lpf` supports them. The asymmetry
+is PyPSA's, not this port's.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

@@ -37,7 +37,7 @@ graph TD
 
     networkModel["network-model<br/><i>PyPSA data model, topology</i>"]
     networkLopf["network-lopf<br/><i>dispatch LP</i>"]
-    networkPf["network-pf<br/><i>linear power flow</i>"]
+    networkPf["network-pf<br/><i>linear + Newton-Raphson AC</i>"]
 
     zioLib["ZIO / ZIO Streams"]:::ext
     ojalgoLib["ojAlgo"]:::ext
@@ -59,12 +59,14 @@ graph TD
 ```
 
 `network-pf` does '''not''' depend on `prima-core`, and that absence is the point.
-Linear power flow takes dispatch as given and solves one symmetric
-positive-definite system per sub-network — a linear solve, not an optimisation.
-Routing it through an LP solver would both misrepresent the problem and couple
-two layers that have no reason to meet. It carries its own dense Cholesky, which
-doubles as the fp64 oracle for the sparse factorisation a country-scale network
-will need.
+Power flow takes dispatch as given: the linear form is one symmetric
+positive-definite solve per sub-network, and the Newton-Raphson form is a
+sequence of unsymmetric ones. Neither is an optimisation, and routing them
+through an LP solver would both misrepresent the problem and couple two layers
+that have no reason to meet. The module carries its own dense Cholesky and LU —
+two routines rather than one, because the Newton Jacobian is unsymmetric so
+Cholesky does not apply to it — and both double as the fp64 oracles for the
+sparse factorisations a country-scale network will need.
 
 `prima-core` has no third-party dependencies at all. That is not minimalism for
 its own sake: it is what lets the solver be called from a Pekko actor, a ZIO
@@ -298,9 +300,11 @@ graph TD
 ```
 
 Green is complete, amber partial. L1 reads and writes PyPSA's CSV directory format
-and round-trips it; netCDF and HDF5 are not started. L2 has linear power flow
-(matching PyPSA's angles to 1e-9) and dispatch LOPF with Kirchhoff cycle
-constraints; Newton-Raphson, SCLOPF and unit commitment are not.
+and round-trips it; netCDF and HDF5 are not started. L2 has linear power flow and
+Newton-Raphson AC power flow (both matching PyPSA's angles to 1e-9) and dispatch
+LOPF with Kirchhoff cycle constraints; SCLOPF and unit commitment are not. The DC
+half of "Newton-Raphson AC/DC" is absent because the pinned PyPSA does not
+implement it either, so there is nothing to validate it against.
 
 Prima came first, ahead of the foundation layer, because it is the highest-risk
 piece and the one nothing else could substitute for: a GPU-accelerated

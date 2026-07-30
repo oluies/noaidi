@@ -156,6 +156,27 @@ lazy val primaNetlib = project
       ((ThisBuild / baseDirectory).value / "target" / "netlib").getAbsolutePath,
   )
 
+// L0: the network data model.
+//
+// PyPSA's component model is dynamic — types and attributes come from metadata,
+// and users add their own — so the store is schema-driven rather than a fixed
+// set of case classes. The schema is read from the pinned PyPSA install's own
+// registry (reference/goldens/schema.json), which is why upickle is here.
+val upickleVersion = "4.4.3"
+
+lazy val networkModel = project
+  .in(file("modules/network-model"))
+  .settings(commonSettings)
+  .settings(
+    name := "network-model",
+    libraryDependencies += "com.lihaoyi" %% "upickle" % upickleVersion,
+    // The goldens are the schema's source of truth, so tests read them from the
+    // repository rather than from a copy under test resources.
+    Test / envVars += "NOAIDI_GOLDENS" ->
+      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+    Test / fork := true,
+  )
+
 // Cross-backend validation: Prima vs ojAlgo on a ladder of LP instances.
 lazy val primaValidation = project
   .in(file("modules/prima-validation"))
@@ -168,7 +189,7 @@ lazy val primaValidation = project
 
 lazy val root = project
   .in(file("."))
-  .aggregate(primaCore, primaZio, primaOjalgo, primaMps, primaValidation)
+  .aggregate(primaCore, primaZio, primaOjalgo, primaMps, primaValidation, networkModel)
   .settings(
     name := "noaidi",
     publish / skip := true,

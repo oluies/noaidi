@@ -12,3 +12,6 @@ project/project/
 .DS_Store
 # roborev snapshots
 /.roborev/
+
+# Pinned PyPSA reference environment — recreated with uv, not committed
+reference/.venv/

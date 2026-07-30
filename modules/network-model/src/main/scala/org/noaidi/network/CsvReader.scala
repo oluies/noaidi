@@ -126,7 +126,7 @@ object CsvReader:
       // every round-trip, so the type is inferred from the values instead.
       val col = spec.attribute(columnName) match
         case Some(attr) => column(attr, cells, columnName, spec)
-        case None       => inferColumn(cells)
+        case None       => inferColumn(cells, columnName)
       columnName -> col
     }
 
@@ -177,9 +177,15 @@ object CsvReader:
     * Conservative: a column is only numeric or boolean if every value is, so a
     * mixed column stays textual and survives the round-trip verbatim.
     */
-  private def inferColumn(cells: IndexedSeq[String]): Column =
+  private def inferColumn(cells: IndexedSeq[String], columnName: String): Column =
     val trimmed = cells.map(_.trim)
     val present = trimmed.filter(_.nonEmpty)
+    // A port column holds bus *names*, which are identifiers even when they look
+    // numeric -- storage-hvdc names its buses 0 to 5. Inferring Floats there
+    // would both break string comparison against the bus table and render "0"
+    // back as "0.0".
+    if columnName.matches("bus\\d+") then Column.Strings(IArray.from(trimmed))
+    else
     if present.nonEmpty && present.forall(c => c == "True" || c == "False") then
       Column.Bools(IArray.from(trimmed.map(_ == "True")))
     else if present.nonEmpty && present.forall(_.toDoubleOption.isDefined) then

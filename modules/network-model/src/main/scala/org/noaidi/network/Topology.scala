@@ -50,7 +50,9 @@ object Role:
 /** One connected island of the network.
   *
   * PyPSA calls these sub-networks and determines them over '''passive branches
-  * only''', grouped by carrier. That is the rule that makes an AC/DC network
+  * only'''. Connectivity is the only grouping; [[carrier]] is a label read off
+  * the island's first bus in sorted order. That is the rule that makes an AC/DC
+  * network
   * come out as separate AC and DC islands joined by links rather than as one
   * graph: a link's flow is a decision variable, so the buses at its ends are not
   * electrically coupled and cannot share a slack.
@@ -74,10 +76,16 @@ final case class SubNetwork(
 
 object Topology:
 
-  /** Buses reachable from each other over passive branches, grouped by carrier.
+  /** Buses reachable from each other over passive branches.
     *
-    * Returned in ascending order of the smallest bus name in each island, so the
-    * result is deterministic without depending on hash iteration order.
+    * Grouped by connectivity alone; the carrier is a label, not part of the
+    * grouping. Returned in ascending order of the smallest bus name in each
+    * island, so the result is deterministic without depending on hash iteration
+    * order.
+    *
+    * @throws CsvReader.MalformedNetwork
+    *   if a passive branch references a bus that does not exist, or leaves an
+    *   endpoint blank. Use [[danglingReferences]] to check without throwing.
     */
   def subNetworks(network: Network): IndexedSeq[SubNetwork] =
     val busTable = network.table("Bus")
@@ -105,7 +113,17 @@ object Topology:
 
     // Loudly, not silently: a dangling reference would otherwise split an island
     // and produce a plausible-looking decomposition with the wrong slack count.
-    val dangling = danglingReferences(network)
+    //
+    // Restricted to passive branches, which is what this function reads. A stale
+    // reference in links.csv cannot affect a decomposition defined over passive
+    // branches, so refusing to decompose the network over it would be a
+    // different function's complaint.
+    val dangling = danglingIn(
+      branchEndpoints(network).filter { (component, _, _, _) =>
+        network.schema.get(component).exists(Role.of(_) == Role.PassiveBranch)
+      },
+      network,
+    )
     if dangling.nonEmpty then
       val (component, id, port, bus) = dangling.head
       throw new CsvReader.MalformedNetwork(
@@ -124,8 +142,12 @@ object Topology:
 
     islands.toIndexedSeq
       .map { (_, members) =>
-        val carriers = members.map(buses.string("carrier", _)).distinct
-        SubNetwork(carriers.headOption.getOrElse(""), members.sorted, carriers.length > 1)
+        val sorted = members.sorted
+        // Read off `sorted.head`, not file order, so the label agrees with the
+        // `buses` field a caller sees. Taking it from file order would let a
+        // mixed island report a carrier belonging to none of `buses.head`.
+        val carriers = sorted.map(buses.string("carrier", _)).distinct
+        SubNetwork(carriers.head, sorted, carriers.length > 1)
       }
       .sortBy(_.buses.head)
 
@@ -147,9 +169,21 @@ object Topology:
     * would drop endpoints that are present in the data.
     */
   private[network] def portsOf(table: ComponentTable): IndexedSeq[String] =
-    table.static.keys.toIndexedSeq
+    val ports = table.static.keys.toIndexedSeq
       .filter(_.matches("bus\\d+"))
       .sortBy(_.drop(3).toIntOption.getOrElse(Int.MaxValue))
+    // A branch with no bus1 column contributes no edges at all, which is the
+    // silent island split this module is supposed to make impossible. Both
+    // required ports are declared attributes, so their absence is malformed
+    // input rather than a two-port branch with one port.
+    if table.size > 0 then
+      Seq("bus0", "bus1").foreach { required =>
+        if !ports.contains(required) then
+          throw new CsvReader.MalformedNetwork(
+            s"${table.spec.listName} has no '$required' column; a branch needs both endpoints"
+          )
+      }
+    ports
 
   /** Endpoints of every branch a role accepts, as pairs.
     *
@@ -165,6 +199,8 @@ object Topology:
       else
         val ports = portsOf(table)
         table.ids.flatMap { id =>
+          // Blanks are excluded from the pairing but reported as dangling, so a
+          // missing endpoint cannot quietly reduce the graph.
           val endpoints = ports.map(table.string(_, id)).filter(_.nonEmpty)
           endpoints.combinations(2).collect { case IndexedSeq(a, b) => (a, b) }.toIndexedSeq
         }
@@ -194,8 +230,18 @@ object Topology:
     * slack buses.
     */
   def danglingReferences(network: Network): IndexedSeq[(String, String, String, String)] =
+    danglingIn(branchEndpoints(network), network)
+
+  /** As [[danglingReferences]], restricted to the branches a caller consumes. */
+  private def danglingIn(
+      endpoints: IndexedSeq[(String, String, String, String)],
+      network: Network,
+  ): IndexedSeq[(String, String, String, String)] =
     val known = network.table("Bus").map(_.ids.toSet).getOrElse(Set.empty)
-    branchEndpoints(network).filter((_, _, _, bus) => bus.nonEmpty && !known.contains(bus))
+    // A blank endpoint counts. `bus0`/`bus1` have no meaningful default, so an
+    // empty cell is a missing reference rather than an optional one -- and it
+    // produces exactly the silently-split island a wrong name would.
+    endpoints.filter((_, _, _, bus) => bus.isEmpty || !known.contains(bus))
 
   /** Components attached to `bus`, as (component name, entity id) pairs. */
   def attachedTo(network: Network, bus: String): IndexedSeq[(String, String)] =

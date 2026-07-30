@@ -162,6 +162,100 @@ class TopologySuite extends munit.FunSuite:
     assertEquals(Topology.isolatedBuses(n), IndexedSeq.empty)
   }
 
+  /** Write a network to disk and read it back through CsvReader.
+    *
+    * Hand-building a ComponentTable bypasses the reader, which is where column
+    * typing happens — so a defect in inference is invisible to a synthetic
+    * fixture. These cases go through the real path.
+    */
+  private def viaReader(files: Map[String, String]): Network =
+    val dir = Files.createTempDirectory("noaidi-topo-")
+    files.foreach { (name, body) =>
+      Files.writeString(dir.resolve(name), body)
+    }
+    CsvReader.read(dir, schema, "fixture")
+
+  test("a multi-port link with numeric bus names reads correctly") {
+    assume(available, "goldens missing")
+    // storage-hvdc names its buses 0 to 5, so a bus2 column there holds values
+    // that all parse as numbers. Inferring Floats would break comparison against
+    // the bus table and render "0" back as "0.0" -- and a hand-built fixture
+    // using Column.Strings could never show it.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\n0,380.0,AC\n1,380.0,AC\n2,380.0,AC\n",
+      "links.csv"     -> "name,bus0,bus1,bus2\nk,0,1,2\n",
+    ))
+
+    val links = n.require("Link")
+    assertEquals(Topology.portsOf(links), IndexedSeq("bus0", "bus1", "bus2"))
+    assertEquals(links.string("bus2", "k"), "2", "the port was not read as an identifier")
+    // No dangling references: every port names a real bus.
+    assertEquals(Topology.danglingReferences(n), IndexedSeq.empty)
+    assertEquals(Topology.isolatedBuses(n), IndexedSeq.empty)
+  }
+
+  test("a blank endpoint is dangling, not an absent edge") {
+    assume(available, "goldens missing")
+    // bus0/bus1 have no meaningful default, so an empty cell is a missing
+    // reference. Dropping it silently splits the island exactly as a wrong name
+    // would -- which is the failure this module is supposed to make impossible.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\na,380.0,AC\nb,380.0,AC\n",
+      "lines.csv"     -> "name,bus0,bus1\nl0,a,\n",
+    ))
+    val dangling = Topology.danglingReferences(n)
+    assertEquals(dangling.size, 1, s"expected one dangling endpoint, got $dangling")
+    assertEquals(dangling.head._3, "bus1")
+    intercept[CsvReader.MalformedNetwork](Topology.subNetworks(n))
+  }
+
+  test("a branch table missing an endpoint column is rejected") {
+    assume(available, "goldens missing")
+    // Without bus1 the branch contributes no edges and portsOf would simply
+    // return a short list, so nothing would complain.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\na,380.0,AC\nb,380.0,AC\n",
+      "lines.csv"     -> "name,bus0\nl0,a\n",
+    ))
+    val failure = intercept[CsvReader.MalformedNetwork](Topology.subNetworks(n))
+    assert(failure.getMessage.contains("bus1"), failure.getMessage)
+  }
+
+  test("a stale link reference does not block decomposition") {
+    assume(available, "goldens missing")
+    // subNetworks reads passive branches only, so a bad reference in links.csv
+    // cannot affect its answer and must not prevent it being computed.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\na,380.0,AC\nb,380.0,AC\n",
+      "lines.csv"     -> "name,bus0,bus1\nl0,a,b\n",
+      "links.csv"     -> "name,bus0,bus1\nk,a,gone\n",
+    ))
+    // Reported by the full check...
+    assert(Topology.danglingReferences(n).exists((_, _, _, bus) => bus == "gone"))
+    // ...but the decomposition still works.
+    assertEquals(Topology.subNetworks(n).map(_.buses), IndexedSeq(IndexedSeq("a", "b")))
+  }
+
+  test("the carrier label agrees with the sorted bus list") {
+    assume(available, "goldens missing")
+    // The label must come from the same ordering the `buses` field uses. Reading
+    // it in file order would let a mixed island report a carrier belonging to
+    // none of buses.head -- here file order is b,a and sorted order is a,b.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\nb,380.0,DC\na,380.0,AC\n",
+      "lines.csv"     -> "name,bus0,bus1\nl0,a,b\n",
+    ))
+    val island = Topology.subNetworks(n).head
+    assertEquals(island.buses, IndexedSeq("a", "b"))
+    assertEquals(island.carrier, "AC", "the label should match buses.head, not file order")
+    assert(island.mixedCarriers)
+  }
+
   test("every bus belongs to exactly one sub-network") {
     assume(available, "goldens missing")
     List("ac-dc-meshed", "storage-hvdc").foreach { name =>

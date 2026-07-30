@@ -32,7 +32,7 @@ commitment — depends on it.
 | `network-lopf` | L2: linear optimal power flow — turns a Network into an LP and solves it with Prima. |
 | `network-pf` | L2: linear power flow — one symmetric positive-definite solve per sub-network. No LP solver involved. |
 
-237 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+270 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.

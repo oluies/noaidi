@@ -195,16 +195,19 @@ def capture_network(name: str, build) -> dict:
     # controllable and do not merge sub-networks. The component `category` field
     # in schema.json encodes that distinction, so a reader can derive it rather
     # than hardcoding a component list.
+    # Computed on `n`, the same object the LPF results below come from, so the two
+    # artefacts in one manifest entry describe the same graph. `lpf()` calls this
+    # internally anyway; calling it here makes the dependency explicit and avoids
+    # building the example a third time.
     print(f"  {name}: topology")
-    topo = build()
-    topo.determine_network_topology()
+    n.determine_network_topology()
     summary["sub_networks"] = [
         {
             "carrier": str(row.carrier),
             "slack_bus": str(row.slack_bus),
-            "buses": sorted(topo.sub_networks.obj[sn].buses_i().tolist()),
+            "buses": sorted(n.sub_networks.obj[sn].buses_i().tolist()),
         }
-        for sn, row in topo.sub_networks.iterrows()
+        for sn, row in n.sub_networks.iterrows()
     ]
 
     results = {}

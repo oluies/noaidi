@@ -59,7 +59,17 @@ object Role:
   * sub-network independently against its own slack bus, so merging AC and DC
   * would produce one singular system instead of several solvable ones.
   */
-final case class SubNetwork(carrier: String, buses: IndexedSeq[String]):
+final case class SubNetwork(
+    carrier: String,
+    buses: IndexedSeq[String],
+    /** Whether the island's buses disagree about their carrier.
+      *
+      * `carrier` is then only the first bus's, which is what PyPSA reports too —
+      * it warns in this case rather than failing, and so does this, by surfacing
+      * the fact instead of hiding it behind a single label.
+      */
+    mixedCarriers: Boolean = false,
+):
   def size: Int = buses.length
 
 object Topology:
@@ -93,20 +103,29 @@ object Topology:
       val (ra, rb) = (find(a), find(b))
       if ra != rb then parent(ra) = rb
 
-    passiveBranches(network).foreach { (bus0, bus1) =>
-      if parent.contains(bus0) && parent.contains(bus1) then union(bus0, bus1)
-    }
+    // Loudly, not silently: a dangling reference would otherwise split an island
+    // and produce a plausible-looking decomposition with the wrong slack count.
+    val dangling = danglingReferences(network)
+    if dangling.nonEmpty then
+      val (component, id, port, bus) = dangling.head
+      throw new CsvReader.MalformedNetwork(
+        s"$component '$id' references unknown bus '$bus' via $port" +
+          (if dangling.size > 1 then s" (and ${dangling.size - 1} other dangling reference(s))" else "")
+      )
 
-    // Carrier partitions the result as well as connectivity. Two buses joined by
-    // a passive branch necessarily share a carrier in a well-formed network, so
-    // this is a grouping rather than a second constraint — but grouping by it
-    // keeps the carrier available on the result, which power flow needs.
+    passiveBranches(network).foreach((bus0, bus1) => union(bus0, bus1))
+
+    // Connectivity is the only grouping. The carrier is a *label*, taken from the
+    // first bus in the island, which is what PyPSA does too. A well-formed
+    // network has one carrier per island, but neither implementation enforces
+    // that -- PyPSA warns, so a mixed island is reported here rather than
+    // silently labelled with whichever bus came first in file order.
     val islands = buses.ids.groupBy(find)
 
     islands.toIndexedSeq
       .map { (_, members) =>
-        val carrier = members.headOption.map(buses.string("carrier", _)).getOrElse("")
-        SubNetwork(carrier, members.sorted)
+        val carriers = members.map(buses.string("carrier", _)).distinct
+        SubNetwork(carriers.headOption.getOrElse(""), members.sorted, carriers.length > 1)
       }
       .sortBy(_.buses.head)
 
@@ -118,6 +137,25 @@ object Topology:
   def controllableBranches(network: Network): IndexedSeq[(String, String)] =
     branchesWhere(network, _ == Role.ControllableBranch)
 
+  /** Port columns present on a branch table, in order.
+    *
+    * Not fixed at `bus0`/`bus1`. PyPSA's controllable branches are precisely the
+    * multi-port ones — Link is documented as "controllable directed flows
+    * between two or more buses" — and the extra ports arrive as `bus2`, `bus3`
+    * and so on. The schema declares only the first two, so the rest are custom
+    * columns; the reader preserves them, and reading only the declared pair
+    * would drop endpoints that are present in the data.
+    */
+  private[network] def portsOf(table: ComponentTable): IndexedSeq[String] =
+    table.static.keys.toIndexedSeq
+      .filter(_.matches("bus\\d+"))
+      .sortBy(_.drop(3).toIntOption.getOrElse(Int.MaxValue))
+
+  /** Endpoints of every branch a role accepts, as pairs.
+    *
+    * A multi-port branch contributes every pair of its ports, so connectivity
+    * over it is transitive — which is what a three-port link means physically.
+    */
   private def branchesWhere(
       network: Network,
       accept: Role => Boolean,
@@ -125,10 +163,39 @@ object Topology:
     network.tables.values.toIndexedSeq.flatMap { table =>
       if !accept(Role.of(table.spec)) then IndexedSeq.empty
       else
-        table.ids.map { id =>
-          (table.string("bus0", id), table.string("bus1", id))
+        val ports = portsOf(table)
+        table.ids.flatMap { id =>
+          val endpoints = ports.map(table.string(_, id)).filter(_.nonEmpty)
+          endpoints.combinations(2).collect { case IndexedSeq(a, b) => (a, b) }.toIndexedSeq
         }
     }
+
+  /** Every (component, entity, port, bus) a branch references.
+    *
+    * Used to check references before they are silently dropped.
+    */
+  private[network] def branchEndpoints(network: Network): IndexedSeq[(String, String, String, String)] =
+    network.tables.values.toIndexedSeq.flatMap { table =>
+      Role.of(table.spec) match
+        case Role.PassiveBranch | Role.ControllableBranch =>
+          val ports = portsOf(table)
+          table.ids.flatMap { id =>
+            ports.map(port => (table.spec.name, id, port, table.string(port, id)))
+          }
+        case _ => IndexedSeq.empty
+    }
+
+  /** Branch endpoints naming a bus that does not exist.
+    *
+    * A stale or mistyped bus reference splits what should be one island in two,
+    * and the result still looks like a network — so it is reported rather than
+    * skipped. Every other structural error in this module fails loudly, and the
+    * consequence here is the same one the class doc names: the wrong number of
+    * slack buses.
+    */
+  def danglingReferences(network: Network): IndexedSeq[(String, String, String, String)] =
+    val known = network.table("Bus").map(_.ids.toSet).getOrElse(Set.empty)
+    branchEndpoints(network).filter((_, _, _, bus) => bus.nonEmpty && !known.contains(bus))
 
   /** Components attached to `bus`, as (component name, entity id) pairs. */
   def attachedTo(network: Network, bus: String): IndexedSeq[(String, String)] =

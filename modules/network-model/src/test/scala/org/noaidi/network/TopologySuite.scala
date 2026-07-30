@@ -1,6 +1,7 @@
 package org.noaidi.network
 
 import java.nio.file.{Files, Path, Paths}
+import scala.collection.immutable.ListMap
 
 /** Sub-network decomposition, against PyPSA's own.
   *
@@ -61,6 +62,11 @@ class TopologySuite extends munit.FunSuite:
         expected.toSet,
         s"$name: sub-network decomposition",
       )
+
+      // The scaladoc promises a deterministic order by smallest bus name; assert
+      // it rather than leaving it to hash iteration order to honour by luck.
+      val heads = actual.map(_._2.head)
+      assertEquals(heads, heads.sorted, s"$name: sub-networks are not in a stable order")
     }
   }
 
@@ -79,16 +85,81 @@ class TopologySuite extends munit.FunSuite:
     assertEquals(carriers, Set("AC", "DC"), "AC and DC should stay separate")
   }
 
-  test("a chain of passive branches forms one island") {
+  /** A network built in code, for shapes the reference fixtures do not contain. */
+  private def synthetic(
+      buses: IndexedSeq[String],
+      lines: IndexedSeq[(String, String)],
+      carriers: IndexedSeq[String] = IndexedSeq.empty,
+  ): Network =
+    val busCarriers = if carriers.nonEmpty then carriers else buses.map(_ => "AC")
+    val busTable = ComponentTable(
+      schema("Bus"),
+      buses,
+      ListMap("carrier" -> Column.Strings(IArray.from(busCarriers))),
+      ListMap.empty,
+    )
+    val lineTable = ComponentTable(
+      schema("Line"),
+      lines.indices.map(i => s"l$i"),
+      ListMap(
+        "bus0" -> Column.Strings(IArray.from(lines.map(_._1))),
+        "bus1" -> Column.Strings(IArray.from(lines.map(_._2))),
+      ),
+      ListMap.empty,
+    )
+    Network.empty("synthetic", schema).withTable(busTable).withTable(lineTable)
+
+  test("a series chain forms one island") {
     assume(available, "goldens missing")
-    // Path compression makes this the interesting shape for the union-find, and
-    // a series chain is what a radial distribution feeder looks like.
-    val n     = network("ac-dc-meshed")
-    val acIsl = Topology.subNetworks(n).filter(_.carrier == "AC")
-    // Three AC islands, one of which is a single isolated-by-passive-branches
-    // bus reached only over a link.
+    // Neither reference network contains a chain -- the AC side is a triangle,
+    // a pair and a singleton -- so this is built in code. A radial feeder is the
+    // shape that exercises the union-find's path compression, which the previous
+    // version of this test claimed to cover and did not.
+    val chain = synthetic(
+      IndexedSeq("a", "b", "c", "d", "e"),
+      IndexedSeq("a" -> "b", "b" -> "c", "c" -> "d", "d" -> "e"),
+    )
+    val islands = Topology.subNetworks(chain)
+    assertEquals(islands.size, 1, s"a chain should be one island, got ${islands.map(_.buses)}")
+    assertEquals(islands.head.buses, IndexedSeq("a", "b", "c", "d", "e"))
+  }
+
+  test("the AC side splits into three islands, one reached only over a link") {
+    assume(available, "goldens missing")
+    val acIsl = Topology.subNetworks(network("ac-dc-meshed")).filter(_.carrier == "AC")
     assertEquals(acIsl.size, 3)
     assert(acIsl.exists(_.size == 1), s"expected a singleton AC island, got ${acIsl.map(_.size)}")
+  }
+
+  test("a multi-port branch connects all of its ports") {
+    assume(available, "goldens missing")
+    // PyPSA links take two *or more* buses, with the extra ports arriving as
+    // custom bus2/bus3 columns. Reading only the declared bus0/bus1 pair drops
+    // those endpoints, and the visible symptom is a connected bus reported
+    // isolated.
+    val buses = ComponentTable(
+      schema("Bus"),
+      IndexedSeq("a", "b", "c"),
+      ListMap("carrier" -> Column.Strings(IArray("AC", "AC", "AC"))),
+      ListMap.empty,
+    )
+    val threePort = ComponentTable(
+      schema("Link"),
+      IndexedSeq("k"),
+      ListMap(
+        "bus0" -> Column.Strings(IArray("a")),
+        "bus1" -> Column.Strings(IArray("b")),
+        "bus2" -> Column.Strings(IArray("c")),
+      ),
+      ListMap.empty,
+    )
+    val n = Network.empty("multiport", schema).withTable(buses).withTable(threePort)
+
+    assertEquals(Topology.portsOf(threePort), IndexedSeq("bus0", "bus1", "bus2"))
+    // Every pair, so connectivity over the link is transitive.
+    assertEquals(Topology.controllableBranches(n).size, 3)
+    // And the third port is not reported isolated.
+    assertEquals(Topology.isolatedBuses(n), IndexedSeq.empty)
   }
 
   test("every bus belongs to exactly one sub-network") {
@@ -115,13 +186,50 @@ class TopologySuite extends munit.FunSuite:
     assert(!atManchester.exists((c, _) => c == "Line" || c == "Link"))
   }
 
-  test("isolated buses are reported") {
+  test("an isolated bus is reported") {
     assume(available, "goldens missing")
-    // Neither reference network has one, which is the expected result and worth
-    // asserting so the check is known to run rather than assumed.
+    // The positive case. Asserting only that the goldens have none would pass
+    // for `def isolatedBuses(n) = IndexedSeq.empty`, so the branch that actually
+    // surfaces the infeasibility would never have run.
+    val orphaned = synthetic(
+      IndexedSeq("connected0", "connected1", "nowhere"),
+      IndexedSeq("connected0" -> "connected1"),
+    )
+    assertEquals(Topology.isolatedBuses(orphaned), IndexedSeq("nowhere"))
+  }
+
+  test("neither reference network has an isolated bus") {
+    assume(available, "goldens missing")
     List("ac-dc-meshed", "storage-hvdc").foreach { name =>
       assertEquals(Topology.isolatedBuses(network(name)), IndexedSeq.empty, name)
     }
+  }
+
+  test("a branch referencing an unknown bus is rejected") {
+    assume(available, "goldens missing")
+    // Silently skipping it would split an island and yield a plausible
+    // decomposition with the wrong slack count -- no error, wrong answer.
+    val broken = synthetic(IndexedSeq("a", "b"), IndexedSeq("a" -> "typo"))
+    val failure = intercept[CsvReader.MalformedNetwork](Topology.subNetworks(broken))
+    assert(failure.getMessage.contains("typo"), failure.getMessage)
+  }
+
+  test("an island whose buses disagree about carrier is flagged") {
+    assume(available, "goldens missing")
+    // PyPSA warns here rather than failing, and labels the island with the first
+    // bus's carrier. Matching that, but surfacing the fact instead of hiding it
+    // behind a single label.
+    val mixed = synthetic(
+      IndexedSeq("a", "b"),
+      IndexedSeq("a" -> "b"),
+      carriers = IndexedSeq("AC", "DC"),
+    )
+    val island = Topology.subNetworks(mixed).head
+    assert(island.mixedCarriers, "a mixed-carrier island was not flagged")
+    assertEquals(island.carrier, "AC", "the label should be the first bus's carrier")
+
+    // And a well-formed island is not flagged.
+    assert(Topology.subNetworks(network("ac-dc-meshed")).forall(!_.mixedCarriers))
   }
 
   test("an empty network has no sub-networks rather than failing") {

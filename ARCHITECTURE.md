@@ -33,19 +33,38 @@ graph TD
     primaZio["prima-zio<br/><i>effects, streaming</i>"]
     primaOjalgo["prima-ojalgo<br/><i>simplex backend + oracle</i>"]
     primaValidation["prima-validation<br/><i>cross-solver agreement</i>"]
+    primaMps["prima-mps<br/><i>MPS reader</i>"]
+
+    networkModel["network-model<br/><i>PyPSA data model, topology</i>"]
+    networkLopf["network-lopf<br/><i>dispatch LP</i>"]
+    networkPf["network-pf<br/><i>linear power flow</i>"]
 
     zioLib["ZIO / ZIO Streams"]:::ext
     ojalgoLib["ojAlgo"]:::ext
+    upickleLib["uPickle"]:::ext
 
     primaZio --> primaCore
     primaOjalgo --> primaCore
     primaValidation --> primaCore
     primaValidation --> primaOjalgo
+    primaMps --> primaCore
+    networkLopf --> networkModel
+    networkLopf --> primaCore
+    networkPf --> networkModel
     primaZio -.-> zioLib
     primaOjalgo -.-> ojalgoLib
+    networkModel -.-> upickleLib
 
     classDef ext fill:#f6f6f6,stroke:#bbb,stroke-dasharray:4 3,color:#555;
 ```
+
+`network-pf` does '''not''' depend on `prima-core`, and that absence is the point.
+Linear power flow takes dispatch as given and solves one symmetric
+positive-definite system per sub-network — a linear solve, not an optimisation.
+Routing it through an LP solver would both misrepresent the problem and couple
+two layers that have no reason to meet. It carries its own dense Cholesky, which
+doubles as the fp64 oracle for the sparse factorisation a country-scale network
+will need.
 
 `prima-core` has no third-party dependencies at all. That is not minimalism for
 its own sake: it is what lets the solver be called from a Pekko actor, a ZIO
@@ -273,8 +292,15 @@ graph TD
     l3 --> l5
 
     classDef done fill:#eef6ee,stroke:#4a7,color:#243;
+    classDef partial fill:#fbf7e8,stroke:#c9a227,color:#443;
     class prima done;
+    class l1,l2 partial;
 ```
+
+Green is complete, amber partial. L1 reads and writes PyPSA's CSV directory format
+and round-trips it; netCDF and HDF5 are not started. L2 has linear power flow
+(matching PyPSA's angles to 1e-9) and dispatch LOPF with Kirchhoff cycle
+constraints; Newton-Raphson, SCLOPF and unit commitment are not.
 
 Prima came first, ahead of the foundation layer, because it is the highest-risk
 piece and the one nothing else could substitute for: a GPU-accelerated
@@ -283,9 +309,21 @@ over well-understood libraries; if it had been built first, the project's
 riskiest assumption would still be untested.
 
 From L1 onward every module is gated on golden-file comparison against a pinned
-PyPSA run. That harness does not exist yet because nothing below L1 has any
-power-system semantics to compare — Prima is validated against ojAlgo instead,
-which is the right oracle for an LP solver and the wrong one for a network model.
+PyPSA run, and that harness now exists: `reference/generate_goldens.py` pins
+PyPSA 1.2.4 and captures schema, exported tables, sub-network decomposition, LPF
+and optimisation results for each reference network. Prima itself is validated
+against ojAlgo and the Netlib corpus instead, which are the right oracles for an
+LP solver and the wrong ones for a network model.
+
+Generating the goldens '''before''' designing anything that consumes them has paid
+for itself repeatedly. Three PyPSA conventions that documentation does not state,
+and that were each caught by a golden rather than by reasoning: CSV export omits
+columns never *set* rather than columns holding defaults; `p_set` defaults to NaN
+for every one-port except Load, so a generator with no setpoint is idle rather
+than erroneous; and the LPF slack is the first *generator's* bus in file order,
+not the first bus. The last of those is the sharpest — a wrong slack shifts every
+voltage angle by a constant and leaves the flows correct, so it reads as a scaling
+bug rather than a convention error.
 
 ## Invariants
 

@@ -323,6 +323,55 @@ Also not yet implemented: capacity expansion (rejected rather than mis-solved),
 storage (its energy balance couples snapshots), and transformers with
 off-nominal tap ratios.
 
+## L2: linear power flow
+
+`network-pf` reproduces PyPSA's `n.lpf()` on all three reference networks —
+voltage angles to 1e-9 rad, line flows and slack dispatch to 1e-6 MW. It does not
+depend on Prima: LPF takes dispatch as given and the only unknowns are the angles
+that carry it, so the problem is one symmetric positive-definite solve per
+sub-network per snapshot, not an optimisation.
+
+`storage-hvdc` becomes usable evidence here, having been only a rejection test for
+LOPF. The asymmetry is real rather than an inconsistency: LOPF must refuse a
+storage unit because its energy balance couples consecutive snapshots, whereas LPF
+takes dispatch as an input, so a storage unit is just another one-port with a
+`p_set` and a `sign`.
+
+Three conventions were established by solving the reference network, not read off
+documentation, and each would have been wrong otherwise:
+
+- **`p_set` defaults to NaN**, not zero, for every one-port except Load. So the
+  arithmetic has to special-case it — propagating the NaN silences the whole
+  solve, and coercing it without comment hides a genuinely missing value. PyPSA
+  reads it as zero, which is why `ac-dc-meshed`'s gas generators are idle under
+  LPF while its wind generators are not.
+- **The slack is the first generator's bus in file order**, falling back to the
+  first bus only for an island with no generator. That makes Manchester the slack
+  of {London, Manchester, Norwich} — not London, which is first both
+  alphabetically and in `buses.csv` — and Norwich DC the slack of the DC island,
+  where sorted order says Bremen DC. `SubNetwork.buses` is sorted for
+  determinism, so file order has to be recovered from the tables.
+- **Susceptance is `v_nom²/x` for AC and `v_nom²/r` for DC.** The same split as
+  the cycle constraints, and for the same reason: the reference network's DC lines
+  carry `x = 0` and its AC lines carry `r = 0`, so either mistake divides by zero
+  rather than degrading gracefully. Unlike the cycle constraints, the `v_nom²`
+  does not cancel here — it sets the magnitude of every angle.
+
+The slack rule is the one worth dwelling on, because getting it wrong produces a
+'''plausible''' answer: every angle is measured against the slack, so a different
+choice shifts the entire profile by a constant and leaves the flows correct. It
+would have read as a scaling or sign bug for as long as it took to doubt the
+convention instead. `LinearPowerFlowSuite` therefore asserts the slack choice
+directly against the manifest, separately from the angles.
+
+An island with no generator at all is legal — the DC island's only attachments are
+converters at their default zero flow — so the flows are well-defined but the slack
+power has nowhere to be attributed. That is reported through `LpfResult.slacks`
+rather than rejected or silently assigned; PyPSA warns in the same situation.
+Transformers are refused: they would decompose correctly, but their per-unit base
+involves `s_nom` and an off-nominal `tap_ratio` shifts the angle across them, so
+reusing the line formula would put a plausible number on a wrong model.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

@@ -162,7 +162,7 @@ object Lopf:
                 // Every other port receives, scaled by that port's efficiency --
                 // the difference is conversion loss, not a balance violation.
                 if port == "bus0" then terms += ((c, -1.0))
-                else terms += ((c, efficiencyOf(branch, id, port, t)))
+                else terms += ((c, Topology.portEfficiency(branch, id, port, t)))
             }
           }
         }
@@ -329,16 +329,7 @@ object Lopf:
       .filter(_.isFinite)
       .getOrElse(0.0)
 
-  /** Efficiency applying to a branch's receiving port.
-    *
-    * PyPSA names these `efficiency` for `bus1` and `efficiency<i>` for later
-    * ports. A passive branch has none and is lossless in the linear model.
-    */
-  private def efficiencyOf(branch: ComponentTable, id: String, port: String, t: Int): Double =
-    val attribute = if port == "bus1" then "efficiency" else s"efficiency${port.drop(3)}"
-    if branch.spec.attribute(attribute).isDefined || branch.static.contains(attribute) then
-      branch.valueAt(attribute, id, t)
-    else 1.0
+
 
 /** A solved dispatch, addressable by component name. */
 final case class LopfResult(

@@ -183,6 +183,26 @@ object Topology:
     */
   def branchPorts(table: ComponentTable): IndexedSeq[String] = portsOf(table)
 
+  /** Efficiency applying to a branch's receiving port.
+    *
+    * PyPSA names these `efficiency` for `bus1` and `efficiency<i>` for later
+    * ports. A passive branch declares none and is lossless in the linear model,
+    * so the fallback is 1.
+    *
+    * Lives here rather than in a solver module because every consumer of
+    * [[branchPorts]] needs it and they must agree: a port enumerated without its
+    * matching efficiency silently becomes lossless, which balances the books at
+    * the wrong number.
+    */
+  def portEfficiency(table: ComponentTable, id: String, port: String, snapshot: Int): Double =
+    val attribute = if port == "bus1" then "efficiency" else s"efficiency${port.drop(3)}"
+    // Declared attributes and custom columns both count: `efficiency2` is not in
+    // the schema, so a multi-port link carries it as an extra column.
+    if table.spec.attribute(attribute).isDefined || table.static.contains(attribute) then
+      val value = table.valueAt(attribute, id, snapshot)
+      if value.isFinite then value else 1.0
+    else 1.0
+
   private[network] def portsOf(table: ComponentTable): IndexedSeq[String] =
     val ports = table.static.keys.toIndexedSeq
       .filter(isPortColumn)

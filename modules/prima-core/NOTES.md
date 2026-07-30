@@ -254,7 +254,7 @@ Against PyPSA on `ac-dc-dispatch`:
 | Objective | matches to 1e-6 relative |
 | Generator dispatch | matches to 1e-3 MW |
 | Line flows | matches to 1e-3 MW |
-| Nodal prices | **does not match** |
+| Nodal prices | matches at 4 of 10 snapshots; the rest are a different optimal dual |
 
 The primal is exact. Adding Kirchhoff voltage constraints over a cycle basis is
 what achieved that: without them the model is a relaxation, and because capacity
@@ -270,16 +270,54 @@ orientation of each branch around the cycle must be right: getting it backwards
 does not perturb the flows, it makes the LP infeasible, because the cycle
 equation then contradicts bus balance.
 
-**Nodal prices remain open.** Strong duality holds and the primal matches
-exactly, so the dual is optimal for the LP as built. But the prices differ
-substantially from PyPSA's — PyPSA reports the marginal wind costs
-(0.09–0.11) where this reports values up to 6.8. Degeneracy is the likely
-explanation: every line rating binds and every gas generator sits at its zero
-lower bound, so far more constraints are active than there are variables and the
-optimal dual is a face rather than a point, with simplex reporting a vertex and a
-first-order method converging elsewhere. That is a hypothesis, not an
-established fact, and it should be settled before nodal prices are relied on —
-they are a headline output of the model, not a diagnostic.
+### Nodal prices: settled, and the wrong answer first
+
+An earlier version of this section blamed the price gap on generic degeneracy and
+called that a hypothesis. It has now been settled, and along the way a confident
+intermediate explanation turned out to be flatly wrong. Both are worth recording,
+because the wrong one was much more plausible than the right one.
+
+**The wrong explanation.** The fixture's `global_constraints.csv` carries a
+`co2_limit` of 1000 with `mu = -2178.29`, and the dispatch emits exactly 1000.
+That looks conclusive: a binding constraint with a large shadow price, absent from
+the model, whose multiplier would feed every gas-attached bus price. It is not.
+The exported `mu` is a '''stale dual from the sizing solve''' — the expansion
+problem that produced `p_nom_opt` — written into the CSV by the same export that
+fixed capacity. Solving the dispatch problem itself gives `mu = -0.0`. The cap is
+touched but weakly binding, and no tighter cap is even feasible, because gas here
+is simultaneously the dirty carrier and the expensive one (4.09–5.89 against
+wind's 0.09–0.11), so minimising cost already minimises emissions. The
+constraint never influenced the optimum it sits on. The golden generator now
+captures `global_constraint_mu` from the solved model precisely so the two cannot
+be confused again.
+
+**The actual explanation.** Dual non-uniqueness, now demonstrated rather than
+assumed. Two facts establish it:
+
+- Tightening the solver from 1e-9 to 1e-12 moves the worst price gap by exactly
+  zero — 3.874938 either way, with a dual residual of 0.0. Whatever this is, it
+  is not an unconverged dual.
+- At six of ten snapshots every generator sits precisely at a bound and total
+  output equals total load, so there is no marginal generator and nothing pins
+  the price. That is a direct consequence of sizing capacity from the expansion
+  optimum.
+
+The discriminator between degeneracy and a real bug is complementary slackness: a
+generator strictly '''inside''' its bounds pins its bus price in every optimal
+dual. Snapshots 6 and 8 have such a generator and the price matches PyPSA
+exactly; snapshot 9 has one whose price sat 0.678 high, which is
+`0.24/0.3517 × 0.9935` — the CO2 intensity of gas times this solver's CO2
+multiplier, where PyPSA's is zero. Same optimal face, different point on it.
+`LopfSuite` asserts that forced condition instead of equality with PyPSA's vertex,
+because only the former fails on a genuine dual error.
+
+**The constraint is implemented anyway**, and not for the price gap. Omitting a
+global constraint drops a restriction, so the objective comes out too '''low''' —
+and no fixture that existed at the time could catch it, since on
+`ac-dc-dispatch` omitting it reproduces the objective exactly. Hence `ac-dc-co2`,
+which prices gas below wind so the cap has to displace economic generation: it
+emits 6702 unconstrained at a cost of 2819.52, and 2000 under the cap at 3178.55.
+That 12.7% spread is what a silent drop would have cost, and it is now a golden.
 
 Also not yet implemented: capacity expansion (rejected rather than mis-solved),
 storage (its energy balance couples snapshots), and transformers with

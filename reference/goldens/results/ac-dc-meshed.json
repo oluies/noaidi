@@ -763,6 +763,9 @@
     ]
    ]
   },
+  "global_constraint_mu": {
+   "co2_limit": -2178.2917992178996
+  },
   "line_p0": {
    "columns": [
     "0",

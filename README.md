@@ -194,7 +194,7 @@ everything from the foundation layer up is ahead:
 4. **Prima GPU**: the remaining seven kernel operations behind `Kernels`, then a timing against the CPU reference, then validation against cuPDLP-C. Worth resolving the dense-instance warm-start regression first — it is a concrete, reproducible anomaly with two named suspects in NOTES.md, and it decides how much a GPU can actually buy.
 5. ~~**L0 foundation**: typed columnar store, CSV round-trip, sub-network topology.~~ ✅ (dense linear algebra deferred to L2, where Newton-Raphson needs it)
 6. **L1 I/O and solver plumbing**: CSV/netCDF/HDF5 round-tripping PyPSA byte-for-byte; solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima.
-7. **L2 physics**: LOPF now matches PyPSA's objective, dispatch and line flows on the dispatch fixture (nodal prices still differ — see NOTES); Newton-Raphson AC/DC, SCLOPF and unit commitment remain.
+7. **L2 physics**: LOPF matches PyPSA's objective, dispatch and line flows on the dispatch fixture, and its objective under a binding CO2 cap. Nodal prices agree wherever the dual is unique and are a different point of the same optimal dual face elsewhere — settled, see NOTES. Newton-Raphson AC/DC, SCLOPF and unit commitment remain.
 8. **L3 features**: clustering, statistics, sector coupling, plotting.
 9. **L4 acceleration**: remaining kernels onto Cyfra/MLX/CUDA, plus Spatial/Chisel for FPGA.
 10. **L5 runtime**: ZIO Streams over snapshots and contingencies, Pekko cluster distribution.

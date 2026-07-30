@@ -1,6 +1,7 @@
 package org.noaidi.lopf
 
 import java.nio.file.{Files, Path, Paths}
+import scala.jdk.CollectionConverters.*
 import org.noaidi.network.{CsvReader, Network, Schema, Topology}
 import org.noaidi.prima.{PdhgParams, SolveStatus}
 
@@ -13,18 +14,35 @@ import org.noaidi.prima.{PdhgParams, SolveStatus}
   * fixing capacity at the *given* `p_nom` instead is infeasible — there is not
   * enough generation to serve the load.
   *
-  * What is checked and what is not is deliberate. Bus balance without Kirchhoff
-  * voltage constraints is a '''relaxation''' of PyPSA's model, so the objective can
-  * only come out lower — that inequality is asserted and must hold. Equality is
-  * not: every line rating binds exactly here, because capacity was sized from the
-  * expansion optimum, so the relaxation actively relieves tight limits rather
-  * than merely reshuffling equally-priced flows. The objective lands 4.4e-06 low
-  * and dispatch shifts by a couple of MW.
+  * Objective, generator dispatch and line flows match PyPSA exactly. Nodal
+  * prices match at 4 of 10 snapshots and are legitimately '''different''' at the
+  * rest, which took some work to establish rather than assume:
   *
-  * Those gaps are bounded rather than tolerated: they are the numbers the cycle
-  * constraints have to drive to zero. The line-flow test asserts the
-  * disagreement still exists, so it fails when that lands — which is the signal
-  * to replace it with a positive comparison.
+  *   - Fixing capacity at the expansion optimum makes the instance severely
+  *     degenerate. Every line rating binds exactly, and at six snapshots every
+  *     generator sits precisely at a bound with total output equal to total load
+  *     — so there is no marginal generator and nothing pins the price.
+  *   - Tightening the solver from 1e-9 to 1e-12 moves the price gap by exactly
+  *     zero (3.874938 either way, with a dual residual of 0.0), which rules out
+  *     non-convergence: this is a different vertex of the same optimal dual face,
+  *     not an unfinished one.
+  *   - Part of that freedom is the CO2 multiplier. The cap is tight here but
+  *     weakly binding, so any multiplier in a range is optimal; PyPSA's simplex
+  *     reports 0 and a first-order method lands near -0.99. Since gas emits
+  *     0.24/0.35 per MWh that shifts every gas-attached bus price by 0.678 —
+  *     exactly the residual observed at snapshot 9.
+  *
+  * So what is asserted of the dual is that it is '''valid''' — strong duality —
+  * plus the one part of it that is forced rather than chosen: a generator
+  * strictly inside its bounds pins its bus price in every optimal dual, by
+  * complementary slackness. That check is independent of PyPSA and fails on a
+  * real dual error, which asserting equality with one particular vertex would
+  * not.
+  *
+  * `ac-dc-co2` exists because `ac-dc-dispatch` cannot test the CO2 constraint at
+  * all: omitting it entirely reproduces that fixture's objective exactly. See
+  * `ac_dc_co2` in the generator for why, and what had to change to make a cap
+  * that bites.
   */
 class LopfSuite extends munit.FunSuite:
 
@@ -41,6 +59,45 @@ class LopfSuite extends munit.FunSuite:
     ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))
 
   private val params = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 500_000)
+
+  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
+
+  /** A copy of a golden network with one file rewritten.
+    *
+    * Routed through `CsvReader` rather than assembled in memory on purpose: a
+    * hand-built table can express states the reader never produces, so a test
+    * built that way can pass while the real path stays broken.
+    */
+  private def copyOf(name: String): Path =
+    val dir = Files.createTempDirectory("noaidi-lopf-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve(name)
+    Files.list(source).iterator.asScala.foreach { f =>
+      Files.copy(f, dir.resolve(f.getFileName.toString))
+    }
+    dir
+
+  private def mutate(name: String, file: String, edit: String => String): Network =
+    val dir    = copyOf(name)
+    val target = dir.resolve(file)
+    val before = Files.readString(target)
+    val after  = edit(before)
+    // Otherwise a fixture that silently stops matching turns into a test that
+    // asserts something about an unmodified network.
+    assertNotEquals(after, before, s"the edit to $file changed nothing")
+    Files.writeString(target, after)
+    CsvReader.read(dir, schema, name)
+
+  private def withExtraFile(name: String, file: String, content: String): Network =
+    val dir = copyOf(name)
+    Files.writeString(dir.resolve(file), content)
+    CsvReader.read(dir, schema, name)
+
+  override def afterAll(): Unit =
+    temporaries.foreach { dir =>
+      if Files.exists(dir) then
+        Files.walk(dir).sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+    }
 
   /** A column of a golden frame, by entity name, with tagged NaN handled. */
   private def frameValue(frame: ujson.Value, row: Int, column: String): Double =
@@ -216,6 +273,115 @@ class LopfSuite extends munit.FunSuite:
         assert(result.marginalPrice(bus, t).isFinite, s"bus $bus at snapshot $t")
       }
     }
+  }
+
+  test("the objective matches PyPSA's when a CO2 cap binds") {
+    assume(available, "goldens missing")
+    // ac-dc-co2 prices gas below wind so the cap displaces generation it would
+    // otherwise be economic to run. Ignoring the constraint gives 2819.52 against
+    // this 3178.55, so unlike ac-dc-dispatch this fixture can tell an
+    // implementation of the constraint apart from its absence.
+    val expected = results("ac-dc-co2")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val result = Lopf.solve(network("ac-dc-co2"), params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * math.abs(target), s"against PyPSA's $target")
+
+    // And PyPSA agrees the cap is doing work, so this is not a fixture that
+    // happens to be satisfied for some other reason.
+    assertNotEquals(expected("global_constraint_mu")("co2_limit").num, 0.0)
+  }
+
+  test("the CO2 cap is respected and reached") {
+    assume(available, "goldens missing")
+    // Both halves matter. Emissions above the cap mean the row is absent or
+    // mis-signed; emissions well *under* it would mean the row is over-tight, and
+    // the objective comparison alone cannot separate those from a coefficient
+    // error that happens to land on the same cost.
+    val n        = network("ac-dc-co2")
+    val result   = Lopf.solve(n, params)
+    val gens     = n.require("Generator")
+    val carriers = n.require("Carrier")
+
+    val emitted = n.snapshots.indices.map { t =>
+      gens.ids.map { g =>
+        val intensity = carriers.float("co2_emissions", gens.string("carrier", g))
+        result.dispatch("Generator", g, t) * intensity / gens.valueAt("efficiency", g, t) *
+          n.weighting("objective", t)
+      }.sum
+    }.sum
+
+    val cap = n.require("GlobalConstraint").float("constant", "co2_limit")
+    assert(emitted <= cap + 1e-3, s"emitted $emitted exceeds cap $cap")
+    // Unconstrained this network emits 6702, so landing on the cap is the
+    // constraint binding rather than an accident of the dispatch.
+    assertEqualsDouble(emitted, cap, 1e-2, s"emitted $emitted against cap $cap")
+  }
+
+  test("a generator strictly inside its bounds pins its bus price") {
+    assume(available, "goldens missing")
+    // The part of the dual that is forced rather than chosen. Complementary
+    // slackness makes an interior variable's reduced cost zero in *every* optimal
+    // dual, so for a zero-emission generator — where the CO2 term vanishes and no
+    // other row touches it — the bus price equals its marginal cost exactly.
+    // Unlike a comparison against PyPSA's vertex this cannot be failed by a
+    // legitimate alternative optimum, and it is what actually separates a dual bug
+    // from degeneracy on this fixture: it is how snapshot 9 was identified as the
+    // former while 6 and 8 were the latter.
+    val n        = network("ac-dc-dispatch")
+    val result   = Lopf.solve(n, params)
+    val gens     = n.require("Generator")
+    val carriers = n.require("Carrier")
+    var checked  = 0
+
+    n.snapshots.indices.foreach { t =>
+      gens.ids.foreach { g =>
+        val pNom  = gens.float("p_nom", g)
+        val lo    = pNom * gens.valueAt("p_min_pu", g, t)
+        val hi    = pNom * gens.valueAt("p_max_pu", g, t)
+        val p     = result.dispatch("Generator", g, t)
+        val clean = carriers.float("co2_emissions", gens.string("carrier", g)) == 0.0
+        // A margin well above the solver tolerance, so "interior" is not a
+        // rounding artefact of a variable resting on its bound.
+        if clean && p > lo + 1e-2 && p < hi - 1e-2 then
+          checked += 1
+          assertEqualsDouble(
+            result.marginalPrice(gens.string("bus", g), t),
+            gens.valueAt("marginal_cost", g, t),
+            1e-3,
+            s"snapshot $t, interior generator $g",
+          )
+      }
+    }
+    // Otherwise the test passes by finding nothing to check.
+    assert(checked >= 2, s"only $checked interior generator(s) found; the check is vacuous")
+  }
+
+  test("a component attached to a nonexistent bus is rejected") {
+    assume(available, "goldens missing")
+    // Not hypothetical: a load whose bus is stale simply vanishes from the balance
+    // rows, and the LP stays feasible and returns a *cheaper* answer with no
+    // diagnostic. Cheaper-and-silent is the worst direction for an error to go.
+    val broken  = mutate("ac-dc-dispatch", "loads.csv", _.replace(",Manchester,", ",Mancester,"))
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(broken, params))
+    assert(failure.getMessage.contains("Mancester"), failure.getMessage)
+  }
+
+  test("an unmodelled component is rejected rather than dropped") {
+    assume(available, "goldens missing")
+    // A ShuntImpedance draws real power and is not built here. Dropping it leaves
+    // a feasible LP describing a different network, so it has to be refused — the
+    // same reason extendable capacity and storage are.
+    val broken = withExtraFile(
+      "ac-dc-dispatch",
+      "shunt_impedances.csv",
+      "name,bus,g,b\nshunt,Manchester,0.1,0.0\n",
+    )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(broken, params))
+    assert(failure.getMessage.contains("ShuntImpedance"), failure.getMessage)
   }
 
   // A test asserting that prices lie between the cheapest and dearest marginal

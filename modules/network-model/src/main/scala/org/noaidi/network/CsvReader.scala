@@ -184,7 +184,7 @@ object CsvReader:
     // numeric -- storage-hvdc names its buses 0 to 5. Inferring Floats there
     // would both break string comparison against the bus table and render "0"
     // back as "0.0".
-    if columnName.matches("bus\\d+") then Column.Strings(IArray.from(trimmed))
+    if Topology.isPortColumn(columnName) then Column.Strings(IArray.from(trimmed))
     else
     if present.nonEmpty && present.forall(c => c == "True" || c == "False") then
       Column.Bools(IArray.from(trimmed.map(_ == "True")))

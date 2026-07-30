@@ -76,6 +76,19 @@ final case class SubNetwork(
 
 object Topology:
 
+  /** What counts as a branch port column.
+    *
+    * Defined once because two modules must agree: `CsvReader` uses it to decide a
+    * column holds identifiers rather than numbers, and [[portsOf]] uses it to
+    * decide the same column is an endpoint. They are the same rule, and letting
+    * them drift reintroduces the numeric-bus-name crash — the reader would type
+    * the column as floats and every read would throw.
+    */
+  private[network] val PortColumn = "bus\\d+".r
+
+  private[network] def isPortColumn(name: String): Boolean =
+    PortColumn.matches(name)
+
   /** Buses reachable from each other over passive branches.
     *
     * Grouped by connectivity alone; the carrier is a label, not part of the
@@ -84,7 +97,8 @@ object Topology:
     * order.
     *
     * @throws CsvReader.MalformedNetwork
-    *   if a passive branch references a bus that does not exist, or leaves an
+    *   if a passive branch table lacks a `bus0` or `bus1` column, or a passive
+    *   branch references a bus that does not exist, or leaves a declared
     *   endpoint blank. Use [[danglingReferences]] to check without throwing.
     */
   def subNetworks(network: Network): IndexedSeq[SubNetwork] =
@@ -118,12 +132,7 @@ object Topology:
     // reference in links.csv cannot affect a decomposition defined over passive
     // branches, so refusing to decompose the network over it would be a
     // different function's complaint.
-    val dangling = danglingIn(
-      branchEndpoints(network).filter { (component, _, _, _) =>
-        network.schema.get(component).exists(Role.of(_) == Role.PassiveBranch)
-      },
-      network,
-    )
+    val dangling = danglingIn(branchEndpoints(network, _ == Role.PassiveBranch), network)
     if dangling.nonEmpty then
       val (component, id, port, bus) = dangling.head
       throw new CsvReader.MalformedNetwork(
@@ -168,9 +177,15 @@ object Topology:
     * columns; the reader preserves them, and reading only the declared pair
     * would drop endpoints that are present in the data.
     */
+  /** Public alias for [[portsOf]], for callers outside this package that need to
+    * enumerate a branch's endpoints -- the LP builder above all, which must agree
+    * with the topology about how many ports a branch has.
+    */
+  def branchPorts(table: ComponentTable): IndexedSeq[String] = portsOf(table)
+
   private[network] def portsOf(table: ComponentTable): IndexedSeq[String] =
     val ports = table.static.keys.toIndexedSeq
-      .filter(_.matches("bus\\d+"))
+      .filter(isPortColumn)
       .sortBy(_.drop(3).toIntOption.getOrElse(Int.MaxValue))
     // A branch with no bus1 column contributes no edges at all, which is the
     // silent island split this module is supposed to make impossible. Both
@@ -210,15 +225,19 @@ object Topology:
     *
     * Used to check references before they are silently dropped.
     */
-  private[network] def branchEndpoints(network: Network): IndexedSeq[(String, String, String, String)] =
-    network.tables.values.toIndexedSeq.flatMap { table =>
-      Role.of(table.spec) match
-        case Role.PassiveBranch | Role.ControllableBranch =>
-          val ports = portsOf(table)
-          table.ids.flatMap { id =>
-            ports.map(port => (table.spec.name, id, port, table.string(port, id)))
-          }
-        case _ => IndexedSeq.empty
+  private[network] def branchEndpoints(
+      network: Network,
+      accept: Role => Boolean = r => r == Role.PassiveBranch || r == Role.ControllableBranch,
+  ): IndexedSeq[(String, String, String, String)] =
+    // Tables are filtered *before* their ports are enumerated. Filtering the
+    // resulting tuples instead would still run portsOf over every branch table,
+    // so a links.csv missing bus1 would prevent a passive-only decomposition —
+    // the outcome this validation was added to prevent.
+    network.tables.values.toIndexedSeq.filter(t => accept(Role.of(t.spec))).flatMap { table =>
+      val ports = portsOf(table)
+      table.ids.flatMap { id =>
+        ports.map(port => (table.spec.name, id, port, table.string(port, id)))
+      }
     }
 
   /** Branch endpoints naming a bus that does not exist.
@@ -238,10 +257,18 @@ object Topology:
       network: Network,
   ): IndexedSeq[(String, String, String, String)] =
     val known = network.table("Bus").map(_.ids.toSet).getOrElse(Set.empty)
-    // A blank endpoint counts. `bus0`/`bus1` have no meaningful default, so an
-    // empty cell is a missing reference rather than an optional one -- and it
-    // produces exactly the silently-split island a wrong name would.
-    endpoints.filter((_, _, _, bus) => bus.isEmpty || !known.contains(bus))
+    endpoints.filter { (component, _, port, bus) =>
+      if bus.nonEmpty then !known.contains(bus)
+      else
+        // A blank is a missing reference only for a port the schema declares.
+        // `bus0`/`bus1` have no meaningful default, so an empty cell there is an
+        // error. An extra port is different: PyPSA's default for `bus2` is the
+        // empty string and it omits all-default columns on export, so a `bus2`
+        // column appears as soon as *one* link uses it and every link that does
+        // not carries a blank. Treating those as dangling would reject a valid
+        // multi-port network -- the very shape port enumeration was added for.
+        network.schema.get(component).exists(_.attribute(port).isDefined)
+    }
 
   /** Components attached to `bus`, as (component name, entity id) pairs. */
   def attachedTo(network: Network, bus: String): IndexedSeq[(String, String)] =

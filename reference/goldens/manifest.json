@@ -1,5 +1,442 @@
 {
  "networks": {
+  "ac-dc-co2": {
+   "components": {
+    "Bus": {
+     "count": 9,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "x",
+      "y",
+      "carrier",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "varying": {
+      "marginal_price": [
+       "London",
+       "Norwich",
+       "Norwich DC",
+       "Manchester",
+       "Bremen",
+       "Bremen DC",
+       "Frankfurt",
+       "Norway",
+       "Norway DC"
+      ],
+      "p": [
+       "London",
+       "Norwich",
+       "Norwich DC",
+       "Manchester",
+       "Bremen",
+       "Bremen DC",
+       "Frankfurt",
+       "Norway",
+       "Norway DC"
+      ],
+      "v_ang": [
+       "London",
+       "Norwich",
+       "Norwich DC",
+       "Manchester",
+       "Bremen",
+       "Bremen DC",
+       "Frankfurt",
+       "Norway",
+       "Norway DC"
+      ]
+     }
+    },
+    "Carrier": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "co2_emissions",
+      "color",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "co2_emissions",
+      "color",
+      "nice_name",
+      "max_growth",
+      "max_relative_growth",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "p_nom_min",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "efficiency",
+      "p_nom_opt"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt"
+     ],
+     "varying": {
+      "p": [
+       "Manchester Wind",
+       "Manchester Gas",
+       "Norway Wind",
+       "Norway Gas",
+       "Frankfurt Wind",
+       "Frankfurt Gas"
+      ],
+      "p_max_pu": [
+       "Manchester Wind",
+       "Frankfurt Wind",
+       "Norway Wind"
+      ]
+     }
+    },
+    "GlobalConstraint": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "sense",
+      "constant",
+      "mu"
+     ],
+     "in_memory_columns": [
+      "type",
+      "investment_period",
+      "bus",
+      "carrier_attribute",
+      "sense",
+      "constant",
+      "mu"
+     ],
+     "varying": {}
+    },
+    "Line": {
+     "count": 7,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "x",
+      "r",
+      "s_nom",
+      "capital_cost",
+      "carrier",
+      "sub_network",
+      "x_pu",
+      "r_pu",
+      "x_pu_eff",
+      "r_pu_eff",
+      "s_nom_opt",
+      "v_nom"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "x",
+      "r",
+      "g",
+      "b",
+      "s_nom",
+      "s_nom_mod",
+      "s_nom_extendable",
+      "s_nom_min",
+      "s_nom_max",
+      "s_nom_set",
+      "s_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "active",
+      "build_year",
+      "lifetime",
+      "length",
+      "carrier",
+      "terrain_factor",
+      "num_parallel",
+      "v_ang_min",
+      "v_ang_max",
+      "sub_network",
+      "x_pu",
+      "r_pu",
+      "g_pu",
+      "b_pu",
+      "x_pu_eff",
+      "r_pu_eff",
+      "s_nom_opt",
+      "v_nom"
+     ],
+     "varying": {
+      "p0": [
+       "0",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6"
+      ],
+      "p1": [
+       "0",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6"
+      ]
+     }
+    },
+    "Link": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "carrier",
+      "p_nom",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "p_nom_opt"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "carrier",
+      "efficiency",
+      "active",
+      "build_year",
+      "lifetime",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_set",
+      "p_init",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "stand_by_cost",
+      "length",
+      "terrain_factor",
+      "committable",
+      "start_up_cost",
+      "shut_down_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "delay",
+      "cyclic_delay",
+      "p_nom_opt"
+     ],
+     "varying": {
+      "p": [
+       "Norwich Converter",
+       "Norway Converter",
+       "Bremen Converter",
+       "DC link"
+      ],
+      "p0": [
+       "Norwich Converter",
+       "Norway Converter",
+       "Bremen Converter",
+       "DC link"
+      ],
+      "p1": [
+       "Norwich Converter",
+       "Norway Converter",
+       "Bremen Converter",
+       "DC link"
+      ]
+     }
+    },
+    "Load": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "carrier"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p": [
+       "London",
+       "Frankfurt",
+       "Norway",
+       "Norwich",
+       "Bremen",
+       "Manchester"
+      ],
+      "p_set": [
+       "London",
+       "Norwich",
+       "Frankfurt",
+       "Bremen",
+       "Norway",
+       "Manchester"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 3,
+     "exported_columns": [
+      "name",
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "name": "ac-dc-co2",
+   "snapshots": [
+    "2015-01-01T00:00:00",
+    "2015-01-01T01:00:00",
+    "2015-01-01T02:00:00",
+    "2015-01-01T03:00:00",
+    "2015-01-01T04:00:00",
+    "2015-01-01T05:00:00",
+    "2015-01-01T06:00:00",
+    "2015-01-01T07:00:00",
+    "2015-01-01T08:00:00",
+    "2015-01-01T09:00:00"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "London",
+      "Manchester",
+      "Norwich"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Manchester"
+    },
+    {
+     "buses": [
+      "Bremen DC",
+      "Norway DC",
+      "Norwich DC"
+     ],
+     "carrier": "DC",
+     "slack_bus": "Norwich DC"
+    },
+    {
+     "buses": [
+      "Bremen",
+      "Frankfurt"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Frankfurt"
+    },
+    {
+     "buses": [
+      "Norway"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Norway"
+    }
+   ]
+  },
   "ac-dc-dispatch": {
    "components": {
     "Bus": {

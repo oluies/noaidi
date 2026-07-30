@@ -61,6 +61,8 @@ object Lopf:
   /** Turn a network into a dispatch LP. */
   def build(network: Network): Model =
     rejectExtendable(network)
+    rejectUnhandled(network)
+    rejectDanglingBuses(network)
 
     val snapshots = network.snapshots.indices
     if snapshots.isEmpty then throw new UnsupportedNetwork("network has no snapshots")
@@ -81,9 +83,20 @@ object Lopf:
       costs += cost
       index
 
-    val generators = network.table("Generator")
-    val lines      = network.table("Line")
-    val links      = network.table("Link")
+    // Selected by role rather than by name. Transformer is also a passive branch
+    // and carries bus0/bus1 and s_nom with the same meaning as Line; reading only
+    // "Line" silently dropped it, so buses joined only through a transformer came
+    // out disconnected -- infeasible for a valid network, or a plausible dispatch
+    // for a different one.
+    def tablesWith(role: Role): IndexedSeq[ComponentTable] =
+      network.tables.values.toIndexedSeq.filter(t => Role.of(t.spec) == role && t.size > 0)
+
+    val passive      = tablesWith(Role.PassiveBranch)
+    val controllable = tablesWith(Role.ControllableBranch)
+    val attached     = tablesWith(Role.Attached)
+
+    val generators = attached.filter(_.spec.name == "Generator")
+    val loadTables = attached.filter(_.spec.name == "Load")
 
     snapshots.foreach { t =>
       // The objective weighting scales this snapshot's cost. It is not
@@ -97,26 +110,26 @@ object Lopf:
           val lo   = pNom * g.valueAt("p_min_pu", id, t)
           val hi   = pNom * g.valueAt("p_max_pu", id, t)
           val cost = g.valueAt("marginal_cost", id, t) * weight
-          declare("Generator", id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+          declare(g.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
         }
       }
 
-      lines.foreach { l =>
-        l.ids.foreach { id =>
-          // A line's rating is symmetric and applies to apparent power; for the
-          // linear model that is a bound on the flow in either direction.
-          val sNom = l.float("s_nom", id)
-          declare("Line", id, t, -sNom, sNom, 0.0): Unit
+      passive.foreach { branch =>
+        branch.ids.foreach { id =>
+          // A rating is symmetric and applies to apparent power; in the linear
+          // model that is a bound on flow in either direction.
+          val sNom = branch.float("s_nom", id)
+          declare(branch.spec.name, id, t, -sNom, sNom, 0.0): Unit
         }
       }
 
-      links.foreach { k =>
-        k.ids.foreach { id =>
-          val pNom = k.float("p_nom", id)
-          val lo   = pNom * k.valueAt("p_min_pu", id, t)
-          val hi   = pNom * k.valueAt("p_max_pu", id, t)
-          val cost = k.valueAt("marginal_cost", id, t) * weight
-          declare("Link", id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+      controllable.foreach { branch =>
+        branch.ids.foreach { id =>
+          val pNom = branch.float("p_nom", id)
+          val lo   = pNom * branch.valueAt("p_min_pu", id, t)
+          val hi   = pNom * branch.valueAt("p_max_pu", id, t)
+          val cost = branch.valueAt("marginal_cost", id, t) * weight
+          declare(branch.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
         }
       }
     }
@@ -135,37 +148,29 @@ object Lopf:
 
         generators.foreach { g =>
           g.ids.filter(id => g.string("bus", id) == bus).foreach { id =>
-            terms += ((columns(("Generator", id, t)), 1.0))
+            terms += ((columns((g.spec.name, id, t)), 1.0))
           }
         }
 
-        lines.foreach { l =>
-          l.ids.foreach { id =>
-            val c = columns(("Line", id, t))
-            // p0 enters the branch at bus0, so it leaves that bus.
-            if l.string("bus0", id) == bus then terms += ((c, -1.0))
-            if l.string("bus1", id) == bus then terms += ((c, 1.0))
-          }
-        }
-
-        links.foreach { k =>
-          k.ids.foreach { id =>
-            val c = columns(("Link", id, t))
-            if k.string("bus0", id) == bus then terms += ((c, -1.0))
-            // A link's output is scaled by its efficiency; the difference is
-            // conversion loss, not a violation of balance.
-            if k.string("bus1", id) == bus then
-              terms += ((c, k.valueAt("efficiency", id, t)))
+        (passive ++ controllable).foreach { branch =>
+          val ports = Topology.branchPorts(branch)
+          branch.ids.foreach { id =>
+            val c = columns((branch.spec.name, id, t))
+            ports.foreach { port =>
+              if branch.string(port, id) == bus then
+                // bus0 is where flow enters the branch, so it leaves that bus.
+                // Every other port receives, scaled by that port's efficiency --
+                // the difference is conversion loss, not a balance violation.
+                if port == "bus0" then terms += ((c, -1.0))
+                else terms += ((c, efficiencyOf(branch, id, port, t)))
+            }
           }
         }
 
         // Load is fixed demand, so it moves to the right-hand side.
-        val demand = network
-          .table("Load")
-          .map { loads =>
-            loads.ids.filter(id => loads.string("bus", id) == bus).map(loads.valueAt("p_set", _, t)).sum
-          }
-          .getOrElse(0.0)
+        val demand = loadTables.map { loads =>
+          loads.ids.filter(id => loads.string("bus", id) == bus).map(loads.valueAt("p_set", _, t)).sum
+        }.sum
 
         builder.equalityConstraint(terms.toSeq, demand)
         balanceRows((bus, t)) = rowIndex
@@ -191,6 +196,39 @@ object Lopf:
         if terms.exists((_, coefficient) => coefficient != 0.0) then
           builder.equalityConstraint(terms, 0.0)
           rowIndex += 1
+      }
+    }
+
+    // Global constraints -- an emissions cap, typically. Ignoring one is not
+    // conservative: it drops a restriction, so the answer comes out cheaper than
+    // the real network's, and the "objective is a lower bound on PyPSA's" test
+    // that guarded the Kirchhoff work would have passed for exactly that reason.
+    // A dropped constraint and a missing constraint are indistinguishable to an
+    // inequality.
+    network.table("GlobalConstraint").foreach { constraints =>
+      constraints.ids.foreach { id =>
+        val sense    = constraints.string("sense", id)
+        val constant = constraints.float("constant", id)
+        if sense != "<=" then
+          throw new UnsupportedNetwork(
+            s"global constraint '$id' has sense '$sense'; only '<=' is implemented"
+          )
+
+        // Emissions are per unit of *primary energy*, so a generator's output is
+        // divided by its efficiency before being charged.
+        val terms = snapshots.flatMap { t =>
+          val weight = network.weighting("objective", t)
+          generators.flatMap { g =>
+            g.ids.flatMap { gid =>
+              val intensity = carrierEmissions(network, g.string("carrier", gid))
+              val efficiency = g.valueAt("efficiency", gid, t)
+              if intensity == 0.0 || efficiency == 0.0 then None
+              else Some((columns((g.spec.name, gid, t)), intensity / efficiency * weight))
+            }
+          }
+        }
+
+        if terms.nonEmpty then builder.lessThan(terms, constant)
       }
     }
 
@@ -234,6 +272,73 @@ object Lopf:
           )
       }
     }
+
+  /** Reject component classes the builder does not model.
+    *
+    * Silently dropping a component is the worst available outcome: the LP stays
+    * feasible and returns a plausible dispatch for a network that is not the one
+    * given. A ShuntImpedance draws power and a Process converts it, and neither
+    * is built here.
+    */
+  private def rejectUnhandled(network: Network): Unit =
+    val handled = Set("Generator", "Load", "Line", "Transformer", "Link", "Bus",
+                      "Carrier", "GlobalConstraint", "SubNetwork", "LineType",
+                      "TransformerType", "Shape")
+    val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
+    if unhandled.nonEmpty then
+      throw new UnsupportedNetwork(
+        s"network contains unmodelled component(s): " +
+          unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
+      )
+
+  /** Reject a component whose bus does not exist.
+    *
+    * A branch with a stale endpoint contributes a term at only its valid end, so
+    * its flow becomes a free source or sink bounded only by its rating and the
+    * objective comes out cheaper than the real network's. A generator or load
+    * with a bad bus simply vanishes. Both stay feasible, and a dropped load makes
+    * the answer cheaper with no diagnostic -- so this is loud, matching
+    * `Topology.danglingReferences`, which the model layer already made throw.
+    */
+  private def rejectDanglingBuses(network: Network): Unit =
+    val known = network.table("Bus").map(_.ids.toSet).getOrElse(Set.empty)
+
+    Topology.danglingReferences(network).headOption.foreach { (component, id, port, bus) =>
+      throw new UnsupportedNetwork(
+        s"$component '$id' references unknown bus '$bus' via $port"
+      )
+    }
+
+    network.tables.values.foreach { table =>
+      if Role.of(table.spec) == Role.Attached && table.spec.attribute("bus").isDefined then
+        table.ids.foreach { id =>
+          val bus = table.string("bus", id)
+          if !known.contains(bus) then
+            throw new UnsupportedNetwork(
+              s"${table.spec.name} '$id' is attached to unknown bus '$bus'"
+            )
+        }
+    }
+
+  /** CO2 intensity of a carrier, or zero if it emits nothing. */
+  private def carrierEmissions(network: Network, carrier: String): Double =
+    network
+      .table("Carrier")
+      .filter(_.has(carrier))
+      .map(_.float("co2_emissions", carrier))
+      .filter(_.isFinite)
+      .getOrElse(0.0)
+
+  /** Efficiency applying to a branch's receiving port.
+    *
+    * PyPSA names these `efficiency` for `bus1` and `efficiency<i>` for later
+    * ports. A passive branch has none and is lossless in the linear model.
+    */
+  private def efficiencyOf(branch: ComponentTable, id: String, port: String, t: Int): Double =
+    val attribute = if port == "bus1" then "efficiency" else s"efficiency${port.drop(3)}"
+    if branch.spec.attribute(attribute).isDefined || branch.static.contains(attribute) then
+      branch.valueAt(attribute, id, t)
+    else 1.0
 
 /** A solved dispatch, addressable by component name. */
 final case class LopfResult(

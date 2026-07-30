@@ -168,12 +168,21 @@ class TopologySuite extends munit.FunSuite:
     * typing happens — so a defect in inference is invisible to a synthetic
     * fixture. These cases go through the real path.
     */
+  private val scratch = scala.collection.mutable.ArrayBuffer.empty[Path]
+
   private def viaReader(files: Map[String, String]): Network =
     val dir = Files.createTempDirectory("noaidi-topo-")
+    scratch += dir
     files.foreach { (name, body) =>
       Files.writeString(dir.resolve(name), body)
     }
+    // Only the schema comes from the goldens; the network itself is written here.
     CsvReader.read(dir, schema, "fixture")
+
+  override def afterAll(): Unit =
+    scratch.foreach { dir =>
+      Files.walk(dir).sorted(java.util.Comparator.reverseOrder()).forEach(Files.deleteIfExists(_))
+    }
 
   test("a multi-port link with numeric bus names reads correctly") {
     assume(available, "goldens missing")
@@ -254,6 +263,39 @@ class TopologySuite extends munit.FunSuite:
     assertEquals(island.buses, IndexedSeq("a", "b"))
     assertEquals(island.carrier, "AC", "the label should match buses.head, not file order")
     assert(island.mixedCarriers)
+  }
+
+  test("an unused extra port is not a dangling reference") {
+    assume(available, "goldens missing")
+    // PyPSA's default for bus2 is the empty string, and it omits all-default
+    // columns on export -- so a bus2 column appears as soon as one link uses it,
+    // and every link that does not carries a blank. Treating those as dangling
+    // would reject a valid multi-port network, which is the shape port
+    // enumeration exists for.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\na,380.0,AC\nb,380.0,AC\nc,380.0,AC\n",
+      "links.csv"     -> "name,bus0,bus1,bus2\nthree,a,b,c\ntwo,a,b,\n",
+    ))
+
+    // The three-port link connects all three; the two-port one leaves bus2 blank
+    // and that is not an error.
+    assertEquals(Topology.danglingReferences(n), IndexedSeq.empty)
+    assertEquals(Topology.isolatedBuses(n), IndexedSeq.empty)
+  }
+
+  test("a links table missing bus1 does not block decomposition") {
+    assume(available, "goldens missing")
+    // subNetworks reads passive branches only, so it must not even enumerate the
+    // ports of a controllable table -- filtering the resulting tuples rather than
+    // the tables would still throw here.
+    val n = viaReader(Map(
+      "snapshots.csv" -> ",snapshot\n0,2015-01-01 00:00:00\n",
+      "buses.csv"     -> "name,v_nom,carrier\na,380.0,AC\nb,380.0,AC\n",
+      "lines.csv"     -> "name,bus0,bus1\nl0,a,b\n",
+      "links.csv"     -> "name,bus0\nk,a\n",
+    ))
+    assertEquals(Topology.subNetworks(n).map(_.buses), IndexedSeq(IndexedSeq("a", "b")))
   }
 
   test("every bus belongs to exactly one sub-network") {

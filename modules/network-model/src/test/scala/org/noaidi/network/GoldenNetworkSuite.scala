@@ -66,7 +66,7 @@ class GoldenNetworkSuite extends munit.FunSuite:
     * reader and writer had never been exercised on.
     */
   private val goldenNetworks =
-    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "storage-hvdc")
+    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "storage-hvdc")
 
   goldenNetworks.foreach { name =>
     test(s"$name loads with the component counts PyPSA reported") {
@@ -79,13 +79,13 @@ class GoldenNetworkSuite extends munit.FunSuite:
       // count was right and every assertion was satisfied.
       val expectedSnapshots = expected("snapshots").arr.map(_.str).toIndexedSeq
       assertEquals(n.snapshotCount, expectedSnapshots.size, "snapshot count")
-      // PyPSA writes "2015-01-01 00:00:00" to CSV and reports the ISO form in
-      // the manifest; only the separator differs.
-      assertEquals(
-        n.snapshots.map(_.replace(' ', 'T')),
-        expectedSnapshots,
-        s"$name: snapshot labels",
-      )
+      // Compared verbatim. The manifest used to report the ISO form while the CSV
+      // writes "2015-01-01 00:00:00", so this normalised the separator — but the
+      // manifest now records the label as the file spells it, which it has to,
+      // because a snapshot label need not be a timestamp at all. `ac-pf-pv` uses
+      // plain integers, and rendering those as JSON numbers described the
+      // in-memory index rather than the file.
+      assertEquals(n.snapshots, expectedSnapshots, s"$name: snapshot labels")
 
       expected("components").obj.foreach { (componentName, info) =>
         val table = n.table(componentName)

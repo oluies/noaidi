@@ -967,5 +967,8 @@
   "objective_constant": 0.0,
   "status": "ok",
   "total_system_cost": 3178.551769049608
+ },
+ "pf": {
+  "error": "AttributeError: 'SubNetwork' object has no attribute 'Y'"
  }
 }

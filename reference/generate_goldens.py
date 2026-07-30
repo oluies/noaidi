@@ -104,8 +104,67 @@ def ac_dc_co2():
     return n
 
 
+def ac_pf_pv():
+    """A three-bus AC network covering all three Newton-Raphson bus types.
+
+    Built by hand because no stock example has a PV bus. `storage-hvdc` is the
+    only example whose AC power flow converges at all here -- `ac-dc-meshed`
+    fails inside PyPSA with `'SubNetwork' object has no attribute 'Y'` -- and its
+    generators are all Slack or PQ. Without a PV bus the half of the algorithm
+    that holds voltage fixed and solves for reactive power would be unvalidated,
+    and it is the half that makes AC power flow more than a nonlinear DC one.
+
+    So: a slack bus, a PV bus whose generator pins |V| at 1.0 pu while its Q is
+    solved (24.47 and 32.65 MVAr at the two snapshots), and a PQ bus whose
+    voltage is solved (0.9921 pu). Lines carry non-zero `r`, so there are real
+    losses -- the slack picks up 60.41 MW against 60.0 MW of PV generation and
+    100 MW of load -- and non-zero `b`, so the pi-model shunt admittance is
+    exercised rather than left at zero where a missing term would not show.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+    n.add("Bus", "slack", v_nom=110.0)
+    n.add("Bus", "pv", v_nom=110.0)
+    n.add("Bus", "pq", v_nom=110.0)
+    n.add("Line", "l1", bus0="slack", bus1="pv", r=0.5, x=2.0, b=1e-4, s_nom=500)
+    n.add("Line", "l2", bus0="pv", bus1="pq", r=0.8, x=3.0, b=2e-4, s_nom=500)
+    n.add("Line", "l3", bus0="slack", bus1="pq", r=1.0, x=4.0, b=0.0, s_nom=500)
+    # Capacity and costs are irrelevant to the power flow -- which reads `p_set`
+    # and `control` -- but without them `optimize` cannot build an objective, and
+    # every fixture is put through every stage so that a failure is a real signal
+    # rather than a known exception someone has to remember.
+    # No `p_set` on the slack generator, and that is not an omission. Its active
+    # power is the *unknown* a power flow solves for, so the value is ignored --
+    # verified: setting it changes v_mag, v_ang and Q by nothing at ten decimal
+    # places. It does change the optimisation, because PyPSA pins a generator
+    # carrying a `p_set` to exactly that value rather than leaving it free between
+    # p_min_pu and p_max_pu. With both generators pinned this network cannot serve
+    # its load and `optimize` comes back infeasible.
+    n.add("Generator", "g_slack", bus="slack", control="Slack", p_nom=500.0, marginal_cost=50.0)
+    n.add(
+        "Generator", "g_pv", bus="pv", control="PV", p_set=[60.0, 80.0],
+        p_nom=200.0, marginal_cost=10.0,
+    )
+    n.add("Load", "d", bus="pq", p_set=[100.0, 120.0], q_set=[30.0, 40.0])
+    n.add("Load", "d2", bus="pv", p_set=[20.0, 25.0], q_set=[5.0, 8.0])
+    return n
+
+
+# Stages a fixture is *known* not to support, with the reason.
+#
+# Expressed as data rather than tolerated silently, so the exit code keeps its
+# meaning: an unexpected failure still fails the run, and a stage listed here that
+# starts succeeding is reported too -- which is how a PyPSA upgrade that fixed the
+# limitation would announce itself instead of going unnoticed.
+KNOWN_UNSUPPORTED = {
+    ("ac-dc-meshed", "pf"): "PyPSA 1.2.4 raises AttributeError inside its own sub-network handling",
+    ("ac-dc-dispatch", "pf"): "same as ac-dc-meshed, from which it is derived",
+    ("ac-dc-co2", "pf"): "same as ac-dc-meshed, from which it is derived",
+}
+
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
+    "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
     "storage-hvdc": pypsa.examples.storage_hvdc,
@@ -246,7 +305,13 @@ def capture_network(name: str, build) -> dict:
 
     summary = {
         "name": name,
-        "snapshots": [jsonable(s) for s in n.snapshots],
+        # Stringified, because a snapshot is a *label* and that is how the CSV
+        # carries it. PyPSA does not require timestamps -- `ac-pf-pv` uses plain
+        # integers -- and `jsonable` would render those as JSON numbers while
+        # snapshots.csv writes "0" and "1", so the manifest would describe the
+        # in-memory index rather than the file it is supposed to be checked
+        # against.
+        "snapshots": [str(s) for s in n.snapshots],
         "components": {},
     }
     for component in n.components:
@@ -326,6 +391,34 @@ def capture_network(name: str, build) -> dict:
     except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
         results["lpf"] = {"error": f"{type(exc).__name__}: {exc}"}
 
+    # Newton-Raphson AC power flow, on a fresh network so the linear solve above
+    # cannot seed it. Recorded with its per-sub-network convergence flags: PyPSA
+    # returns those rather than raising, so a non-converged snapshot would
+    # otherwise be written out as though it were an answer.
+    print(f"  {name}: non-linear power flow")
+    try:
+        a = build()
+        result = a.pf()
+        converged = result.converged if hasattr(result, "converged") else result
+        results["pf"] = {
+            "converged": frame_to_json(converged.astype(float)),
+            "bus_v_mag_pu": frame_to_json(a.buses_t.v_mag_pu),
+            "bus_v_ang": frame_to_json(a.buses_t.v_ang),
+            "bus_p": frame_to_json(a.buses_t.p),
+            "bus_q": frame_to_json(a.buses_t.q),
+            "line_p0": frame_to_json(a.lines_t.p0),
+            "line_q0": frame_to_json(a.lines_t.q0),
+            "line_p1": frame_to_json(a.lines_t.p1),
+            "line_q1": frame_to_json(a.lines_t.q1),
+            "generator_p": frame_to_json(a.generators_t.p),
+            "generator_q": frame_to_json(a.generators_t.q),
+        }
+    except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+        # ac-dc-meshed lands here: PyPSA 1.2.4 raises AttributeError inside its
+        # own sub-network handling. Recorded so the absence is visibly PyPSA's
+        # rather than an oversight in this script.
+        results["pf"] = {"error": f"{type(exc).__name__}: {exc}"}
+
     print(f"  {name}: optimisation")
     try:
         m = build()  # fresh, so the LPF result does not seed the optimisation
@@ -385,11 +478,21 @@ def main() -> int:
     }
 
     failures: list[str] = []
+    unexpected_successes: list[str] = []
     for name, build in NETWORKS.items():
         manifest["networks"][name] = capture_network(name, build)
         recorded = json.loads((OUT / "results" / f"{name}.json").read_text())
-        failures += [f"{name}/{stage}: {body['error']}" for stage, body in recorded.items()
-                     if isinstance(body, dict) and "error" in body]
+        for stage, body in recorded.items():
+            if not isinstance(body, dict):
+                continue
+            known = KNOWN_UNSUPPORTED.get((name, stage))
+            if "error" in body:
+                if known is None:
+                    failures.append(f"{name}/{stage}: {body['error']}")
+                else:
+                    print(f"  {name}: {stage} unsupported as expected ({known})")
+            elif known is not None:
+                unexpected_successes.append(f"{name}/{stage} succeeded, but is listed in KNOWN_UNSUPPORTED")
 
     reference = capture_reference_schema()
     (OUT / "schema.json").write_text(json.dumps(reference, indent=1, sort_keys=True))
@@ -397,6 +500,13 @@ def main() -> int:
 
     print(f"\nwrote goldens to {OUT}")
     print(f"pypsa {pypsa.__version__}, pandas {pd.__version__}")
+
+    if unexpected_successes:
+        # Not a failure, but it does mean KNOWN_UNSUPPORTED is now lying -- most
+        # likely because a PyPSA upgrade fixed something.
+        print("\nno longer unsupported:", file=sys.stderr)
+        for u in unexpected_successes:
+            print(f"  {u}", file=sys.stderr)
 
     if failures:
         # Recorded in the JSON *and* signalled here: a regeneration where a solve

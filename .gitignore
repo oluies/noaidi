@@ -15,3 +15,6 @@ project/project/
 
 # Pinned PyPSA reference environment — recreated with uv, not committed
 reference/.venv/
+
+# Claude Code local settings
+.claude/

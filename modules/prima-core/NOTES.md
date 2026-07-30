@@ -244,6 +244,134 @@ tolerance regimes as separate tables covering all twelve ladder instances, and
 the six rows here are the ones worth carrying. Run it to regenerate the
 underlying numbers, then merge.
 
+## L2: what LOPF reproduces, and what it does not
+
+`network-lopf` builds a dispatch LP from a `Network` and solves it with Prima.
+Against PyPSA on `ac-dc-dispatch`:
+
+| | |
+| --- | --- |
+| Objective | matches to 1e-6 relative |
+| Generator dispatch | matches to 1e-3 MW |
+| Line flows | matches to 1e-3 MW |
+| Nodal prices | matches at 4 of 10 snapshots; the rest are a different optimal dual |
+
+The primal is exact. Adding Kirchhoff voltage constraints over a cycle basis is
+what achieved that: without them the model is a relaxation, and because capacity
+in this fixture was sized from the expansion optimum every line rating binds, so
+the relaxation actively relieved tight limits and undercut the true cost by
+4.4e-06.
+
+Two details of that formulation are load-bearing. The cycle impedance is
+'''reactance for an AC sub-network and resistance for a DC one''' — the reference
+network's DC lines carry `x = 0` with `r` non-zero, so using reactance
+unconditionally gives every DC cycle a vacuous all-zero constraint. And the
+orientation of each branch around the cycle must be right: getting it backwards
+does not perturb the flows, it makes the LP infeasible, because the cycle
+equation then contradicts bus balance.
+
+### Nodal prices: settled, and the wrong answer first
+
+An earlier version of this section blamed the price gap on generic degeneracy and
+called that a hypothesis. It has now been settled, and along the way a confident
+intermediate explanation turned out to be flatly wrong. Both are worth recording,
+because the wrong one was much more plausible than the right one.
+
+**The wrong explanation.** The fixture's `global_constraints.csv` carries a
+`co2_limit` of 1000 with `mu = -2178.29`, and the dispatch emits exactly 1000.
+That looks conclusive: a binding constraint with a large shadow price, absent from
+the model, whose multiplier would feed every gas-attached bus price. It is not.
+The exported `mu` is a '''stale dual from the sizing solve''' — the expansion
+problem that produced `p_nom_opt` — written into the CSV by the same export that
+fixed capacity. Solving the dispatch problem itself gives `mu = -0.0`. The cap is
+touched but weakly binding, and no tighter cap is even feasible, because gas here
+is simultaneously the dirty carrier and the expensive one (4.09–5.89 against
+wind's 0.09–0.11), so minimising cost already minimises emissions. The
+constraint never influenced the optimum it sits on. The golden generator now
+captures `global_constraint_mu` from the solved model precisely so the two cannot
+be confused again.
+
+**The actual explanation.** Dual non-uniqueness, now demonstrated rather than
+assumed. Two facts establish it:
+
+- Tightening the solver from 1e-9 to 1e-12 moves the worst price gap by exactly
+  zero — 3.874938 either way, with a dual residual of 0.0. Whatever this is, it
+  is not an unconverged dual.
+- At six of ten snapshots every generator sits precisely at a bound and total
+  output equals total load, so there is no marginal generator and nothing pins
+  the price. That is a direct consequence of sizing capacity from the expansion
+  optimum.
+
+The discriminator between degeneracy and a real bug is complementary slackness: a
+generator strictly '''inside''' its bounds pins its bus price in every optimal
+dual. Snapshots 6 and 8 have such a generator and the price matches PyPSA
+exactly; snapshot 9 has one whose price sat 0.678 high, which is
+`0.24/0.3517 × 0.9935` — the CO2 intensity of gas times this solver's CO2
+multiplier, where PyPSA's is zero. Same optimal face, different point on it.
+`LopfSuite` asserts that forced condition instead of equality with PyPSA's vertex,
+because only the former fails on a genuine dual error.
+
+**The constraint is implemented anyway**, and not for the price gap. Omitting a
+global constraint drops a restriction, so the objective comes out too '''low''' —
+and no fixture that existed at the time could catch it, since on
+`ac-dc-dispatch` omitting it reproduces the objective exactly. Hence `ac-dc-co2`,
+which prices gas below wind so the cap has to displace economic generation: it
+emits 6702 unconstrained at a cost of 2819.52, and 2000 under the cap at 3178.55.
+That 12.7% spread is what a silent drop would have cost, and it is now a golden.
+
+Also not yet implemented: capacity expansion (rejected rather than mis-solved),
+storage (its energy balance couples snapshots), and transformers with
+off-nominal tap ratios.
+
+## L2: linear power flow
+
+`network-pf` reproduces PyPSA's `n.lpf()` on all three reference networks —
+voltage angles to 1e-9 rad, line flows and slack dispatch to 1e-6 MW. It does not
+depend on Prima: LPF takes dispatch as given and the only unknowns are the angles
+that carry it, so the problem is one symmetric positive-definite solve per
+sub-network per snapshot, not an optimisation.
+
+`storage-hvdc` becomes usable evidence here, having been only a rejection test for
+LOPF. The asymmetry is real rather than an inconsistency: LOPF must refuse a
+storage unit because its energy balance couples consecutive snapshots, whereas LPF
+takes dispatch as an input, so a storage unit is just another one-port with a
+`p_set` and a `sign`.
+
+Three conventions were established by solving the reference network, not read off
+documentation, and each would have been wrong otherwise:
+
+- **`p_set` defaults to NaN**, not zero, for every one-port except Load. So the
+  arithmetic has to special-case it — propagating the NaN silences the whole
+  solve, and coercing it without comment hides a genuinely missing value. PyPSA
+  reads it as zero, which is why `ac-dc-meshed`'s gas generators are idle under
+  LPF while its wind generators are not.
+- **The slack is the first generator's bus in file order**, falling back to the
+  first bus only for an island with no generator. That makes Manchester the slack
+  of {London, Manchester, Norwich} — not London, which is first both
+  alphabetically and in `buses.csv` — and Norwich DC the slack of the DC island,
+  where sorted order says Bremen DC. `SubNetwork.buses` is sorted for
+  determinism, so file order has to be recovered from the tables.
+- **Susceptance is `v_nom²/x` for AC and `v_nom²/r` for DC.** The same split as
+  the cycle constraints, and for the same reason: the reference network's DC lines
+  carry `x = 0` and its AC lines carry `r = 0`, so either mistake divides by zero
+  rather than degrading gracefully. Unlike the cycle constraints, the `v_nom²`
+  does not cancel here — it sets the magnitude of every angle.
+
+The slack rule is the one worth dwelling on, because getting it wrong produces a
+'''plausible''' answer: every angle is measured against the slack, so a different
+choice shifts the entire profile by a constant and leaves the flows correct. It
+would have read as a scaling or sign bug for as long as it took to doubt the
+convention instead. `LinearPowerFlowSuite` therefore asserts the slack choice
+directly against the manifest, separately from the angles.
+
+An island with no generator at all is legal — the DC island's only attachments are
+converters at their default zero flow — so the flows are well-defined but the slack
+power has nowhere to be attributed. That is reported through `LpfResult.slacks`
+rather than rejected or silently assigned; PyPSA warns in the same situation.
+Transformers are refused: they would decompose correctly, but their per-unit base
+involves `s_nom` and an off-nominal `tap_ratio` shifts the angle across them, so
+reusing the line formula would put a plausible number on a wrong model.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

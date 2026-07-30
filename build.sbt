@@ -177,6 +177,34 @@ lazy val networkModel = project
     Test / fork := true,
   )
 
+// L2: linear optimal power flow. The first module that makes the port *do*
+// something -- it turns a Network into an LpProblem, hands it to Prima, and maps
+// the solution back.
+lazy val networkLopf = project
+  .in(file("modules/network-lopf"))
+  .dependsOn(networkModel % "compile->compile;test->test", primaCore)
+  .settings(commonSettings)
+  .settings(
+    name := "network-lopf",
+    Test / fork := true,
+    Test / envVars += "NOAIDI_GOLDENS" ->
+      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+  )
+
+// L2: linear power flow. Deliberately independent of Prima -- LPF is a linear
+// *solve*, not an optimisation, so dragging in an LP solver would misrepresent
+// the problem and couple two layers that have no reason to meet.
+lazy val networkPf = project
+  .in(file("modules/network-pf"))
+  .dependsOn(networkModel % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name := "network-pf",
+    Test / fork := true,
+    Test / envVars += "NOAIDI_GOLDENS" ->
+      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+  )
+
 // Cross-backend validation: Prima vs ojAlgo on a ladder of LP instances.
 lazy val primaValidation = project
   .in(file("modules/prima-validation"))
@@ -189,7 +217,16 @@ lazy val primaValidation = project
 
 lazy val root = project
   .in(file("."))
-  .aggregate(primaCore, primaZio, primaOjalgo, primaMps, primaValidation, networkModel)
+  .aggregate(
+    primaCore,
+    primaZio,
+    primaOjalgo,
+    primaMps,
+    primaValidation,
+    networkModel,
+    networkLopf,
+    networkPf,
+  )
   .settings(
     name := "noaidi",
     publish / skip := true,

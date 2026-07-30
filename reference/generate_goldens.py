@@ -43,8 +43,71 @@ OUT = ROOT / "goldens"
 # Small first, so a failure is diagnosable. `ac_dc_meshed` is the brief's
 # starting point: meshed AC and DC in one network, which exercises the parts of
 # the model a purely-AC example would not.
+def ac_dc_dispatch():
+    """`ac_dc_meshed` with capacity fixed, so the LP is pure dispatch.
+
+    The stock example is a capacity *expansion* problem -- lines and generators
+    carry `s_nom_extendable`/`p_nom_extendable` -- which is why its objective is
+    negative and its `objective_constant` large. Reproducing that needs
+    investment variables and capital costs, so this variant exists to give the
+    dispatch formulation a target it can actually be checked against before that
+    lands.
+    """
+    n = pypsa.examples.ac_dc_meshed()
+
+    # Fixing capacity at the *stock* p_nom is infeasible -- there is not enough
+    # generation to serve the load, because the example is posed so that capacity
+    # is chosen rather than given. So the expansion problem is solved first and
+    # its optimal capacities become the fixed ones, which guarantees the dispatch
+    # problem is feasible and gives it a meaningful optimum.
+    status, condition = n.optimize(solver_name="highs")
+    if status != "ok" or condition != "optimal":
+        raise RuntimeError(f"sizing solve failed: status={status} condition={condition}")
+
+    n.generators["p_nom"] = n.generators["p_nom_opt"]
+    n.lines["s_nom"] = n.lines["s_nom_opt"]
+    n.links["p_nom"] = n.links["p_nom_opt"]
+    n.generators["p_nom_extendable"] = False
+    n.lines["s_nom_extendable"] = False
+    n.links["p_nom_extendable"] = False
+    return n
+
+
+def ac_dc_co2():
+    """`ac-dc-dispatch` with a CO2 cap that actually restricts the dispatch.
+
+    `ac-dc-dispatch` cannot test the constraint at all, which is not obvious and
+    took a solved LP to establish. Its emissions land on exactly 1000 -- the cap
+    -- but the multiplier is 0 and *every* tighter cap is infeasible. The reason
+    is structural: gas is both the dirty carrier and the expensive one (4.09-5.89
+    against wind's 0.09-0.11), so minimising cost already minimises emissions and
+    the cap is merely touched on the way to an optimum it never influenced. An
+    implementation that omits the constraint entirely reproduces that objective
+    exactly.
+
+    Making the cap bind therefore requires the dirty plant to be the *cheap* one,
+    so the cap has to displace something it would otherwise be economic to run.
+    Pricing gas below wind does that: unconstrained the network emits 6702 t at a
+    cost of 2819.52, and at a 2000 t cap it costs 3178.55 with a multiplier of
+    -0.0879. The 12.7% spread between those objectives is what a solver that
+    silently drops the constraint gets wrong -- and it is why this fixture exists
+    rather than an assertion bolted onto the existing one.
+
+    The cap sits mid-range deliberately: the multiplier is -0.0879 for every cap
+    from 1200 to 3000, so the fixture is not balanced on a knife edge where a
+    solver tolerance could tip it into a different basis.
+    """
+    n = ac_dc_dispatch()
+    gas = n.generators.carrier == "gas"
+    n.generators.loc[gas, "marginal_cost"] = 0.05
+    n.global_constraints.loc["co2_limit", "constant"] = 2000.0
+    return n
+
+
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
+    "ac-dc-dispatch": ac_dc_dispatch,
+    "ac-dc-co2": ac_dc_co2,
     "storage-hvdc": pypsa.examples.storage_hvdc,
 }
 
@@ -189,6 +252,27 @@ def capture_network(name: str, build) -> dict:
             },
         }
 
+    # Sub-network decomposition. PyPSA forms these from *passive* branches only
+    # -- lines and transformers -- grouped by carrier, which is why a meshed
+    # AC/DC network has separate AC and DC islands joined by links. Links are
+    # controllable and do not merge sub-networks. The component `category` field
+    # in schema.json encodes that distinction, so a reader can derive it rather
+    # than hardcoding a component list.
+    # Computed on `n`, the same object the LPF results below come from, so the two
+    # artefacts in one manifest entry describe the same graph. `lpf()` calls this
+    # internally anyway; calling it here makes the dependency explicit and avoids
+    # building the example a third time.
+    print(f"  {name}: topology")
+    n.determine_network_topology()
+    summary["sub_networks"] = [
+        {
+            "carrier": str(row.carrier),
+            "slack_bus": str(row.slack_bus),
+            "buses": sorted(n.sub_networks.obj[sn].buses_i().tolist()),
+        }
+        for sn, row in n.sub_networks.iterrows()
+    ]
+
     results = {}
 
     print(f"  {name}: linear power flow")
@@ -233,6 +317,17 @@ def capture_network(name: str, build) -> dict:
             "line_p0": frame_to_json(m.lines_t.p0),
             "link_p0": frame_to_json(m.links_t.p0),
             "bus_marginal_price": frame_to_json(m.buses_t.marginal_price),
+            # Shadow price of each global constraint *as solved*. The exported
+            # network CSVs carry a `mu` column too, but on ac-dc-dispatch that is
+            # a stale dual left over from the sizing solve (-2178.29) while the
+            # dispatch problem's own multiplier is 0 -- the CO2 cap there is tight
+            # (emissions land on exactly 1000) yet weakly binding. Confusing the
+            # two makes a redundant constraint look like the explanation for a
+            # nodal-price discrepancy, so the solved value is recorded here where
+            # it cannot be mistaken for the exported one.
+            "global_constraint_mu": {
+                str(k): jsonable(v) for k, v in m.global_constraints.get("mu", {}).items()
+            },
         }
     except Exception as exc:  # noqa: BLE001
         results["optimize"] = {"error": f"{type(exc).__name__}: {exc}"}

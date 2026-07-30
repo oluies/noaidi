@@ -319,9 +319,24 @@ which prices gas below wind so the cap has to displace economic generation: it
 emits 6702 unconstrained at a cost of 2819.52, and 2000 under the cap at 3178.55.
 That 12.7% spread is what a silent drop would have cost, and it is now a golden.
 
-Also not yet implemented: capacity expansion (rejected rather than mis-solved),
-storage (its energy balance couples snapshots), and transformers with
-off-nominal tap ratios.
+Not implemented, and rejected rather than mis-solved in every case:
+
+- **Capacity expansion.** `p_nom_extendable` poses a strictly larger problem with
+  investment variables and capital costs.
+- **Storage.** A storage unit's energy balance couples consecutive snapshots,
+  which dispatch alone cannot represent. `network-pf` handles the same networks
+  fine, because there dispatch is an input rather than an unknown.
+- **Transformers, at any tap ratio.** Not merely off-nominal ones. A transformer
+  is a passive branch and decomposes correctly, but its per-unit impedance is
+  based on `s_nom` and scaled by `tap_ratio` where a line's is based on `v_nom²`.
+  Reusing the line formula is not a small error: for a 380 kV, 500 MVA
+  transformer with `x = 0.1` it gives 6.9e-10 against PyPSA's 2.0e-4, so any
+  cycle crossing the transformer behaves as though it were absent and the LP
+  returns wrong flows reporting `Optimal`. Refused until there is a golden with a
+  transformer to validate the conversion against.
+- **Global constraints other than `primary_energy` with sense `<=`.** PyPSA
+  dispatches on `type` to entirely different builders, so assuming one would
+  build an energy cap as an emissions cap wearing the same right-hand side.
 
 ## L2: linear power flow
 

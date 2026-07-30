@@ -11,13 +11,17 @@ hardware (Spatial/Chisel) without touching the algorithms that call them.
 
 ## Current state
 
-**Prima**, the LP solver, is implemented and validated. Nothing above it exists
-yet.
+**Prima**, the LP solver, is implemented and validated. On top of it sit the L0
+network data model and the first two L2 physics modules — linear optimal power
+flow and linear power flow — each gated on golden-file comparison against a
+pinned PyPSA.
 
-Prima comes first because it is the highest-risk and most reusable piece: a
+Prima came first because it is the highest-risk and most reusable piece: a
 GPU-accelerated first-order LP solver in Scala did not previously exist, and
 every optimisation feature of PyPSA — economic dispatch, LOPF, SCLOPF, unit
-commitment — depends on it.
+commitment — depends on it. Linear power flow does not, and `network-pf`
+accordingly does not depend on Prima: it is a linear solve rather than an
+optimisation.
 
 | Module | What it is |
 | --- | --- |
@@ -32,7 +36,7 @@ commitment — depends on it.
 | `network-lopf` | L2: linear optimal power flow — turns a Network into an LP and solves it with Prima. |
 | `network-pf` | L2: linear power flow — one symmetric positive-definite solve per sub-network. No LP solver involved. |
 
-270 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+294 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.

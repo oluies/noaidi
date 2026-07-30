@@ -61,6 +61,7 @@ object Lopf:
   /** Turn a network into a dispatch LP. */
   def build(network: Network): Model =
     rejectExtendable(network)
+    rejectTransformers(network)
     rejectUnhandled(network)
     rejectDanglingBuses(network)
 
@@ -83,11 +84,10 @@ object Lopf:
       costs += cost
       index
 
-    // Selected by role rather than by name. Transformer is also a passive branch
-    // and carries bus0/bus1 and s_nom with the same meaning as Line; reading only
-    // "Line" silently dropped it, so buses joined only through a transformer came
-    // out disconnected -- infeasible for a valid network, or a plausible dispatch
-    // for a different one.
+    // Selected by role rather than by name, so nothing with a bus0/bus1 is
+    // silently dropped. Transformer is a passive branch too and reaches this
+    // point, but `rejectTransformers` above has already refused it -- see there
+    // for why admitting it would be worse than refusing it.
     def tablesWith(role: Role): IndexedSeq[ComponentTable] =
       network.tables.values.toIndexedSeq.filter(t => Role.of(t.spec) == role && t.size > 0)
 
@@ -118,8 +118,12 @@ object Lopf:
         branch.ids.foreach { id =>
           // A rating is symmetric and applies to apparent power; in the linear
           // model that is a bound on flow in either direction.
-          val sNom = branch.float("s_nom", id)
-          declare(branch.spec.name, id, t, -sNom, sNom, 0.0): Unit
+          //
+          // Derated by `s_max_pu`, which every fixture leaves at 1.0 but an n-1
+          // study does not: at the ordinary value of 0.7 a bound of plain `s_nom`
+          // lets flows run 43% above the real rating.
+          val limit = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
+          declare(branch.spec.name, id, t, -limit, limit, 0.0): Unit
         }
       }
 
@@ -185,17 +189,38 @@ object Lopf:
     // underdetermined, and where a rating binds it lets the model route around
     // the limit and undercut the true cost.
     val cycles = Cycles.basis(network)
+
+    // Impedance is static, so it is computed once per branch rather than once per
+    // branch per snapshot. Each lookup walks a table and reads two columns, and a
+    // year-long network has 8760 snapshots.
+    val impedances = cycles.flatMap { cycle =>
+      cycle.terms.map { (component, id, _) =>
+        (component, id) -> Cycles.impedance(network, component, id, cycle.carrier)
+      }
+    }.toMap
+
+    // A cycle whose coefficients are all zero imposes nothing. Earlier this was
+    // dropped to keep the matrix free of empty rows, which is a real but
+    // secondary concern -- the primary one is that such a cycle leaves its flows
+    // exactly as underdetermined as having no constraint at all, and the solve
+    // then returns a too-cheap answer reporting Optimal. Since the condition is
+    // detectable here, discarding the evidence is the one thing not to do.
+    cycles.foreach { cycle =>
+      if !cycle.terms.exists((component, id, _) => impedances((component, id)) != 0.0) then
+        throw new UnsupportedNetwork(
+          "every branch in the cycle " +
+            cycle.terms.map((c, id, _) => s"$c '$id'").mkString(", ") +
+            s" has zero impedance in its ${cycle.carrier} sub-network, so Kirchhoff's voltage law " +
+            "would impose nothing and the flows around it would be left free"
+        )
+    }
+
     snapshots.foreach { t =>
       cycles.foreach { cycle =>
         val terms = cycle.terms.map { (component, id, orientation) =>
-          val z = Cycles.impedance(network, component, id, cycle.subNetwork)
-          (columns((component, id, t)), orientation * z)
+          (columns((component, id, t)), orientation * impedances((component, id)))
         }
-        // A cycle whose branches are all zero-impedance would give a vacuous
-        // constraint; skipping it keeps the matrix free of empty rows.
-        if terms.exists((_, coefficient) => coefficient != 0.0) then
-          builder.equalityConstraint(terms, 0.0)
-          rowIndex += 1
+        builder.equalityConstraint(terms, 0.0)
       }
     }
 
@@ -209,18 +234,42 @@ object Lopf:
       constraints.ids.foreach { id =>
         val sense    = constraints.string("sense", id)
         val constant = constraints.float("constant", id)
+
+        // `type` selects an entirely different left-hand side in PyPSA --
+        // primary_energy, tech_capacity_expansion_limit and operational_limit are
+        // three separate builders. Assuming the first would take an
+        // `operational_limit` capping one carrier's *energy* and build it as an
+        // emissions-weighted sum over every emitting generator: a different
+        // constraint wearing the same right-hand side, returning Optimal.
+        val kind = constraints.string("type", id)
+        if kind != "primary_energy" then
+          throw new UnsupportedNetwork(
+            s"global constraint '$id' has type '$kind'; only 'primary_energy' is implemented"
+          )
         if sense != "<=" then
           throw new UnsupportedNetwork(
             s"global constraint '$id' has sense '$sense'; only '<=' is implemented"
           )
 
+        // Which carrier column is charged is data, not a constant. Hardcoding
+        // `co2_emissions` silently reads the wrong column -- or, since a missing
+        // column reads as zero, drops every term and then drops the row.
+        val attribute = constraints.string("carrier_attribute", id)
+
         // Emissions are per unit of *primary energy*, so a generator's output is
         // divided by its efficiency before being charged.
+        //
+        // Weighted by the `generators` column, not `objective`. PyPSA uses a
+        // different weighting for the emissions sum than for cost, and they are
+        // separate columns of snapshots.csv that a representative-period study
+        // sets apart on purpose. Every fixture holds both at 1.0, so no
+        // comparison here can see the difference -- which is exactly why it has to
+        // be read rather than assumed.
         val terms = snapshots.flatMap { t =>
-          val weight = network.weighting("objective", t)
+          val weight = network.weighting("generators", t)
           generators.flatMap { g =>
             g.ids.flatMap { gid =>
-              val intensity = carrierEmissions(network, g.string("carrier", gid))
+              val intensity  = carrierAttribute(network, g.string("carrier", gid), attribute)
               val efficiency = g.valueAt("efficiency", gid, t)
               if intensity == 0.0 || efficiency == 0.0 then None
               else Some((columns((g.spec.name, gid, t)), intensity / efficiency * weight))
@@ -273,6 +322,33 @@ object Lopf:
       }
     }
 
+  /** Reject transformers, which are passive branches this cannot yet price.
+    *
+    * Selecting branches by role rather than by name fixed one defect and created
+    * a worse one. A transformer now gets an LP column and enters the cycle basis,
+    * but [[Cycles.impedance]] applies the '''line''' per-unit base, and the two
+    * are not the same. PyPSA converts a line from voltage (`x / v_nom²`) and a
+    * transformer from its own rating (`x / s_nom`, then scaled by `tap_ratio`).
+    * For a 380 kV, 500 MVA transformer with `x = 0.1` that is 2.0e-4 against
+    * 6.9e-10 — six orders of magnitude, enough that any cycle crossing the
+    * transformer behaves as though the transformer were not there, and the LP
+    * comes back optimal with wrong flows.
+    *
+    * So this is refused until there is a golden with a transformer in it to
+    * validate the conversion against. Refusing is not the timid option here: a
+    * crash and a rejection are both loud, and a silently plausible dispatch is
+    * the one outcome that cannot be caught downstream.
+    */
+  private def rejectTransformers(network: Network): Unit =
+    network.table("Transformer").foreach { table =>
+      if table.size > 0 then
+        throw new UnsupportedNetwork(
+          s"network has ${table.size} Transformer(s); their per-unit impedance is based on s_nom " +
+            "and tap_ratio rather than v_nom, which is not implemented, and reusing the line " +
+            "formula would give a feasible LP with wrong flows"
+        )
+    }
+
   /** Reject component classes the builder does not model.
     *
     * Silently dropping a component is the worst available outcome: the LP stays
@@ -301,31 +377,20 @@ object Lopf:
     * `Topology.danglingReferences`, which the model layer already made throw.
     */
   private def rejectDanglingBuses(network: Network): Unit =
-    val known = network.table("Bus").map(_.ids.toSet).getOrElse(Set.empty)
-
-    Topology.danglingReferences(network).headOption.foreach { (component, id, port, bus) =>
-      throw new UnsupportedNetwork(
-        s"$component '$id' references unknown bus '$bus' via $port"
-      )
+    Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
+      throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")
     }
 
-    network.tables.values.foreach { table =>
-      if Role.of(table.spec) == Role.Attached && table.spec.attribute("bus").isDefined then
-        table.ids.foreach { id =>
-          val bus = table.string("bus", id)
-          if !known.contains(bus) then
-            throw new UnsupportedNetwork(
-              s"${table.spec.name} '$id' is attached to unknown bus '$bus'"
-            )
-        }
-    }
-
-  /** CO2 intensity of a carrier, or zero if it emits nothing. */
-  private def carrierEmissions(network: Network, carrier: String): Double =
+  /** A carrier's value for the attribute a global constraint charges.
+    *
+    * Zero when the carrier is unknown or the column absent, which is the right
+    * reading: a carrier with no declared intensity contributes nothing to the cap.
+    */
+  private def carrierAttribute(network: Network, carrier: String, attribute: String): Double =
     network
       .table("Carrier")
-      .filter(_.has(carrier))
-      .map(_.float("co2_emissions", carrier))
+      .filter(t => t.has(carrier) && (t.spec.attribute(attribute).isDefined || t.static.contains(attribute)))
+      .map(_.float(attribute, carrier))
       .filter(_.isFinite)
       .getOrElse(0.0)
 

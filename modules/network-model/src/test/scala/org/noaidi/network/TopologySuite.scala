@@ -45,7 +45,16 @@ class TopologySuite extends munit.FunSuite:
     assertEquals(Role.of(schema("LineType")), Role.None)
   }
 
-  List("ac-dc-meshed", "storage-hvdc").foreach { name =>
+  /** Every golden network.
+    *
+    * `ac-dc-dispatch` and `ac-dc-co2` were missing here, and they are the only two
+    * carrying solved output series and output columns -- exactly the shape the
+    * reader and writer had never been exercised on.
+    */
+  private val goldenNetworks =
+    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "storage-hvdc")
+
+  goldenNetworks.foreach { name =>
     test(s"$name decomposes into the sub-networks PyPSA found") {
       assume(available, "goldens missing")
       val expected = manifest("networks")(name)("sub_networks").arr.map { sn =>
@@ -300,7 +309,7 @@ class TopologySuite extends munit.FunSuite:
 
   test("every bus belongs to exactly one sub-network") {
     assume(available, "goldens missing")
-    List("ac-dc-meshed", "storage-hvdc").foreach { name =>
+    goldenNetworks.foreach { name =>
       val n    = network(name)
       val all  = n.require("Bus").ids.toSet
       val seen = Topology.subNetworks(n).flatMap(_.buses)
@@ -336,7 +345,7 @@ class TopologySuite extends munit.FunSuite:
 
   test("neither reference network has an isolated bus") {
     assume(available, "goldens missing")
-    List("ac-dc-meshed", "storage-hvdc").foreach { name =>
+    goldenNetworks.foreach { name =>
       assertEquals(Topology.isolatedBuses(network(name)), IndexedSeq.empty, name)
     }
   }

@@ -25,15 +25,58 @@ object Cholesky:
     */
   final class NotPositiveDefinite(message: String) extends RuntimeException(message)
 
+  /** A factorised matrix, reusable across right-hand sides.
+    *
+    * This is the whole reason to separate factorisation from solving. A power flow
+    * holds the network fixed and varies only the injections, so one factorisation
+    * serves every snapshot — O(n³) once instead of once per hour of a year.
+    */
+  final class Factorisation private[pf] (n: Int, l: IArray[Double]):
+    def size: Int = n
+
+    def solve(rhs: IArray[Double]): IArray[Double] =
+      require(rhs.length == n, s"rhs is ${rhs.length} entries, expected $n")
+      if n == 0 then return IArray.empty
+
+      // Forward substitution: L y = rhs.
+      val y = new Array[Double](n)
+      var i = 0
+      while i < n do
+        var sum = rhs(i)
+        var k   = 0
+        while k < i do
+          sum -= l(i * n + k) * y(k)
+          k += 1
+        y(i) = sum / l(i * n + i)
+        i += 1
+
+      // Back substitution: L^T x = y.
+      val x = new Array[Double](n)
+      var r = n - 1
+      while r >= 0 do
+        var sum = y(r)
+        var k   = r + 1
+        while k < n do
+          sum -= l(k * n + r) * x(k)
+          k += 1
+        x(r) = sum / l(r * n + r)
+        r -= 1
+
+      IArray.unsafeFromArray(x)
+
   /** Solve `a x = rhs` for a symmetric positive-definite `a`.
     *
     * `a` is row-major `n × n`. Only the lower triangle is read, so a caller that
     * fills one triangle need not mirror it.
     */
   def solve(n: Int, a: IArray[Double], rhs: IArray[Double]): IArray[Double] =
-    require(a.length == n * n, s"matrix is ${a.length} entries, expected ${n * n}")
     require(rhs.length == n, s"rhs is ${rhs.length} entries, expected $n")
-    if n == 0 then return IArray.empty
+    factor(n, a).solve(rhs)
+
+  /** Factorise once, to solve against many right-hand sides. */
+  def factor(n: Int, a: IArray[Double]): Factorisation =
+    require(a.length == n * n, s"matrix is ${a.length} entries, expected ${n * n}")
+    if n == 0 then return new Factorisation(0, IArray.empty)
 
     // Lower-triangular factor, computed in place into its own buffer so `a` stays
     // untouched and a caller can reuse it across snapshots.
@@ -71,28 +114,4 @@ object Cholesky:
         i += 1
       j += 1
 
-    // Forward substitution: L y = rhs.
-    val y = new Array[Double](n)
-    var i = 0
-    while i < n do
-      var sum = rhs(i)
-      var k   = 0
-      while k < i do
-        sum -= l(i * n + k) * y(k)
-        k += 1
-      y(i) = sum / l(i * n + i)
-      i += 1
-
-    // Back substitution: L^T x = y.
-    val x = new Array[Double](n)
-    var r = n - 1
-    while r >= 0 do
-      var sum = y(r)
-      var k   = r + 1
-      while k < n do
-        sum -= l(k * n + r) * x(k)
-        k += 1
-      x(r) = sum / l(r * n + r)
-      r -= 1
-
-    IArray.unsafeFromArray(x)
+    new Factorisation(n, IArray.unsafeFromArray(l))

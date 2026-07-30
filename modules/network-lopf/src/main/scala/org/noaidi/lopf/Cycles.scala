@@ -9,7 +9,7 @@ import scala.collection.mutable
   * when the cycle traverses the branch from `bus0` to `bus1` and `-1` the other
   * way. Kirchhoff's voltage law is then `sum(orientation * impedance * flow) = 0`.
   */
-final case class Cycle(subNetwork: String, terms: IndexedSeq[(String, String, Double)]):
+final case class Cycle(carrier: String, terms: IndexedSeq[(String, String, Double)]):
   def length: Int = terms.length
 
 object Cycles:
@@ -39,10 +39,22 @@ object Cycles:
     val cycles  = mutable.ArrayBuffer.empty[Cycle]
     val visited = mutable.Set.empty[String]
 
+    // Carrier labels come from the decomposition rather than being recomputed
+    // here. `Topology.subNetworks` reads its label off the island's *sorted* first
+    // bus so that it agrees with the `buses` field a caller sees; walking from the
+    // BFS root would read file order instead, and on a mixed-carrier island --
+    // which `SubNetwork.mixedCarriers` reports rather than rejects -- the two
+    // disagree. Cycles is the side that decides whether `x` or `r` is used, so a
+    // disagreement here is a wrong impedance, not a cosmetic mismatch.
+    val carrierOf = Topology
+      .subNetworks(network)
+      .flatMap(sub => sub.buses.map(_ -> sub.carrier))
+      .toMap
+
     network.table("Bus").foreach { buses =>
       buses.ids.foreach { root =>
         if !visited.contains(root) && adjacency.contains(root) then
-          cycles ++= basisFrom(root, adjacency, visited, network)
+          cycles ++= basisFrom(root, adjacency, visited, carrierOf.getOrElse(root, ""))
       }
     }
     cycles.toIndexedSeq
@@ -64,7 +76,7 @@ object Cycles:
       root: String,
       adjacency: mutable.Map[String, mutable.ArrayBuffer[Edge]],
       visited: mutable.Set[String],
-      network: Network,
+      carrier: String,
   ): IndexedSeq[Cycle] =
     // Parent edge and depth per bus, so a cycle's two arms can be walked up to
     // their common ancestor without searching.
@@ -86,12 +98,15 @@ object Cycles:
           order.enqueue(next)
       }
 
-    val carrier = subNetworkCarrier(network, root)
-    val cycles  = mutable.ArrayBuffer.empty[Cycle]
+    val cycles = mutable.ArrayBuffer.empty[Cycle]
 
     // Every edge not in the tree closes exactly one cycle with the tree path
-    // between its endpoints.
-    adjacency.values.flatten.toSeq.distinct.foreach { e =>
+    // between its endpoints. Scanned over this component's own buses rather than
+    // the whole network's adjacency, which was O(components x edges).
+    depth.keys.toIndexedSeq.sorted
+      .flatMap(bus => adjacency.getOrElse(bus, mutable.ArrayBuffer.empty))
+      .distinct
+      .foreach { e =>
       if !treeEdges.contains((e.component, e.id)) && depth.contains(e.bus0) && depth.contains(e.bus1) then
         val terms = mutable.ArrayBuffer.empty[(String, String, Double)]
         // Traverse the closing edge from bus0 to bus1.
@@ -135,9 +150,6 @@ object Cycles:
         cycles += Cycle(carrier, terms.toIndexedSeq)
     }
     cycles.toIndexedSeq
-
-  private def subNetworkCarrier(network: Network, bus: String): String =
-    network.table("Bus").map(_.string("carrier", bus)).getOrElse("")
 
   /** Per-unit impedance a branch contributes to a voltage constraint.
     *

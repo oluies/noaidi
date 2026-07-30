@@ -26,6 +26,10 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
   private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
 
+  // `ac-dc-co2` is deliberately absent: it differs from `ac-dc-dispatch` only in
+  // generator marginal costs and a CO2 cap, neither of which is an input to a
+  // power flow, so its LPF golden is identical and would add a duplicate run
+  // rather than coverage.
   private val networks = List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc")
 
   private def network(name: String): Network =
@@ -37,7 +41,17 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   private def manifest: ujson.Value =
     ujson.read(Files.readString(goldens.resolve("manifest.json")))
 
-  private def frameValue(frame: ujson.Value, row: Int, column: String): Double =
+  /** A golden frame cell, by row and entity name.
+    *
+    * The row index is checked against the golden's own `index` rather than
+    * trusted. The two artefacts spell timestamps differently -- `2015-01-01
+    * 00:00:00` in snapshots.csv against `2015-01-01T00:00:00` in the JSON -- so
+    * positional indexing is right today and silently compares the wrong rows the
+    * moment either side reorders.
+    */
+  private def frameValue(frame: ujson.Value, row: Int, column: String, snapshot: String): Double =
+    val stamp = frame("index")(row).str.replace('T', ' ')
+    assertEquals(stamp, snapshot.replace('T', ' '), s"golden row $row is not the expected snapshot")
     val index = frame("columns").arr.indexWhere(_.str == column)
     assert(index >= 0, s"golden frame has no column '$column'")
     frame("values")(row)(index) match
@@ -61,7 +75,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
         n.require("Bus").ids.foreach { bus =>
           assertEqualsDouble(
             result.voltageAngle(bus, t),
-            frameValue(frame, t, bus),
+            frameValue(frame, t, bus, n.snapshots(t)),
             1e-9,
             s"$name snapshot $t, bus $bus",
           )
@@ -72,7 +86,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
     test(s"line flows match PyPSA on $name") {
       assume(available, "goldens missing")
       val expected = lpf(name)
-      assume(!expected.obj.contains("error"), "golden lpf failed")
+      assert(!expected.obj.contains("error"), s"golden lpf failed: ${expected.obj.get("error")}")
 
       val n      = network(name)
       val result = LinearPowerFlow.solve(n)
@@ -82,7 +96,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
         n.require("Line").ids.foreach { line =>
           assertEqualsDouble(
             result.flow("Line", line, t),
-            frameValue(frame, t, line),
+            frameValue(frame, t, line, n.snapshots(t)),
             1e-6,
             s"$name snapshot $t, line $line",
           )
@@ -119,7 +133,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       // offset. On ac-dc-meshed, Manchester Wind's 1308.81 is exactly the sum of
       // the London, Norwich and Manchester loads.
       val expected = lpf(name)
-      assume(!expected.obj.contains("error"), "golden lpf failed")
+      assert(!expected.obj.contains("error"), s"golden lpf failed: ${expected.obj.get("error")}")
 
       val n      = network(name)
       val result = LinearPowerFlow.solve(n)
@@ -129,7 +143,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
         n.require("Generator").ids.foreach { g =>
           assertEqualsDouble(
             result.dispatch("Generator", g, t),
-            frameValue(frame, t, g),
+            frameValue(frame, t, g, n.snapshots(t)),
             1e-6,
             s"$name snapshot $t, generator $g",
           )
@@ -196,6 +210,96 @@ class LinearPowerFlowSuite extends munit.FunSuite:
     }
   }
 
+  test("a DC island takes its susceptance from resistance, numerically") {
+    assume(available, "goldens missing")
+    // The AC/DC split is pinned only *negatively* by the goldens, which is worth
+    // being explicit about: every DC island in them has zero injection at every
+    // bus, so `B theta = 0` and theta = 0 for any positive susceptance whatsoever.
+    // Choosing reactance there fails only because the DC lines carry x = 0 and the
+    // guard throws. Nothing checks the magnitude.
+    //
+    // So: a two-bus DC island with an actual load. v_nom = 2 and r = 0.5 give
+    // susceptance v_nom^2/r = 8, and a 4 MW load at B puts theta_B at -0.5 rad
+    // with 4 MW flowing A -> B. Reading `x` instead would divide by zero; reading
+    // r without the v_nom^2 scale would give theta_B = -2.
+    val dir = Files.createTempDirectory("noaidi-pf-dc-")
+    temporaries += dir
+    Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nA,2.0,DC\nB,2.0,DC\n")
+    Files.writeString(dir.resolve("lines.csv"), "name,bus0,bus1,x,r,s_nom\nl,A,B,0.0,0.5,100.0\n")
+    Files.writeString(dir.resolve("generators.csv"), "name,bus,control,carrier\ng,A,PQ,wind\n")
+    Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nd,B,4.0\n")
+    Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n0,2015-01-01 00:00:00\n")
+    val n      = CsvReader.read(dir, schema, "pf-dc")
+    val result = LinearPowerFlow.solve(n)
+
+    assertEqualsDouble(result.voltageAngle("A", 0), 0.0, 1e-12, "slack angle")
+    assertEqualsDouble(result.voltageAngle("B", 0), -0.5, 1e-12, "v_nom^2/r susceptance")
+    assertEqualsDouble(result.flow("Line", "l", 0), 4.0, 1e-9)
+    // The slack generator serves the load, and reports it as a positive dispatch.
+    assertEqualsDouble(result.dispatch("Generator", "g", 0), 4.0, 1e-9)
+  }
+
+  test("a load reports PyPSA's sign, not its injection") {
+    assume(available, "goldens missing")
+    // `sign` is -1 for a Load, and it belongs to the injection arithmetic alone.
+    // Folding it into the recorded dispatch made a 1000 MW load report -1000
+    // where PyPSA's `loads_t.p` says +1000 -- under an accessor documented as
+    // returning MW, and disagreeing with the sibling accessor in Lopf. Nothing
+    // caught it because the golden comparison only ever reads generators, all of
+    // which carry sign = +1.
+    val n      = network("ac-dc-meshed")
+    val result = LinearPowerFlow.solve(n)
+    val loads  = n.require("Load")
+
+    n.snapshots.indices.foreach { t =>
+      loads.ids.foreach { l =>
+        val demand = loads.valueAt("p_set", l, t)
+        assertEqualsDouble(result.dispatch("Load", l, t), demand, 1e-9, s"snapshot $t, load $l")
+        assert(demand > 0.0, s"fixture load $l is zero, so the sign cannot be observed")
+      }
+    }
+  }
+
+  test("a one-port attached to a nonexistent bus is rejected") {
+    assume(available, "goldens missing")
+    // Branch endpoints were validated and one-ports were not, so a Load with a
+    // stale bus matched nothing in `injections` and simply vanished: the island's
+    // demand dropped and the angles came out those of a different network. The
+    // sibling LOPF module already rejected this, which made the same broken input
+    // loud through one entry point and silently wrong through the other.
+    val broken  = mutate("ac-dc-meshed", "loads.csv", _.replace(",Manchester,", ",Mancester,"))
+    val failure = intercept[LinearPowerFlow.UnsupportedNetwork](LinearPowerFlow.solve(broken))
+    assert(failure.getMessage.contains("Mancester"), failure.getMessage)
+  }
+
+  test("a bus with no v_nom is refused rather than rescaled") {
+    assume(available, "goldens missing")
+    // v_nom^2 does not cancel, so a branch whose base is missing ends up scaled
+    // differently from every other branch in its island and every angle in that
+    // island is wrong. Previously this fell back to a different per-unit base
+    // without a word.
+    val broken = mutate("ac-dc-meshed", "buses.csv", _.replace(",380.0,", ",0.0,"))
+    val failure = intercept[LinearPowerFlow.UnsupportedNetwork](LinearPowerFlow.solve(broken))
+    assert(failure.getMessage.contains("v_nom"), failure.getMessage)
+  }
+
+  /** A copy of a golden network with one file rewritten, read back through the
+    * real parse path.
+    */
+  private def mutate(name: String, file: String, edit: String => String): Network =
+    val dir = Files.createTempDirectory("noaidi-pf-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve(name)
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    val target = dir.resolve(file)
+    val before = Files.readString(target)
+    val after  = edit(before)
+    assertNotEquals(after, before, s"the edit to $file changed nothing")
+    Files.writeString(target, after)
+    CsvReader.read(dir, schema, name)
+
   test("a zero impedance in the relevant attribute is refused") {
     assume(available, "goldens missing")
     // ac-dc-meshed's AC lines carry r = 0 and its DC lines carry x = 0 — PyPSA
@@ -224,8 +328,8 @@ class LinearPowerFlowSuite extends munit.FunSuite:
     val dir    = Files.createTempDirectory("noaidi-pf-")
     temporaries += dir
     val source = goldens.resolve("networks").resolve("ac-dc-meshed")
-    Files.list(source).iterator.forEachRemaining { f =>
-      Files.copy(f, dir.resolve(f.getFileName.toString))
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
     }
     val buses = dir.resolve("buses.csv")
     val text  = Files.readString(buses)
@@ -241,5 +345,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   override def afterAll(): Unit =
     temporaries.foreach { dir =>
       if Files.exists(dir) then
-        Files.walk(dir).sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        scala.util.Using.resource(Files.walk(dir)) { paths =>
+          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        }
     }

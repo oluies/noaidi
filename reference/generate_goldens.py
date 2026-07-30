@@ -204,9 +204,39 @@ def component_schema() -> dict:
     return schema
 
 
+def series_columns(target: Path, component) -> dict:
+    """Time-series columns as the CSV export actually wrote them.
+
+    One file per varying attribute, named `<list_name>-<attr>.csv`, whose header
+    is an empty cell for the snapshot index followed by the entities that vary.
+    """
+    found = {}
+    for attr in component.dynamic:
+        path = target / f"{component.list_name}-{attr}.csv"
+        if not path.exists():
+            continue
+        with path.open() as handle:
+            header = handle.readline().rstrip("\n").split(",")
+        # Drop the leading index column, which holds the snapshot label.
+        entities = header[1:]
+        if entities:
+            found[str(attr)] = entities
+    return found
+
+
 def capture_network(name: str, build) -> dict:
     print(f"  {name}: building")
     n = build()
+
+    # Before the export, not after. `buses.csv` carries a `sub_network` column
+    # naming the island each bus belongs to, and `sub_networks.csv` carries the
+    # islands themselves. Exporting first wrote a `buses.csv` whose `sub_network`
+    # values came from whatever the loaded network happened to hold -- on
+    # ac-dc-meshed, Norway pointing at sub_network 3 while sub_networks.csv listed
+    # only 0-2. That is a dangling reference committed inside a fixture, which is
+    # the one place it can quietly become the expected answer.
+    print(f"  {name}: topology")
+    n.determine_network_topology()
 
     target = OUT / "networks" / name
     if target.exists():
@@ -245,11 +275,17 @@ def capture_network(name: str, build) -> dict:
             # Only the entities that actually vary get a time series; the rest
             # fall back to the static value. Reproducing that is the difference
             # between matching PyPSA's files and merely being equivalent.
-            "varying": {
-                str(attr): [str(c) for c in frame.columns]
-                for attr, frame in component.dynamic.items()
-                if frame.shape[1] > 0
-            },
+            #
+            # Read from the exported header for the same reason `exported_columns`
+            # is, and it is not a formality: the omit-defaults rule applies to
+            # *series* columns too, which the static-column comment above does not
+            # imply and which nothing in the documentation states. On
+            # ac-dc-dispatch the in-memory `buses_t.v_ang` carries all nine buses
+            # while the file carries eight -- Norway is dropped, being a
+            # single-bus island whose angle is 0.0 at every snapshot and therefore
+            # entirely default. Recording the in-memory frame would demand the
+            # reader invent a column PyPSA did not write.
+            "varying": series_columns(target, component),
         }
 
     # Sub-network decomposition. PyPSA forms these from *passive* branches only
@@ -262,8 +298,6 @@ def capture_network(name: str, build) -> dict:
     # artefacts in one manifest entry describe the same graph. `lpf()` calls this
     # internally anyway; calling it here makes the dependency explicit and avoids
     # building the example a third time.
-    print(f"  {name}: topology")
-    n.determine_network_topology()
     summary["sub_networks"] = [
         {
             "carrier": str(row.carrier),

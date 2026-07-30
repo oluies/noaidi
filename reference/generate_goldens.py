@@ -43,8 +43,39 @@ OUT = ROOT / "goldens"
 # Small first, so a failure is diagnosable. `ac_dc_meshed` is the brief's
 # starting point: meshed AC and DC in one network, which exercises the parts of
 # the model a purely-AC example would not.
+def ac_dc_dispatch():
+    """`ac_dc_meshed` with capacity fixed, so the LP is pure dispatch.
+
+    The stock example is a capacity *expansion* problem -- lines and generators
+    carry `s_nom_extendable`/`p_nom_extendable` -- which is why its objective is
+    negative and its `objective_constant` large. Reproducing that needs
+    investment variables and capital costs, so this variant exists to give the
+    dispatch formulation a target it can actually be checked against before that
+    lands.
+    """
+    n = pypsa.examples.ac_dc_meshed()
+
+    # Fixing capacity at the *stock* p_nom is infeasible -- there is not enough
+    # generation to serve the load, because the example is posed so that capacity
+    # is chosen rather than given. So the expansion problem is solved first and
+    # its optimal capacities become the fixed ones, which guarantees the dispatch
+    # problem is feasible and gives it a meaningful optimum.
+    status, condition = n.optimize(solver_name="highs")
+    if status != "ok" or condition != "optimal":
+        raise RuntimeError(f"sizing solve failed: status={status} condition={condition}")
+
+    n.generators["p_nom"] = n.generators["p_nom_opt"]
+    n.lines["s_nom"] = n.lines["s_nom_opt"]
+    n.links["p_nom"] = n.links["p_nom_opt"]
+    n.generators["p_nom_extendable"] = False
+    n.lines["s_nom_extendable"] = False
+    n.links["p_nom_extendable"] = False
+    return n
+
+
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
+    "ac-dc-dispatch": ac_dc_dispatch,
     "storage-hvdc": pypsa.examples.storage_hvdc,
 }
 

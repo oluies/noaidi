@@ -29,8 +29,9 @@ commitment — depends on it.
 | `prima-cyfra` | GPU spike. Not in the root build — see below. |
 | `prima-netlib` | Netlib LP corpus. Not in the root build; fetches on first run. |
 | `network-model` | L0: the PyPSA network data model and topology — schema-driven, round-tripping PyPSA's CSV directory format. |
+| `network-lopf` | L2: linear optimal power flow — turns a Network into an LP and solves it with Prima. |
 
-228 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+236 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.

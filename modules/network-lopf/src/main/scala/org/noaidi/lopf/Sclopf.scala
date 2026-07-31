@@ -109,12 +109,28 @@ object Sclopf:
     // the type system says so, and `LopfResult.marginalPrice` reads through that
     // map, so a future equality row added ahead of the balances would make SCLOPF
     // nodal prices silently wrong. Checked rather than trusted.
+    // What the row-by-row copy actually requires: each original row maps to a
+    // single standard-form row of the same index. `Direct` and `Negated` both
+    // satisfy that; only `Range` (one original row becoming two) and a
+    // reordering would break it.
+    //
+    // Demanding `Direct` alone was too strong and regressed real networks:
+    // `Lopf.build` emits global constraints through `lessThan`, which the
+    // builder records as `Negated`, so every CO2-capped network -- `ac-dc-co2`
+    // and `storage-hvdc` among the goldens -- was rejected outright. That traded
+    // a sign quirk in output nothing reads for a hard refusal of secure dispatch
+    // under an emissions cap, which is one of SCLOPF's commonest uses.
     val baseProblem = base.problem
-    require(
-      base.map.balanceRows.isEmpty || base.map.balanceRows.values.max < baseProblem.numEqualities,
-      "balance rows are no longer the leading equalities, so reusing the base variable map " +
-        "would misindex the duals",
-    )
+    (0 until base.translation.numOriginalRows).foreach { r =>
+      base.translation.expansionOf(r) match
+        case RowExpansion.Direct(row) if row == r  => ()
+        case RowExpansion.Negated(row) if row == r => ()
+        case other =>
+          throw new UnsupportedNetwork(
+            s"the base model maps original row $r to $other rather than to the standard-form row " +
+              "of the same index, so the row-by-row copy would misindex its duals"
+          )
+    }
 
     // Copy the base problem's bounds, objective and rows.
     (0 until baseProblem.numVariables).foreach { j =>
@@ -123,22 +139,24 @@ object Sclopf:
     }
     builder.objectiveOffset(baseProblem.objectiveOffset)
 
+    // A row the base negated is re-emitted negated, so the rebuilt translation
+    // records `Negated` too and `originalDuals` returns the same sign the base
+    // model would. Re-emitting it through `greaterThan` would copy the primal
+    // correctly and silently flip that dual.
+    val negated = (0 until base.translation.numOriginalRows).collect {
+      case r if base.translation.expansionOf(r).isInstanceOf[RowExpansion.Negated] => r
+    }.toSet
+
     val matrix = baseProblem.constraintMatrix
     (0 until baseProblem.numConstraints).foreach { r =>
       val terms = (matrix.rowPtr(r) until matrix.rowPtr(r + 1))
         .map(p => (matrix.colIndices(p), matrix.values(p)))
       val q = baseProblem.rhs(r)
       if r < baseProblem.numEqualities then builder.equalityConstraint(terms, q)
+      else if negated.contains(r) then
+        builder.lessThan(terms.map((c, a) => (c, -a)), -q)
       else builder.greaterThan(terms, q)
     }
-
-    // A range row in the base model would have been split into two independent
-    // `>=` rows by the copy above, and its dual could then no longer be
-    // recombined. `Lopf.build` emits only equalities and one-sided rows today.
-    require(
-      baseProblem.numConstraints == base.translation.numOriginalRows,
-      "the base model contains a range row, which the row-by-row copy would split",
-    )
 
     // The security rows.
     snapshots.foreach { t =>
@@ -149,12 +167,13 @@ object Sclopf:
         val column = base.map.column(component, id, t)
 
         requested.foreach { outage =>
-          // Only within one sub-network: an outage cannot move flow onto a
-          // branch it has no electrical path to, and `Lodf.factor` returns zero
-          // for such a pair rather than a missing entry.
-          if lodf.contains((outage.component, outage.id)) && (outage.component, outage.id) != affected
-          then
-            val factor = lodf.factor(affected, (outage.component, outage.id))
+          // `factorOrZero`, not `factor`: an outage cannot move flow onto a
+          // branch it has no electrical path to, and zero is the physically
+          // correct answer for a pair spanning two sub-networks. `factor` throws
+          // for a branch it does not know, which is right for a typo and wrong
+          // here -- this is the case the two accessors exist to separate.
+          if (outage.component, outage.id) != affected then
+            val factor = lodf.factorOrZero(affected, (outage.component, outage.id))
             if factor != 0.0 then
               val outageColumn = base.map.column(outage.component, outage.id, t)
               val terms        = Seq((column, 1.0), (outageColumn, factor))

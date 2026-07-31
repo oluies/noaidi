@@ -7,11 +7,15 @@ The point is not that PyPSA is authoritative about power systems. It is that the
 port has to agree with *this implementation*, including wherever it is
 idiosyncratic, or the two are not interchangeable.
 
+`tables` is PyPSA's optional HDF5 dependency. Without it `export_to_hdf5` raises,
+so the `.h5` goldens cannot be written — netCDF needs nothing extra, because
+xarray's netCDF-4 backend is already a PyPSA dependency.
+
 ## Recreating
 
 ```bash
 uv venv reference/.venv --python 3.13
-uv pip install --python reference/.venv/bin/python "pypsa==1.2.4" highspy
+uv pip install --python reference/.venv/bin/python "pypsa==1.2.4" highspy tables
 ./reference/.venv/bin/python reference/generate_goldens.py
 ```
 

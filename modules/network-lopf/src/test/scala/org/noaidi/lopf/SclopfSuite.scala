@@ -3,7 +3,7 @@ package org.noaidi.lopf
 import java.nio.file.{Files, Path, Paths}
 import org.noaidi.network.{CsvReader, Network, Schema, Topology}
 import org.noaidi.pf.Lodf
-import org.noaidi.prima.{PdhgParams, SolveStatus}
+import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
 
 /** Security-constrained dispatch against PyPSA's own SCLOPF.
   *
@@ -201,20 +201,7 @@ class SclopfSuite extends munit.FunSuite:
     // radial spur -- ordinary in any real network -- used to make every SCLOPF
     // solve throw, even for an outage on the meshed triangle that has nothing to
     // do with it.
-    val dir = Files.createTempDirectory("noaidi-sclopf-spur-")
-    temporaries += dir
-    val source = goldens.resolve("networks").resolve("sclopf-triangle")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
-    val buses = dir.resolve("buses.csv")
-    Files.writeString(buses, Files.readString(buses).stripTrailing + "\nD,380.0\n")
-    val lines = dir.resolve("lines.csv")
-    Files.writeString(lines, Files.readString(lines).stripTrailing + "\nCD,C,D,0.1,0.0,150.0\n")
-    val loads = dir.resolve("loads.csv")
-    Files.writeString(loads, Files.readString(loads).stripTrailing + "\nld,D\n")
-
-    val spurred = CsvReader.read(dir, schema, "sclopf-triangle")
+    val spurred = triangleWithSpur()
     // The spur really is a bridge, so naming it is still refused.
     intercept[Lodf.Unsupported](
       Sclopf.build(spurred, Some(IndexedSeq(Sclopf.Outage("Line", "CD"))))
@@ -258,6 +245,95 @@ class SclopfSuite extends munit.FunSuite:
     assertEquals(one.problem.numConstraints - base, 4, "expected two two-sided rows")
   }
 
+  test("a network carrying a global constraint still builds") {
+    assume(available, "goldens missing")
+    // The regression this pins: `Lopf.build` emits a CO2 cap through `lessThan`,
+    // which the builder records as a negated row, and an invariant demanding
+    // every row be `Direct` rejected the whole network. Every fixture in this
+    // suite is derived from `sclopf-triangle`, which carries no
+    // global_constraints.csv, so nothing here noticed -- secure dispatch under an
+    // emissions cap is among SCLOPF's commonest uses.
+    val n = network("ac-dc-co2")
+    assert(n.table("GlobalConstraint").exists(_.size > 0), "the fixture lost its cap")
+
+    // Line 6 is a bridge, so the credible contingencies are the meshed triangle.
+    val outages = IndexedSeq("0", "1", "5").map(Sclopf.Outage("Line", _))
+    val model   = Sclopf.build(n, Some(outages))
+    assert(
+      model.problem.numConstraints > Lopf.build(n).problem.numConstraints,
+      "no security rows were added",
+    )
+  }
+
+  test("a negated row keeps its sign through the rebuild") {
+    assume(available, "goldens missing")
+    // The reason a negated row is re-emitted negated rather than through
+    // `greaterThan`: the latter copies the primal correctly and silently flips
+    // the dual that `translation.originalDuals` hands back, which is public API.
+    val n       = network("ac-dc-co2")
+    val base    = Lopf.build(n)
+    val secure  = Sclopf.build(n, Some(IndexedSeq("0", "1", "5").map(Sclopf.Outage("Line", _))))
+
+    val baseNegated = (0 until base.translation.numOriginalRows)
+      .count(r => base.translation.expansionOf(r).isInstanceOf[RowExpansion.Negated])
+    assert(baseNegated > 0, "the fixture has no negated row, so this proves nothing")
+
+    val secureNegated = (0 until base.translation.numOriginalRows)
+      .count(r => secure.translation.expansionOf(r).isInstanceOf[RowExpansion.Negated])
+    assertEquals(secureNegated, baseNegated, "the rebuild changed which rows are negated")
+  }
+
+  /** The triangle plus a radial load spur, which is a bridge.
+    *
+    * Rows are built from each file's actual header rather than an assumed column
+    * order: the golden's lines.csv is `name,bus0,bus1,x,s_nom,sub_network`, and
+    * CsvReader maps by position, so a row written against a guessed order landed
+    * s_nom in sub_network and gave the spur a zero rating.
+    */
+  private def triangleWithSpur(): Network =
+    val dir = Files.createTempDirectory("noaidi-sclopf-spur-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("sclopf-triangle")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    // Rows are built from each file's actual header rather than from an assumed
+    // column order. The golden's lines.csv is `name,bus0,bus1,x,s_nom,sub_network`
+    // -- not the `...,x,r,s_nom` this first assumed -- and CsvReader maps by
+    // position, so the spur was created with s_nom = 0 and sub_network = "150.0".
+    // The assertions still held, since CD is a bridge topologically whatever its
+    // rating, but the fixture was not the network its comment described, and a
+    // zero rating would drive the answer the moment it were solved.
+    def append(file: String, values: Map[String, String]): Unit =
+      val target = dir.resolve(file)
+      val lines  = Files.readString(target).linesIterator.toIndexedSeq
+      val header = lines.head.split(",", -1)
+      val row    = header.map(c => values.getOrElse(c, ""))
+      header.foreach { c =>
+        assert(values.contains(c), s"$file column '$c' was not given a value")
+      }
+      Files.writeString(target, (lines :+ row.mkString(",")).mkString("\n") + "\n")
+
+    append("buses.csv", Map(
+      "name" -> "D", "v_nom" -> "380.0", "control" -> "PQ",
+      "generator" -> "", "sub_network" -> "0",
+    ))
+    append("lines.csv", Map(
+      "name" -> "CD", "bus0" -> "C", "bus1" -> "D",
+      "x" -> "0.1", "s_nom" -> "150.0", "sub_network" -> "0",
+    ))
+    append("loads.csv", Map("name" -> "ld", "bus" -> "D"))
+    // And a real load on the spur, so it is the radial *load* spur the comment
+    // describes rather than an empty stub.
+    val series = dir.resolve("loads-p_set.csv")
+    val rows   = Files.readString(series).linesIterator.toIndexedSeq
+    Files.writeString(
+      series,
+      ((rows.head + ",ld") +: rows.tail.map(_ + ",40.0")).mkString("\n") + "\n",
+    )
+
+    CsvReader.read(dir, schema, "sclopf-triangle")
+
   private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
 
   override def afterAll(): Unit =
@@ -267,3 +343,61 @@ class SclopfSuite extends munit.FunSuite:
           paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
         }
     }
+
+  test("an unrequested bridge column fails loudly rather than reading as zero") {
+    assume(available, "goldens missing")
+    // Restricting validation to the requested outages leaves the bridge columns
+    // uncomputable, and they used to be filled with 0.0 off-diagonal. Reading one
+    // then gave a zero meaning "not computed" dressed as a zero meaning "no
+    // effect" -- the hazard `factor` was changed to avoid, reinstated one layer
+    // up. Note this is specific to *bridges*: an unrequested ordinary column is
+    // computed and perfectly valid, so it reads back normally.
+    val spurred = triangleWithSpur()
+    val sub     = Topology.subNetworks(spurred).head
+    val some    = Lodf.of(spurred, sub, Some(Set(("Line", "AB"))))
+
+    // The requested column is computed.
+    assert(some.factor(("Line", "BC"), ("Line", "AB")).abs > 0.0)
+    // An unrequested ordinary column is computed too -- nothing was lost.
+    assert(some.factor(("Line", "AB"), ("Line", "BC")).abs > 0.0)
+    // The unrequested bridge is not, and says so.
+    val failure = intercept[NoSuchElementException](some.factor(("Line", "AB"), ("Line", "CD")))
+    assert(failure.getMessage.contains("not computed"), failure.getMessage)
+    // The message on this one too: without it the assertion would pass for a
+    // NoSuchElementException thrown from anywhere at all.
+    val orZero = intercept[NoSuchElementException](some.factorOrZero(("Line", "AB"), ("Line", "CD")))
+    assert(orZero.getMessage.contains("not computed"), orZero.getMessage)
+    // A branch of another sub-network is still a legitimate zero.
+    assertEqualsDouble(some.factorOrZero(("Line", "AB"), ("Line", "elsewhere")), 0.0, 0.0)
+  }
+
+  test("factors stay bounded as a network approaches a bridge") {
+    assume(available, "goldens missing")
+    // Why there is no magnitude bound on the factors. Driving a network towards a
+    // bridge -- a stiff branch parallel to a path whose impedance is raised by
+    // orders of magnitude -- does not make the factors grow: all of an outaged
+    // branch's flow moves to the alternative path, so the ratio is exactly one
+    // until the denominator check fires. A bound of 1e6 was added here on the
+    // reasoning that a denominator just past the threshold would yield a huge
+    // finite factor; this is the measurement that showed it could never trip.
+    Seq(1e2, 1e4, 1e6).foreach { ratio =>
+      val dir = Files.createTempDirectory("noaidi-sclopf-weak-")
+      temporaries += dir
+      Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\nC,380.0,AC\n")
+      Files.writeString(
+        dir.resolve("lines.csv"),
+        "name,bus0,bus1,x,r,s_nom\n" +
+          s"AB,A,B,0.1,0.0,150.0\nAC,A,C,${0.1 * ratio},0.0,150.0\nCB,C,B,${0.1 * ratio},0.0,150.0\n",
+      )
+      Files.writeString(dir.resolve("generators.csv"), "name,bus,control,carrier\ng,A,Slack,wind\n")
+      Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nl,B,50.0\n")
+      Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n0,2015-01-01 00:00:00\n")
+
+      val n    = CsvReader.read(dir, schema, "weak")
+      val lodf = Lodf.of(n, Topology.subNetworks(n).head, None)
+      val ids  = Seq("AB", "AC", "CB")
+      val worst = (for a <- ids; o <- ids if a != o
+                   yield math.abs(lodf.factor(("Line", a), ("Line", o)))).max
+      assertEqualsDouble(worst, 1.0, 1e-6, s"impedance ratio $ratio")
+    }
+  }

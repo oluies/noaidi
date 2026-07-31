@@ -401,6 +401,25 @@ def capture_network(name: str, build) -> dict:
     target.parent.mkdir(parents=True, exist_ok=True)
     n.export_to_csv_folder(str(target))
 
+    # The binary formats, alongside the CSV directory. Both are HDF5 containers:
+    # PyPSA's netCDF export is netCDF-4, and its .h5 export is a pandas HDFStore.
+    # They are written from the same network as the CSVs, so a reader for either
+    # must produce the model the CSV reader produces -- which is the comparison
+    # the Scala side makes, and a much stronger one than checking a binary blob
+    # against itself.
+    binary = OUT / "binary"
+    binary.mkdir(parents=True, exist_ok=True)
+    print(f"  {name}: netCDF")
+    n.export_to_netcdf(str(binary / f"{name}.nc"))
+    # `tables` is genuinely optional: nothing reads these, and NOTES records why.
+    # Hard-failing the whole pipeline for a file the port does not consume would
+    # leave the CSV directory written and the manifest entry missing.
+    try:
+        print(f"  {name}: HDF5")
+        n.export_to_hdf5(str(binary / f"{name}.h5"))
+    except ImportError as exc:
+        print(f"  {name}: HDF5 skipped ({exc})")
+
     summary = {
         "name": name,
         # Stringified, because a snapshot is a *label* and that is how the CSV

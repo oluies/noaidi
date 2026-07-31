@@ -17,9 +17,26 @@ import org.noaidi.network.*
 final class Lodf private[pf] (
     val branches: IndexedSeq[(String, String)],
     private val values: IArray[Double],
+    /** Whether each outage column was validated and populated.
+      *
+      * When only some branches are requested as contingencies, the rest are left
+      * unpopulated rather than filled with a ratio that was never checked. Reading
+      * one has to fail: handing back the placeholder would be a zero that means
+      * "not computed" dressed as a zero that means "no effect" -- the same hazard
+      * removed from [[factor]] itself, one layer up.
+      */
+    private val populated: IArray[Boolean],
 ):
   val size: Int = branches.length
   private val indexOf: Map[(String, String), Int] = branches.zipWithIndex.toMap
+
+  private def checked(j: Int, outage: (String, String)): Int =
+    if !populated(j) then
+      throw new NoSuchElementException(
+        s"the outage column for $outage was not computed: it was not among the requested " +
+          "contingencies, so its factors were never validated"
+      )
+    j
 
   /** The factor for two branches of this sub-network.
     *
@@ -33,7 +50,7 @@ final class Lodf private[pf] (
   def factor(affected: (String, String), outage: (String, String)): Double =
     val i = indexOf.getOrElse(affected, throw new NoSuchElementException(s"no branch $affected here"))
     val j = indexOf.getOrElse(outage, throw new NoSuchElementException(s"no branch $outage here"))
-    values(i * size + j)
+    values(i * size + checked(j, outage))
 
   /** As [[factor]], but zero when either branch belongs to another sub-network.
     *
@@ -42,7 +59,9 @@ final class Lodf private[pf] (
     */
   def factorOrZero(affected: (String, String), outage: (String, String)): Double =
     (indexOf.get(affected), indexOf.get(outage)) match
-      case (Some(i), Some(j)) => values(i * size + j)
+      // A known column that was never computed still throws: only "these are in
+      // different sub-networks" is a legitimate zero.
+      case (Some(i), Some(j)) => values(i * size + checked(j, outage))
       case _                  => 0.0
 
   def contains(branch: (String, String)): Boolean = indexOf.contains(branch)
@@ -93,7 +112,7 @@ object Lodf:
     val edges = Branches.within(network, sub)
     val m     = edges.length
 
-    if m == 0 then return new Lodf(IndexedSeq.empty, IArray.empty)
+    if m == 0 then return new Lodf(IndexedSeq.empty, IArray.empty, IArray.empty)
 
     val susceptance = edges.map(e => Branches.susceptance(network, sub, e, new Unsupported(_)))
 
@@ -159,7 +178,8 @@ object Lodf:
       }
     }
 
-    val lodf = new Array[Double](m * m)
+    val lodf      = new Array[Double](m * m)
+    val populated = new Array[Boolean](m)
     (0 until m).foreach { j =>
       val key       = (edges(j).component, edges(j).id)
       val requested = outages.forall(_.contains(key))
@@ -169,13 +189,13 @@ object Lodf:
       // it, and `1 - branchPTDF[o,o]` goes to zero. Producing an infinity here
       // would put one into a constraint coefficient and the LP would come back
       // infeasible with no indication why.
-      // Scaled rather than absolute. For a true bridge this is analytically
-      // exactly 1, but it comes through a Cholesky solve of B, so on an
-      // ill-conditioned sub-network the residual can exceed a fixed 1e-9 -- the
-      // guard would pass and a factor of order 1e8 would land in a constraint
-      // coefficient, which is what it exists to prevent. The factors themselves
-      // are checked too, since that is the quantity that matters downstream.
-      val bridge = math.abs(denominator) < 1e-7 * math.max(1.0, math.abs(self))
+      // A loosened absolute tolerance, and only that. `branchPTDF[o,o]` lies in
+      // [0, 1], so scaling by it would be inert -- an earlier comment here
+      // claimed a scaling that did nothing. For a true bridge the denominator is
+      // analytically zero, but it arrives through a Cholesky solve, so a fixed
+      // 1e-9 could pass on an ill-conditioned island. What actually catches a
+      // near-bridge is the magnitude of the resulting factors, checked below.
+      val bridge = math.abs(denominator) < 1e-7
       if requested && bridge then
         throw new Unsupported(
           s"${edges(j).component} '${edges(j).id}' is a bridge: removing it disconnects the " +
@@ -183,19 +203,38 @@ object Lodf:
             "credible contingency"
         )
       if bridge then
-        // Not a requested contingency, so this column is never read. Left at zero
-        // rather than filled with a ratio that means nothing.
-        (0 until m).foreach(l => lodf(l * m + j) = if l == j then -1.0 else 0.0)
+        // Not a requested contingency and not computable. Left unpopulated, and
+        // flagged so reading it fails rather than returning a placeholder.
+        ()
       else
+        populated(j) = true
+        var worst = 0.0
         (0 until m).foreach { l =>
           val value = if l == j then -1.0 else branchPtdf(l)(j) / denominator
-          if requested && !value.isFinite then
-            throw new Unsupported(
-              s"outage of ${edges(j).component} '${edges(j).id}' gives a non-finite factor on " +
-                s"${edges(l).component} '${edges(l).id}'"
-            )
           lodf(l * m + j) = value
+          if l != j then worst = math.max(worst, math.abs(value))
         }
+        // Only non-finite factors are refused, and deliberately not large ones.
+        //
+        // An earlier version rejected any factor above 1e6, on the reasoning that
+        // a denominator just past the threshold would yield a huge finite factor
+        // the LP would swallow. Measuring it says otherwise: on a network driven
+        // towards a bridge -- a stiff branch parallel to a path whose impedance
+        // is raised through 1e2, 1e4, 1e6 -- the largest factor stays exactly
+        // 1.0000 at every step, and the denominator check fires before anything
+        // grows. That is the physics: all of an outaged branch's flow moves to
+        // the alternative path, so the ratio is one. A magnitude bound would have
+        // been a branch no input could reach, justified by a claim that does not
+        // hold, so it is gone rather than left as untestable insurance.
+        if requested && !worst.isFinite then
+          throw new Unsupported(
+            s"outage of ${edges(j).component} '${edges(j).id}' gives a non-finite factor, so its " +
+              "sub-network's susceptance matrix did not solve cleanly"
+          )
     }
 
-    new Lodf(edges.map(e => (e.component, e.id)), IArray.unsafeFromArray(lodf))
+    new Lodf(
+      edges.map(e => (e.component, e.id)),
+      IArray.unsafeFromArray(lodf),
+      IArray.unsafeFromArray(populated),
+    )

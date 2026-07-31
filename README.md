@@ -51,6 +51,7 @@ solvers, unchanged across two major versions of ojAlgo, and asserted not to
 exceed 1e-8.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
+- [`HPC.md`](HPC.md) — a plan for running this on NAISS Arrhenius, and what it would change.
 - [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) — the numbers,
   the numerical caveats, and the known gaps.
 

@@ -37,7 +37,7 @@ optimisation.
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-411 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+419 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.

@@ -405,3 +405,33 @@ class LopfSuite extends munit.FunSuite:
   //
   // What remains open is the gap against PyPSA, recorded in NOTES rather than
   // papered over with a tolerance.
+
+  test("a cycle spanning transformers matches PyPSA's dispatch") {
+    assume(available, "goldens missing")
+    // The LOPF half of the transformer conversion. `Cycles.impedance` refers a
+    // transformer to `s_nom` and `tap_ratio` where a line goes to `v_nom^2`, and
+    // this fixture has a cycle crossing two transformers so the choice changes
+    // the flows -- in a radial network topology would fix them and any base would
+    // do.
+    val expected = results("transformer-levels")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("transformer-levels")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val flows = expected("transformer_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Transformer").ids.foreach { id =>
+        assertEqualsDouble(
+          result.dispatch("Transformer", id, t),
+          frameValue(flows, t, id),
+          1e-3,
+          s"snapshot $t, transformer $id",
+        )
+      }
+    }
+  }

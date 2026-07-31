@@ -68,7 +68,14 @@ object NetCdfReader:
     val weightings = ListMap.from(
       datasets.toIndexedSeq
         .collect {
-          case (n, d) if n.startsWith("snapshots_") && n != "snapshots_snapshot" =>
+          // `period` and `timestep` are a multi-period network's index, not
+          // weightings. Both are numeric, so a blanket scan admits them, and
+          // `timestep` would arrive as raw CF offsets where `CsvReader` reads the
+          // same column as timestamp text and substitutes 1.0 -- the two readers
+          // disagreeing about a column neither refuses.
+          case (n, d)
+              if n.startsWith("snapshots_") &&
+                !Set("snapshots_snapshot", "snapshots_period", "snapshots_timestep").contains(n) =>
             n.drop("snapshots_".length) -> IArray.from(doubles(d))
         }
         .sortBy(_._1)
@@ -181,22 +188,37 @@ object NetCdfReader:
         // the silent disagreement this decoding exists to prevent.
         doubles(d).map { offset =>
           val nanos = offset * unit.toNanos.toDouble
-          if math.abs(nanos - math.rint(nanos)) > 1e-3 then
+          // Scaled to the magnitude. A flat 1e-3 ns is finer than double spacing
+          // over most of this range -- past 2^46 ns (about 0.8 days) consecutive
+          // doubles are more than 0.015 ns apart -- so hourly data encoded as
+          // `days since ...`, the fractional case this exists for, would be
+          // refused on ordinary snapshots after the first day.
+          if math.abs(nanos - math.rint(nanos)) > math.max(1e-3, math.ulp(nanos) * 4) then
             throw new MalformedNetwork(
               s"the snapshot offset $offset in '$spec' is not a whole number of nanoseconds"
             )
           epoch.plusNanos(math.rint(nanos).toLong).format(formatter)
         }
 
+  /** Unit words CF accepts verbatim, before any de-pluralisation. */
+  private val units = Set(
+    "day", "d", "hour", "hr", "h", "minute", "min", "second", "sec", "s",
+    "millisecond", "msec", "ms", "microsecond", "usec", "us",
+    "nanosecond", "nsec", "ns",
+  )
+
   /** `<unit> since <timestamp>`, the CF convention. */
   private def parseUnits(spec: String): (Duration, LocalDateTime) =
     val parts = spec.split(" since ", 2)
     if parts.length != 2 then
       throw new MalformedNetwork(s"cannot read the time units '$spec'")
-    // CF allows singular and abbreviated forms as well as the plurals xarray
-    // happens to write, so the word is normalised rather than matched literally.
-    val word = parts(0).trim.toLowerCase.stripSuffix("s")
-    val unit = word match
+    // The raw word first, then the de-pluralised form. Stripping a trailing `s`
+    // before matching made four of the abbreviations below unreachable and
+    // actively broke three: `s` became the empty string, `ms` became `m`, `ns`
+    // became `n`. A file saying `s since ...` -- valid udunits -- was refused as
+    // `unsupported time unit ''`.
+    val written = parts(0).trim.toLowerCase
+    val unit = (if units.contains(written) then written else written.stripSuffix("s")) match
       case "day" | "d"                  => Duration.ofDays(1)
       case "hour" | "hr" | "h"          => Duration.ofHours(1)
       case "minute" | "min"             => Duration.ofMinutes(1)
@@ -204,20 +226,32 @@ object NetCdfReader:
       case "millisecond" | "msec" | "ms" => Duration.ofMillis(1)
       case "microsecond" | "usec" | "us" => Duration.ofNanos(1000)
       case "nanosecond" | "nsec" | "ns"  => Duration.ofNanos(1)
-      case other => throw new MalformedNetwork(s"unsupported time unit '$other'")
+      // Reported as the file wrote it, not as the normalisation left it: saying
+      // `'m'` for a file that said `ms` names a unit appearing nowhere in it.
+      case _ => throw new MalformedNetwork(s"unsupported time unit '$written'")
 
     // A CF epoch may carry a zone offset. Stripping it rather than replacing
     // every space with `T`, which turned `2015-01-01 00:00:00 +00:00` into
     // `2015-01-01T00:00:00T+00:00` and then failed to parse something valid.
-    val raw    = parts(1).trim
-    val zoned  = raw.split("\\s+")
-    val stamp  = if zoned.length >= 2 && !zoned(1).startsWith("+") && !zoned(1).startsWith("-")
-                 then s"${zoned(0)}T${zoned(1)}"
-                 else zoned(0)
-    val text   = stamp.stripSuffix("Z")
+    // An offset may be attached (`...00:00:00+00:00`, what pandas writes for a
+    // tz-aware index) or space-separated (CF's own example,
+    // `1992-10-8 15:15:42.5 -6:00`). Splitting on whitespace handles the second;
+    // `OffsetDateTime` handles the first, and is tried before the local form so
+    // an attached offset is not mistaken for a malformed timestamp.
+    val raw   = parts(1).trim
+    val parts2 = raw.split("\\s+")
+    val joined =
+      if parts2.length >= 2 && !parts2(1).startsWith("+") && !parts2(1).startsWith("-") then
+        (s"${parts2(0)}T${parts2(1)}" +: parts2.drop(2)).mkString("")
+      else parts2(0)
+    val text = if joined.length == 10 then s"${joined}T00:00:00" else joined
+
     val epoch =
-      try LocalDateTime.parse(if text.length == 10 then s"${text}T00:00:00" else text)
-      catch case _: Exception => throw new MalformedNetwork(s"cannot read the epoch '$raw'")
+      try java.time.OffsetDateTime.parse(text).toLocalDateTime
+      catch
+        case _: Exception =>
+          try LocalDateTime.parse(text.stripSuffix("Z"))
+          catch case _: Exception => throw new MalformedNetwork(s"cannot read the epoch '$raw'")
     (unit, epoch)
 
   /** A static column, typed by the schema where it declares one.
@@ -233,17 +267,30 @@ object NetCdfReader:
   private def column(d: Dataset, attribute: String, spec: ComponentSpec): Column =
     spec.attribute(attribute).map(_.valueType) match
       case Some(AttributeType.Float) => Column.Floats(IArray.from(doubles(d)))
-      case Some(AttributeType.Int)   => Column.Ints(IArray.from(doubles(d).map(_.toInt)))
+      case Some(AttributeType.Int) =>
+        // NaN resolves to the schema default, as `CsvReader` does for a blank
+        // cell. Mapping it to 0 made the *type* agree while the value did not --
+        // `up_time_before` defaults to 1, so a promoted column read back as 0 and
+        // silently changed the commitment horizon. Rounded, not truncated.
+        val fallback = spec.attribute(attribute).flatMap(_.defaultText).flatMap(_.toIntOption).getOrElse(0)
+        Column.Ints(IArray.from(doubles(d).map(v => if v.isNaN then fallback else math.round(v).toInt)))
       case Some(AttributeType.Bool)  => Column.Bools(IArray.from(booleans(d)))
-      case Some(AttributeType.Str)   => Column.Strings(IArray.from(strings(d)))
+      // Geometry alongside Str, matching `CsvReader`, which types it as text.
+      case Some(AttributeType.Str) | Some(AttributeType.Geometry) =>
+        Column.Strings(IArray.from(strings(d)))
       // Geometry is not modelled, and an undeclared attribute is a custom column
       // the schema says nothing about; both fall back to the file's own dtype.
       case _                         => inferred(d, s"${spec.listName}.$attribute")
 
+  // The same dtype set `inferred` accepts. Routing schema-declared attributes
+  // through narrower readers refused files the previous version read: an int8 or
+  // int16 column for a schema-Int attribute, or an int16/int64 for a schema-Bool.
   private def booleans(d: Dataset): IndexedSeq[Boolean] = d.getData match
     case a: Array[Byte]    => a.map(_ != 0).toIndexedSeq
     case a: Array[Boolean] => a.toIndexedSeq
+    case a: Array[Short]   => a.map(_ != 0).toIndexedSeq
     case a: Array[Int]     => a.map(_ != 0).toIndexedSeq
+    case a: Array[Long]    => a.map(_ != 0).toIndexedSeq
     case other =>
       throw new MalformedNetwork(s"expected a boolean, got ${other.getClass.getSimpleName}")
 
@@ -282,6 +329,8 @@ object NetCdfReader:
     case a: Array[Float]  => a.map(_.toDouble).toIndexedSeq
     case a: Array[Long]   => a.map(_.toDouble).toIndexedSeq
     case a: Array[Int]    => a.map(_.toDouble).toIndexedSeq
+    case a: Array[Short]  => a.map(_.toDouble).toIndexedSeq
+    case a: Array[Byte]   => a.map(_.toDouble).toIndexedSeq
     case other =>
       throw new MalformedNetwork(s"expected numbers, got ${other.getClass.getSimpleName}")
 

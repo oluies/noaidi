@@ -61,7 +61,6 @@ object Lopf:
   /** Turn a network into a dispatch LP. */
   def build(network: Network): Model =
     rejectExtendable(network)
-    rejectTransformers(network)
     rejectUnhandled(network)
     rejectDanglingBuses(network)
 
@@ -84,10 +83,11 @@ object Lopf:
       costs += cost
       index
 
-    // Selected by role rather than by name, so nothing with a bus0/bus1 is
-    // silently dropped. Transformer is a passive branch too and reaches this
-    // point, but `rejectTransformers` above has already refused it -- see there
-    // for why admitting it would be worse than refusing it.
+    // Selected by role rather than by name, so nothing carrying a bus0/bus1 is
+    // silently dropped. Transformer is a passive branch too, and is now modelled:
+    // `Cycles.impedance` refers it to `s_nom` and `tap_ratio` rather than to
+    // `v_nom`, which is what made reusing the line formula a plausible wrong
+    // answer and kept it refused until there was a network with one to check.
     def tablesWith(role: Role): IndexedSeq[ComponentTable] =
       network.tables.values.toIndexedSeq.filter(t => Role.of(t.spec) == role && t.size > 0)
 
@@ -320,33 +320,6 @@ object Lopf:
             s"network has ${table.size} $component(s); inter-snapshot storage balance is not implemented"
           )
       }
-    }
-
-  /** Reject transformers, which are passive branches this cannot yet price.
-    *
-    * Selecting branches by role rather than by name fixed one defect and created
-    * a worse one. A transformer now gets an LP column and enters the cycle basis,
-    * but [[Cycles.impedance]] applies the '''line''' per-unit base, and the two
-    * are not the same. PyPSA converts a line from voltage (`x / v_nom²`) and a
-    * transformer from its own rating (`x / s_nom`, then scaled by `tap_ratio`).
-    * For a 380 kV, 500 MVA transformer with `x = 0.1` that is 2.0e-4 against
-    * 6.9e-10 — six orders of magnitude, enough that any cycle crossing the
-    * transformer behaves as though the transformer were not there, and the LP
-    * comes back optimal with wrong flows.
-    *
-    * So this is refused until there is a golden with a transformer in it to
-    * validate the conversion against. Refusing is not the timid option here: a
-    * crash and a rejection are both loud, and a silently plausible dispatch is
-    * the one outcome that cannot be caught downstream.
-    */
-  private def rejectTransformers(network: Network): Unit =
-    network.table("Transformer").foreach { table =>
-      if table.size > 0 then
-        throw new UnsupportedNetwork(
-          s"network has ${table.size} Transformer(s); their per-unit impedance is based on s_nom " +
-            "and tap_ratio rather than v_nom, which is not implemented, and reusing the line " +
-            "formula would give a feasible LP with wrong flows"
-        )
     }
 
   /** Reject component classes the builder does not model.

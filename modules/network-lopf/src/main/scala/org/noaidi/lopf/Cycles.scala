@@ -1,6 +1,7 @@
 package org.noaidi.lopf
 
 import org.noaidi.network.*
+import org.noaidi.pf.Branches
 import scala.collection.mutable
 
 /** One independent cycle, as signed branch coefficients.
@@ -159,16 +160,37 @@ object Cycles:
     * an all-zero constraint: vacuously satisfied, and the flows left as
     * underdetermined as before.
     *
-    * Divided by `v_nom^2`, which is PyPSA's per-unit base at its default 1 MVA.
-    * Within a cycle at one voltage the division cancels, since the constraint is
-    * homogeneous — it matters only where a cycle spans a transformer, and it
-    * costs nothing to be right about now.
+    * The base differs by component, exactly as it does for the susceptance a
+    * power flow uses. A line is referred to voltage, `z / v_nom²`; a transformer
+    * to its own rating and tap, `z · tap_ratio / s_nom`. Within a cycle at one
+    * voltage the line division cancels, since the constraint is homogeneous — it
+    * matters precisely where a cycle spans a transformer, which is the case this
+    * now supports.
     */
   def impedance(network: Network, component: String, id: String, carrier: String): Double =
     val table = network.require(component)
     val raw   = if carrier == "DC" then table.float("r", id) else table.float("x", id)
-    val vNom  = busVoltage(network, table.string("bus0", id))
-    if vNom > 0.0 then raw / (vNom * vNom) else raw
+
+    component match
+      case "Line" =>
+        val vNom = busVoltage(network, table.string("bus0", id))
+        if vNom > 0.0 then raw / (vNom * vNom) else raw
+
+      case "Transformer" =>
+        val sNom = table.float("s_nom", id)
+        val tap  = Branches.tapRatio(table, id)
+        if sNom > 0.0 then raw * tap / sNom
+        else
+          throw new Lopf.UnsupportedNetwork(
+            s"Transformer '$id' has s_nom = $sNom, which is its per-unit base"
+          )
+
+      case other =>
+        // Not the line formula by default: that is what made admitting a
+        // transformer a plausible wrong answer rather than a refusal.
+        throw new Lopf.UnsupportedNetwork(
+          s"$other '$id' is a passive branch whose per-unit base is not known here"
+        )
 
   private def busVoltage(network: Network, bus: String): Double =
     network.table("Bus").map(_.float("v_nom", bus)).getOrElse(0.0)

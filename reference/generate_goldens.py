@@ -212,6 +212,71 @@ def unit_commitment():
     return n
 
 
+def transformer_levels():
+    """Two voltage levels joined by transformers, with a cycle spanning them.
+
+    The transformer golden every L2 module was refusing transformers for want of.
+    A transformer's per-unit base is its own rating, `x / s_nom`, where a line's
+    is voltage, `x / v_nom^2` -- and the difference is not small: on `scigrid-de`
+    it is a factor of five, and on a 380 kV unit rated 500 MVA it is six orders of
+    magnitude. Reusing the line formula gives a feasible LP with wrong flows,
+    which is why they were refused rather than approximated.
+
+    Two 380 kV buses and two 110 kV buses, a line at each level and a transformer
+    at each end, so the network has a genuine cycle that crosses both
+    transformers. That is what makes the impedance matter: in a radial network
+    the flows are fixed by topology and any per-unit base would reproduce them.
+
+    Nominal taps and no shunt, deliberately. `tap_ratio` folds into the linear
+    models as a plain multiplier, but an off-nominal tap makes the AC admittance
+    asymmetric and the T model needs a wye-delta conversion before Y is built --
+    neither is written without a golden, so this validates the nominal conversion
+    first.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "hv1", v_nom=380.0)
+    n.add("Bus", "hv2", v_nom=380.0)
+    n.add("Bus", "lv1", v_nom=110.0)
+    n.add("Bus", "lv2", v_nom=110.0)
+    n.add("Line", "hv", bus0="hv1", bus1="hv2", x=0.5, r=0.0, s_nom=600.0)
+    n.add("Line", "lv", bus0="lv1", bus1="lv2", x=0.3, r=0.0, s_nom=400.0)
+    n.add("Transformer", "t1", bus0="hv1", bus1="lv1", x=0.10, r=0.0, s_nom=500.0, model="pi")
+    n.add("Transformer", "t2", bus0="hv2", bus1="lv2", x=0.12, r=0.0, s_nom=400.0, model="pi")
+    n.add("Generator", "g", bus="hv1", control="Slack", p_nom=900.0, marginal_cost=10.0)
+    n.add("Generator", "gl", bus="lv2", p_nom=300.0, marginal_cost=60.0)
+    n.add("Load", "d1", bus="lv1", p_set=[150.0, 120.0, 180.0])
+    n.add("Load", "d2", bus="lv2", p_set=[100.0, 140.0, 90.0])
+    return n
+
+
+def lodf_mesh():
+    """Two loops sharing an edge, so the outage factors are not all plus or minus one.
+
+    `sclopf-triangle` cannot validate the LODF computation. A single cycle has
+    only one alternative path, so the whole of an outaged branch's flow reappears
+    on every survivor and every factor is exactly +-1 by topology, whatever the
+    impedances. An implementation that simply returned +-1 would match it.
+
+    Four buses and five lines give two loops sharing BC. Outaging a branch then
+    leaves two distinct paths and the split depends on the impedances: PyPSA's own
+    BODF has interior values of -0.333 and -0.500 here. Those are what a correct
+    implementation has to reproduce.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+    for bus in ("A", "B", "C", "D"):
+        n.add("Bus", bus, v_nom=380.0)
+    n.add("Line", "AB", bus0="A", bus1="B", x=0.10, r=0.0, s_nom=500.0)
+    n.add("Line", "CA", bus0="C", bus1="A", x=0.15, r=0.0, s_nom=500.0)
+    n.add("Line", "BD", bus0="B", bus1="D", x=0.20, r=0.0, s_nom=500.0)
+    n.add("Line", "DC", bus0="D", bus1="C", x=0.25, r=0.0, s_nom=500.0)
+    n.add("Line", "BC", bus0="B", bus1="C", x=0.30, r=0.0, s_nom=500.0)
+    n.add("Generator", "g", bus="A", control="Slack", p_nom=600.0, marginal_cost=10.0)
+    n.add("Load", "l", bus="C", p_set=[50.0, 80.0])
+    return n
+
+
 def sclopf_triangle():
     """A meshed triangle whose optimum is set by N-1 security, not by dispatch.
 
@@ -261,11 +326,25 @@ SCLOPF_OUTAGES = {
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
     "sclopf-triangle": sclopf_triangle,
+    "lodf-mesh": lodf_mesh,
+    "transformer-levels": transformer_levels,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
     "storage-hvdc": pypsa.examples.storage_hvdc,
+    # The first realistic-scale network: 585 buses, 852 lines, 96 transformers,
+    # 1423 generators over 24 snapshots. It is also the only bundled PyPSA
+    # example that is not a capacity-expansion problem -- nothing is extendable,
+    # nothing committable, no global constraints, no ramp limits -- so it is pure
+    # dispatch, which is what this port already does.
+    #
+    # It is the transformer golden everything else was waiting on. All 96 sit at
+    # tap_ratio = 1 and phase_shift = 0 with b = g = 0, so the nominal per-unit
+    # conversion can be validated before the off-nominal and T-model paths are
+    # attempted. And at 59,640 variables it is two orders of magnitude past
+    # anything Prima has been exercised on outside Netlib.
+    "scigrid-de": pypsa.examples.scigrid_de,
 }
 
 
@@ -381,6 +460,10 @@ def series_columns(target: Path, component) -> dict:
     return found
 
 
+class _Diverged(Exception):
+    """Control flow only: the pf block has already been written."""
+
+
 def capture_network(name: str, build) -> dict:
     print(f"  {name}: building")
     n = build()
@@ -491,6 +574,30 @@ def capture_network(name: str, build) -> dict:
 
     results = {}
 
+    # The outage factors, for networks meshed enough that they are not all +-1.
+    # Recorded because no other artefact pins them: a single-cycle fixture cannot
+    # tell a correct LODF from one that returns +-1 everywhere, since that is what
+    # its topology forces.
+    try:
+        n.determine_network_topology()
+        n.calculate_dependent_values()
+        factors = {}
+        for label in n.sub_networks.index:
+            sub = n.sub_networks.obj[label]
+            branches = list(sub.branches_i())
+            if not branches:
+                continue
+            sub.calculate_BODF()
+            matrix = np.asarray(sub.BODF)
+            factors[str(label)] = {
+                "branches": [[str(c) for c in b] for b in branches],
+                "bodf": [[jsonable(v) for v in row] for row in matrix],
+            }
+        if factors:
+            results["bodf"] = factors
+    except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+        results["bodf"] = {"error": f"{type(exc).__name__}: {exc}"}
+
     print(f"  {name}: linear power flow")
     try:
         n.lpf()
@@ -502,6 +609,7 @@ def capture_network(name: str, build) -> dict:
             "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
             "bus_v_ang": frame_to_json(n.buses_t.v_ang),
             "line_p0": frame_to_json(n.lines_t.p0),
+            "transformer_p0": frame_to_json(n.transformers_t.p0),
             "link_p0": frame_to_json(n.links_t.p0),
             "generator_p": frame_to_json(n.generators_t.p),
         }
@@ -517,6 +625,22 @@ def capture_network(name: str, build) -> dict:
         a = build()
         result = a.pf()
         converged = result.converged if hasattr(result, "converged") else result
+
+        # A diverged solve has no reference value in it. `scigrid-de` is the case:
+        # PyPSA's own Newton-Raphson gives up after 100 iterations with an error
+        # of 2e90 from a flat start, and the resulting voltages are of order 1e37.
+        # Recording 3.2 MB of those would look like a golden and be worth nothing;
+        # the convergence flags are the finding, so they are kept and the value
+        # frames dropped.
+        if not converged.to_numpy().any():
+            results["pf"] = {
+                "converged": frame_to_json(converged.astype(float)),
+                "note": "PyPSA's own Newton-Raphson did not converge on this network from a "
+                        "flat start, so there are no reference values to record",
+            }
+            print(f"  {name}: non-linear power flow did not converge (flags recorded, values not)")
+            raise _Diverged
+
         results["pf"] = {
             "converged": frame_to_json(converged.astype(float)),
             "bus_v_mag_pu": frame_to_json(a.buses_t.v_mag_pu),
@@ -530,6 +654,8 @@ def capture_network(name: str, build) -> dict:
             "generator_p": frame_to_json(a.generators_t.p),
             "generator_q": frame_to_json(a.generators_t.q),
         }
+    except _Diverged:
+        pass  # already recorded above
     except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
         # ac-dc-meshed lands here: PyPSA 1.2.4 raises AttributeError inside its
         # own sub-network handling. Recorded so the absence is visibly PyPSA's
@@ -588,6 +714,7 @@ def capture_network(name: str, build) -> dict:
             # *schedule* or merely landed on the same cost.
             "generator_status": frame_to_json(m.generators_t.status),
             "line_p0": frame_to_json(m.lines_t.p0),
+            "transformer_p0": frame_to_json(m.transformers_t.p0),
             "link_p0": frame_to_json(m.links_t.p0),
             "bus_marginal_price": frame_to_json(m.buses_t.marginal_price),
             # Shadow price of each global constraint *as solved*. The exported
@@ -608,6 +735,51 @@ def capture_network(name: str, build) -> dict:
     (OUT / "results").mkdir(parents=True, exist_ok=True)
     (OUT / "results" / f"{name}.json").write_text(json.dumps(results, indent=1, sort_keys=True))
     return summary
+
+
+def write_malformed(out: Path) -> None:
+    """Deliberately broken netCDF files, for the reader's error paths.
+
+    Generated and committed rather than built inside the Scala suite. A test that
+    shells out to this virtual environment would skip in CI, where the goldens
+    are present and the venv is not -- and a test that never runs in CI is worth
+    very little.
+
+    Each file is a real netCDF-4 written by xarray, broken in exactly one way, so
+    the reader is exercised against the format it actually meets.
+    """
+    import xarray as xr
+
+    out.mkdir(parents=True, exist_ok=True)
+
+    # No snapshot index at all: structurally valid, not a PyPSA network.
+    xr.Dataset(
+        {"buses_v_nom": ("buses_i", np.array([380.0, 380.0]))},
+        coords={"buses_i": np.array(["A", "B"], dtype=object)},
+    ).to_netcdf(out / "no-snapshots.nc")
+
+    # A static column shorter than the entity index it belongs to.
+    xr.Dataset(
+        {
+            "snapshots_snapshot": ("snapshots", np.array([0, 1])),
+            "buses_v_nom": ("buses_short_i", np.array([380.0])),
+        },
+        coords={
+            "snapshots": np.array([0, 1]),
+            "buses_i": np.array(["A", "B"], dtype=object),
+            "buses_short_i": np.array(["A"], dtype=object),
+        },
+    ).to_netcdf(out / "short-column.nc")
+
+    # A time axis whose units CF does not define.
+    times = xr.DataArray(np.array([0, 1]), dims="snapshots")
+    times.attrs["units"] = "fortnights since 2015-01-01 00:00:00"
+    xr.Dataset(
+        {"snapshots_snapshot": times},
+        coords={"snapshots": np.array([0, 1])},
+    ).to_netcdf(out / "bad-time-unit.nc")
+
+    print(f"  wrote malformed fixtures to {out}")
 
 
 def main() -> int:
@@ -639,6 +811,8 @@ def main() -> int:
                     print(f"  {name}: {stage} unsupported as expected ({known})")
             elif known is not None:
                 unexpected_successes.append(f"{name}/{stage} succeeded, but is listed in KNOWN_UNSUPPORTED")
+
+    write_malformed(OUT / "binary" / "malformed")
 
     reference = capture_reference_schema()
     (OUT / "schema.json").write_text(json.dumps(reference, indent=1, sort_keys=True))

@@ -296,9 +296,9 @@ object LinearPowerFlow:
     // storage unit is just another one-port with a `p_set` and a `sign`. That is
     // what makes `storage-hvdc` usable evidence for this module rather than a
     // rejection test.
-    val handled = Set("Bus", "Line", "Link", "Generator", "Load", "StorageUnit", "Store",
-                      "Carrier", "GlobalConstraint", "SubNetwork", "LineType",
-                      "TransformerType", "Shape")
+    val handled = Set("Bus", "Line", "Transformer", "Link", "Generator", "Load",
+                      "StorageUnit", "Store", "Carrier", "GlobalConstraint", "SubNetwork",
+                      "LineType", "TransformerType", "Shape")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then
       throw new UnsupportedNetwork(

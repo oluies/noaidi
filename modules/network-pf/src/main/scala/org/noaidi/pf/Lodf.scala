@@ -214,16 +214,22 @@ object Lodf:
           lodf(l * m + j) = value
           if l != j then worst = math.max(worst, math.abs(value))
         }
-        // The magnitude check the tolerance above cannot make on its own. A
-        // denominator just past the threshold yields a finite factor of order
-        // 1e7, which the LP would swallow and return infeasible over; only the
-        // factors themselves reveal it. Applied to requested columns, since an
-        // unrequested one is nobody's constraint coefficient.
-        if requested && (!worst.isFinite || worst > 1e6) then
+        // Only non-finite factors are refused, and deliberately not large ones.
+        //
+        // An earlier version rejected any factor above 1e6, on the reasoning that
+        // a denominator just past the threshold would yield a huge finite factor
+        // the LP would swallow. Measuring it says otherwise: on a network driven
+        // towards a bridge -- a stiff branch parallel to a path whose impedance
+        // is raised through 1e2, 1e4, 1e6 -- the largest factor stays exactly
+        // 1.0000 at every step, and the denominator check fires before anything
+        // grows. That is the physics: all of an outaged branch's flow moves to
+        // the alternative path, so the ratio is one. A magnitude bound would have
+        // been a branch no input could reach, justified by a claim that does not
+        // hold, so it is gone rather than left as untestable insurance.
+        if requested && !worst.isFinite then
           throw new Unsupported(
-            s"outage of ${edges(j).component} '${edges(j).id}' redistributes by a factor of " +
-              f"$worst%.3e, which is not a physical redistribution -- the branch is at or near " +
-              "the point where removing it disconnects the sub-network"
+            s"outage of ${edges(j).component} '${edges(j).id}' gives a non-finite factor, so its " +
+              "sub-network's susceptance matrix did not solve cleanly"
           )
     }
 

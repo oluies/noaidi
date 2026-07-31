@@ -109,27 +109,28 @@ object Sclopf:
     // the type system says so, and `LopfResult.marginalPrice` reads through that
     // map, so a future equality row added ahead of the balances would make SCLOPF
     // nodal prices silently wrong. Checked rather than trusted.
-    // The exact invariant, not a proxy for it. Every original row must map to
-    // the standard-form row of the same index, which is what makes re-emitting
-    // row `r` as row `r` preserve `base.map`.
+    // What the row-by-row copy actually requires: each original row maps to a
+    // single standard-form row of the same index. `Direct` and `Negated` both
+    // satisfy that; only `Range` (one original row becoming two) and a
+    // reordering would break it.
     //
-    // The earlier pair of checks was necessary but not sufficient:
-    // `balanceRows.values.max < numEqualities` passes even when inequalities were
-    // emitted first and the balances' standard indices are shifted, which is
-    // silently wrong nodal prices -- the outcome the guard exists to prevent. It
-    // also missed `Negated`: `Lopf.build` emits global constraints through
-    // `lessThan`, which the base records as negated while the copy re-emits the
-    // already-negated standard row directly, so `originalDuals` would come back
-    // with the opposite sign. Nothing reads those today, but `translation` is
-    // public API.
+    // Demanding `Direct` alone was too strong and regressed real networks:
+    // `Lopf.build` emits global constraints through `lessThan`, which the
+    // builder records as `Negated`, so every CO2-capped network -- `ac-dc-co2`
+    // and `storage-hvdc` among the goldens -- was rejected outright. That traded
+    // a sign quirk in output nothing reads for a hard refusal of secure dispatch
+    // under an emissions cap, which is one of SCLOPF's commonest uses.
     val baseProblem = base.problem
-    require(
-      (0 until base.translation.numOriginalRows)
-        .forall(r => base.translation.expansionOf(r) == RowExpansion.Direct(r)),
-      "the base model does not map every original row directly onto the standard-form row of the " +
-        "same index (a range row, a negated row, or a reordering), so the row-by-row copy would " +
-        "misindex its duals",
-    )
+    (0 until base.translation.numOriginalRows).foreach { r =>
+      base.translation.expansionOf(r) match
+        case RowExpansion.Direct(row) if row == r  => ()
+        case RowExpansion.Negated(row) if row == r => ()
+        case other =>
+          throw new UnsupportedNetwork(
+            s"the base model maps original row $r to $other rather than to the standard-form row " +
+              "of the same index, so the row-by-row copy would misindex its duals"
+          )
+    }
 
     // Copy the base problem's bounds, objective and rows.
     (0 until baseProblem.numVariables).foreach { j =>
@@ -138,12 +139,22 @@ object Sclopf:
     }
     builder.objectiveOffset(baseProblem.objectiveOffset)
 
+    // A row the base negated is re-emitted negated, so the rebuilt translation
+    // records `Negated` too and `originalDuals` returns the same sign the base
+    // model would. Re-emitting it through `greaterThan` would copy the primal
+    // correctly and silently flip that dual.
+    val negated = (0 until base.translation.numOriginalRows).collect {
+      case r if base.translation.expansionOf(r).isInstanceOf[RowExpansion.Negated] => r
+    }.toSet
+
     val matrix = baseProblem.constraintMatrix
     (0 until baseProblem.numConstraints).foreach { r =>
       val terms = (matrix.rowPtr(r) until matrix.rowPtr(r + 1))
         .map(p => (matrix.colIndices(p), matrix.values(p)))
       val q = baseProblem.rhs(r)
       if r < baseProblem.numEqualities then builder.equalityConstraint(terms, q)
+      else if negated.contains(r) then
+        builder.lessThan(terms.map((c, a) => (c, -a)), -q)
       else builder.greaterThan(terms, q)
     }
 

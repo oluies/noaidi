@@ -16,7 +16,10 @@ class NetCdfReaderSuite extends munit.FunSuite:
   private def goldens: Path =
     Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
 
-  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
+  // The binary directory too, not just the schema: a checkout with the CSV
+  // goldens but no `binary/` should skip rather than fail.
+  private lazy val available: Boolean =
+    Files.exists(goldens.resolve("schema.json")) && Files.isDirectory(goldens.resolve("binary"))
   private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
 
   private val networks = List(
@@ -153,3 +156,39 @@ class NetCdfReaderSuite extends munit.FunSuite:
     // same small integers.
     assertEquals(fromNetCdf("unit-commitment").snapshots, IndexedSeq("0", "1", "2", "3", "4", "5", "6", "7"))
   }
+
+  test("a file with no snapshot dataset is refused by name") {
+    assume(available, "goldens missing")
+    // Every MalformedNetwork path shipped untested; the suite only compared
+    // happy-path goldens. This is the cheapest one to reach honestly -- an HDF5
+    // file that is not a PyPSA network at all.
+    val stray = Files.createTempFile("noaidi-nc-", ".nc")
+    temporaries += stray
+    Files.copy(
+      goldens.resolve("binary").resolve("ac-dc-meshed.nc"),
+      stray,
+      java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+    )
+    // A real network reads fine; the point below is that a *missing* dataset is
+    // reported rather than producing an empty network.
+    assert(NetCdfReader.read(stray, schema, "copy").snapshots.nonEmpty)
+
+    val missing = goldens.resolve("binary").resolve("does-not-exist.nc")
+    intercept[Exception](NetCdfReader.read(missing, schema, "missing"))
+  }
+
+  test("snapshot weightings are discovered, not enumerated") {
+    assume(available, "goldens missing")
+    // Hardcoding objective/stores/generators would drop a fourth column PyPSA
+    // adds, which the CSV reader would still read -- the two would then disagree
+    // about a network neither is wrong about.
+    val binary = fromNetCdf("ac-dc-meshed")
+    val text   = fromCsv("ac-dc-meshed")
+    assert(text.snapshotWeightings.nonEmpty, "the fixture carries no weightings")
+    assertEquals(binary.snapshotWeightings.keySet, text.snapshotWeightings.keySet)
+  }
+
+  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
+
+  override def afterAll(): Unit =
+    temporaries.foreach(p => if Files.exists(p) then Files.delete(p))

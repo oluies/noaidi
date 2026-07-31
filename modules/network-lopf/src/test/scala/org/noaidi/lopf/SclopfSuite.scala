@@ -3,7 +3,7 @@ package org.noaidi.lopf
 import java.nio.file.{Files, Path, Paths}
 import org.noaidi.network.{CsvReader, Network, Schema, Topology}
 import org.noaidi.pf.Lodf
-import org.noaidi.prima.{PdhgParams, SolveStatus}
+import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
 
 /** Security-constrained dispatch against PyPSA's own SCLOPF.
   *
@@ -245,6 +245,44 @@ class SclopfSuite extends munit.FunSuite:
     assertEquals(one.problem.numConstraints - base, 4, "expected two two-sided rows")
   }
 
+  test("a network carrying a global constraint still builds") {
+    assume(available, "goldens missing")
+    // The regression this pins: `Lopf.build` emits a CO2 cap through `lessThan`,
+    // which the builder records as a negated row, and an invariant demanding
+    // every row be `Direct` rejected the whole network. Every fixture in this
+    // suite is derived from `sclopf-triangle`, which carries no
+    // global_constraints.csv, so nothing here noticed -- secure dispatch under an
+    // emissions cap is among SCLOPF's commonest uses.
+    val n = network("ac-dc-co2")
+    assert(n.table("GlobalConstraint").exists(_.size > 0), "the fixture lost its cap")
+
+    // Line 6 is a bridge, so the credible contingencies are the meshed triangle.
+    val outages = IndexedSeq("0", "1", "5").map(Sclopf.Outage("Line", _))
+    val model   = Sclopf.build(n, Some(outages))
+    assert(
+      model.problem.numConstraints > Lopf.build(n).problem.numConstraints,
+      "no security rows were added",
+    )
+  }
+
+  test("a negated row keeps its sign through the rebuild") {
+    assume(available, "goldens missing")
+    // The reason a negated row is re-emitted negated rather than through
+    // `greaterThan`: the latter copies the primal correctly and silently flips
+    // the dual that `translation.originalDuals` hands back, which is public API.
+    val n       = network("ac-dc-co2")
+    val base    = Lopf.build(n)
+    val secure  = Sclopf.build(n, Some(IndexedSeq("0", "1", "5").map(Sclopf.Outage("Line", _))))
+
+    val baseNegated = (0 until base.translation.numOriginalRows)
+      .count(r => base.translation.expansionOf(r).isInstanceOf[RowExpansion.Negated])
+    assert(baseNegated > 0, "the fixture has no negated row, so this proves nothing")
+
+    val secureNegated = (0 until base.translation.numOriginalRows)
+      .count(r => secure.translation.expansionOf(r).isInstanceOf[RowExpansion.Negated])
+    assertEquals(secureNegated, baseNegated, "the rebuild changed which rows are negated")
+  }
+
   /** The triangle plus a radial load spur, which is a bridge.
     *
     * Rows are built from each file's actual header rather than an assumed column
@@ -325,7 +363,41 @@ class SclopfSuite extends munit.FunSuite:
     // The unrequested bridge is not, and says so.
     val failure = intercept[NoSuchElementException](some.factor(("Line", "AB"), ("Line", "CD")))
     assert(failure.getMessage.contains("not computed"), failure.getMessage)
-    intercept[NoSuchElementException](some.factorOrZero(("Line", "AB"), ("Line", "CD")))
+    // The message on this one too: without it the assertion would pass for a
+    // NoSuchElementException thrown from anywhere at all.
+    val orZero = intercept[NoSuchElementException](some.factorOrZero(("Line", "AB"), ("Line", "CD")))
+    assert(orZero.getMessage.contains("not computed"), orZero.getMessage)
     // A branch of another sub-network is still a legitimate zero.
     assertEqualsDouble(some.factorOrZero(("Line", "AB"), ("Line", "elsewhere")), 0.0, 0.0)
+  }
+
+  test("factors stay bounded as a network approaches a bridge") {
+    assume(available, "goldens missing")
+    // Why there is no magnitude bound on the factors. Driving a network towards a
+    // bridge -- a stiff branch parallel to a path whose impedance is raised by
+    // orders of magnitude -- does not make the factors grow: all of an outaged
+    // branch's flow moves to the alternative path, so the ratio is exactly one
+    // until the denominator check fires. A bound of 1e6 was added here on the
+    // reasoning that a denominator just past the threshold would yield a huge
+    // finite factor; this is the measurement that showed it could never trip.
+    Seq(1e2, 1e4, 1e6).foreach { ratio =>
+      val dir = Files.createTempDirectory("noaidi-sclopf-weak-")
+      temporaries += dir
+      Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\nC,380.0,AC\n")
+      Files.writeString(
+        dir.resolve("lines.csv"),
+        "name,bus0,bus1,x,r,s_nom\n" +
+          s"AB,A,B,0.1,0.0,150.0\nAC,A,C,${0.1 * ratio},0.0,150.0\nCB,C,B,${0.1 * ratio},0.0,150.0\n",
+      )
+      Files.writeString(dir.resolve("generators.csv"), "name,bus,control,carrier\ng,A,Slack,wind\n")
+      Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nl,B,50.0\n")
+      Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n0,2015-01-01 00:00:00\n")
+
+      val n    = CsvReader.read(dir, schema, "weak")
+      val lodf = Lodf.of(n, Topology.subNetworks(n).head, None)
+      val ids  = Seq("AB", "AC", "CB")
+      val worst = (for a <- ids; o <- ids if a != o
+                   yield math.abs(lodf.factor(("Line", a), ("Line", o)))).max
+      assertEqualsDouble(worst, 1.0, 1e-6, s"impedance ratio $ratio")
+    }
   }

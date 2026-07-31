@@ -61,18 +61,29 @@ object NetCdfReader:
     val datasets = hdf.getChildren.asScala.collect { case (n, d: Dataset) => n -> d }.toMap
 
     val snapshots = readSnapshots(datasets)
+    // Discovered, not enumerated. `CsvReader` reads every non-label column of
+    // snapshots.csv as a weighting, so hardcoding three names here would drop a
+    // fourth that PyPSA adds -- and the two readers would then disagree about a
+    // network neither of them is wrong about.
     val weightings = ListMap.from(
-      Seq("objective", "stores", "generators").flatMap { column =>
-        datasets.get(s"snapshots_$column").map(d => column -> IArray.from(doubles(d)))
-      }
+      datasets.toIndexedSeq
+        .collect {
+          case (n, d) if n.startsWith("snapshots_") && n != "snapshots_snapshot" =>
+            n.drop("snapshots_".length) -> IArray.from(doubles(d))
+        }
+        .sortBy(_._1)
     )
 
-    // Driven off the schema's list names, longest first: `sub_networks_carrier`
-    // must not be read as the `networks` list, and only the schema knows which
-    // prefixes are real.
-    val byLength = schema.components.sortBy(-_.listName.length)
-
-    val tables = byLength.flatMap { spec =>
+    // Driven off the schema's list names. Splitting a dataset name on
+    // underscores could not tell `sub_networks_carrier` apart from a `networks`
+    // list with a `sub_carrier` attribute; the schema is what says which prefixes
+    // are real component lists.
+    //
+    // An earlier version sorted these by descending name length to defend
+    // against one list name prefixing another. No two of the schema's sixteen
+    // do, and each spec filters the datasets independently with nothing
+    // consumed, so the sort could not have changed the outcome either way.
+    val tables = schema.components.flatMap { spec =>
       datasets.get(s"${spec.listName}_i").map { index =>
         spec.name -> readTable(spec, strings(index), datasets, snapshots.length)
       }
@@ -100,7 +111,16 @@ object NetCdfReader:
         .flatMap { (n, d) =>
           val rest = n.drop(prefix.length)
           if rest == "i" || rest.startsWith("t_") then None
-          else Some(rest -> column(d, s"${spec.listName}.$rest"))
+          else
+            val col = column(d, rest, spec)
+            // The same check the series path already had. Without it a mis-sized
+            // column is stored happily and surfaces much later as an
+            // ArrayIndexOutOfBoundsException naming neither file nor attribute.
+            if col.length != ids.length then
+              throw new MalformedNetwork(
+                s"$n holds ${col.length} values but ${spec.listName}_i has ${ids.length} entities"
+              )
+            Some(rest -> col)
         }
         .sortBy(_._1)
     )
@@ -154,30 +174,81 @@ object NetCdfReader:
       case Some(spec) =>
         val (unit, epoch) = parseUnits(spec)
         val formatter     = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-        longs(d).map(offset => epoch.plus(unit.multipliedBy(offset)).format(formatter))
+        // Offsets are read as doubles, because CF permits fractional ones and
+        // xarray emits them whenever the units are pinned rather than inferred --
+        // `0.5` under `days since ...` is half a day. Truncating to a long turned
+        // that into `0`, a label twelve hours out with no error, which is exactly
+        // the silent disagreement this decoding exists to prevent.
+        doubles(d).map { offset =>
+          val nanos = offset * unit.toNanos.toDouble
+          if math.abs(nanos - math.rint(nanos)) > 1e-3 then
+            throw new MalformedNetwork(
+              s"the snapshot offset $offset in '$spec' is not a whole number of nanoseconds"
+            )
+          epoch.plusNanos(math.rint(nanos).toLong).format(formatter)
+        }
 
   /** `<unit> since <timestamp>`, the CF convention. */
   private def parseUnits(spec: String): (Duration, LocalDateTime) =
     val parts = spec.split(" since ", 2)
     if parts.length != 2 then
       throw new MalformedNetwork(s"cannot read the time units '$spec'")
-    val unit = parts(0).trim.toLowerCase match
-      case "days"                     => Duration.ofDays(1)
-      case "hours"                    => Duration.ofHours(1)
-      case "minutes"                  => Duration.ofMinutes(1)
-      case "seconds"                  => Duration.ofSeconds(1)
-      case "milliseconds"             => Duration.ofMillis(1)
-      case "microseconds"             => Duration.ofNanos(1000)
-      case "nanoseconds"              => Duration.ofNanos(1)
-      case other                      => throw new MalformedNetwork(s"unsupported time unit '$other'")
-    val text  = parts(1).trim.replace(' ', 'T')
+    // CF allows singular and abbreviated forms as well as the plurals xarray
+    // happens to write, so the word is normalised rather than matched literally.
+    val word = parts(0).trim.toLowerCase.stripSuffix("s")
+    val unit = word match
+      case "day" | "d"                  => Duration.ofDays(1)
+      case "hour" | "hr" | "h"          => Duration.ofHours(1)
+      case "minute" | "min"             => Duration.ofMinutes(1)
+      case "second" | "sec" | "s"       => Duration.ofSeconds(1)
+      case "millisecond" | "msec" | "ms" => Duration.ofMillis(1)
+      case "microsecond" | "usec" | "us" => Duration.ofNanos(1000)
+      case "nanosecond" | "nsec" | "ns"  => Duration.ofNanos(1)
+      case other => throw new MalformedNetwork(s"unsupported time unit '$other'")
+
+    // A CF epoch may carry a zone offset. Stripping it rather than replacing
+    // every space with `T`, which turned `2015-01-01 00:00:00 +00:00` into
+    // `2015-01-01T00:00:00T+00:00` and then failed to parse something valid.
+    val raw    = parts(1).trim
+    val zoned  = raw.split("\\s+")
+    val stamp  = if zoned.length >= 2 && !zoned(1).startsWith("+") && !zoned(1).startsWith("-")
+                 then s"${zoned(0)}T${zoned(1)}"
+                 else zoned(0)
+    val text   = stamp.stripSuffix("Z")
     val epoch =
       try LocalDateTime.parse(if text.length == 10 then s"${text}T00:00:00" else text)
-      catch case e: Exception => throw new MalformedNetwork(s"cannot read the epoch '${parts(1)}'")
+      catch case _: Exception => throw new MalformedNetwork(s"cannot read the epoch '$raw'")
     (unit, epoch)
 
-  /** A static column, typed as the file says rather than as the values look. */
-  private def column(d: Dataset, what: String): Column =
+  /** A static column, typed by the schema where it declares one.
+    *
+    * `CsvReader` types from the schema, and this has to agree or the two produce
+    * different models of the same network. Inferring from the file's dtype alone
+    * is not equivalent: pandas promotes an int column to float64 the moment it
+    * holds a NaN, so a schema-declared Int can arrive as doubles and
+    * `table.int(...)` would then throw. The `dtype = bool` marker is one instance
+    * of that same problem, and is kept for CUSTOM columns, where the schema has
+    * nothing to say.
+    */
+  private def column(d: Dataset, attribute: String, spec: ComponentSpec): Column =
+    spec.attribute(attribute).map(_.valueType) match
+      case Some(AttributeType.Float) => Column.Floats(IArray.from(doubles(d)))
+      case Some(AttributeType.Int)   => Column.Ints(IArray.from(doubles(d).map(_.toInt)))
+      case Some(AttributeType.Bool)  => Column.Bools(IArray.from(booleans(d)))
+      case Some(AttributeType.Str)   => Column.Strings(IArray.from(strings(d)))
+      // Geometry is not modelled, and an undeclared attribute is a custom column
+      // the schema says nothing about; both fall back to the file's own dtype.
+      case _                         => inferred(d, s"${spec.listName}.$attribute")
+
+  private def booleans(d: Dataset): IndexedSeq[Boolean] = d.getData match
+    case a: Array[Byte]    => a.map(_ != 0).toIndexedSeq
+    case a: Array[Boolean] => a.toIndexedSeq
+    case a: Array[Int]     => a.map(_ != 0).toIndexedSeq
+    case other =>
+      throw new MalformedNetwork(s"expected a boolean, got ${other.getClass.getSimpleName}")
+
+  /** A custom column, typed from the file since the schema does not declare it. */
+  private def inferred(d: Dataset, what: String): Column =
     // netCDF has no boolean, so xarray writes int8 and records the real type in a
     // `dtype` attribute. Inferring from the values would make a column of 0s and
     // 1s an integer column, which then does not compare equal to the CSV reader's.

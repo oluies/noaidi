@@ -411,8 +411,14 @@ def capture_network(name: str, build) -> dict:
     binary.mkdir(parents=True, exist_ok=True)
     print(f"  {name}: netCDF")
     n.export_to_netcdf(str(binary / f"{name}.nc"))
-    print(f"  {name}: HDF5")
-    n.export_to_hdf5(str(binary / f"{name}.h5"))
+    # `tables` is genuinely optional: nothing reads these, and NOTES records why.
+    # Hard-failing the whole pipeline for a file the port does not consume would
+    # leave the CSV directory written and the manifest entry missing.
+    try:
+        print(f"  {name}: HDF5")
+        n.export_to_hdf5(str(binary / f"{name}.h5"))
+    except ImportError as exc:
+        print(f"  {name}: HDF5 skipped ({exc})")
 
     summary = {
         "name": name,

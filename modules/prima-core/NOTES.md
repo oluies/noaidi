@@ -643,6 +643,16 @@ coefficient and the LP would come back infeasible with nothing to explain it.
 `ac-dc-meshed`'s Bremen–Frankfurt line is exactly such a branch, which is part of
 why that network cannot serve as an SCLOPF fixture.
 
+There is deliberately **no bound on the factors themselves**, and measuring is
+what settled it. A bound of 1e6 was added on the reasoning that a denominator
+just past the threshold would yield a huge finite factor the LP would swallow.
+Driving a network towards a bridge — a stiff branch parallel to a path whose
+impedance is raised through 1e2, 1e4, 1e6 — leaves the largest factor at exactly
+1.0000 at every step, and the denominator check fires before anything grows. That
+is the physics: all of an outaged branch's flow moves to the alternative path, so
+the ratio is one. The bound was a branch no input could reach, justified by a
+claim that does not hold; it is gone, and the measurement is a test.
+
 The refusal belongs to the **outage column**, not the whole matrix, and getting
 that wrong made the module far less usable than the contract said. Validating
 every column meant a single radial load spur anywhere in the network refused

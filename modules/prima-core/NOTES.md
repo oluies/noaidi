@@ -326,14 +326,12 @@ Not implemented, and rejected rather than mis-solved in every case:
 - **Storage.** A storage unit's energy balance couples consecutive snapshots,
   which dispatch alone cannot represent. `network-pf` handles the same networks
   fine, because there dispatch is an input rather than an unknown.
-- **Transformers, at any tap ratio.** Not merely off-nominal ones. A transformer
-  is a passive branch and decomposes correctly, but its per-unit impedance is
-  based on `s_nom` and scaled by `tap_ratio` where a line's is based on `v_nom²`.
-  Reusing the line formula is not a small error: for a 380 kV, 500 MVA
-  transformer with `x = 0.1` it gives 6.9e-10 against PyPSA's 2.0e-4, so any
-  cycle crossing the transformer behaves as though it were absent and the LP
-  returns wrong flows reporting `Optimal`. Refused until there is a golden with a
-  transformer to validate the conversion against.
+- **Off-nominal tap ratios and the transformer T model, in the AC path only.**
+  Transformers themselves are modelled — see *Transformers* below — but an
+  off-nominal tap makes `Y` asymmetric rather than scaled, and `model = "t"` with
+  a non-zero shunt needs a wye–delta conversion before `Y` is built. Phase shift
+  is not modelled at all. The linear models handle `tap_ratio` as PyPSA does, as
+  a plain multiplier.
 - **Global constraints other than `primary_energy` with sense `<=`.** PyPSA
   dispatches on `type` to entirely different builders, so assuming one would
   build an energy cap as an emissions cap wearing the same right-hand side.
@@ -787,6 +785,94 @@ The shared `Branches` object is now public. Its stated purpose was one definitio
 of susceptance across the power-flow modules, and the transformer conversion was
 the case that would have been added to one and not the other — `network-lopf`'s
 cycle constraints read it rather than carrying a third copy.
+
+## Standard types, and the 585-bus network they unblock
+
+`scigrid-de` runs. 585 buses, 852 lines, 96 transformers, 24 snapshots: angles to
+1e-9 of PyPSA's and flows to 1e-6, two orders of magnitude past every other
+fixture here.
+
+It was unreadable until now for a reason that is not about physics at all. All
+852 of its lines carry `x = 0` and a **type name**, so the impedance comes from
+
+```
+r = r_per_length · length / num_parallel
+x = x_per_length · length / num_parallel
+b = 2π · 1e-9 · f_nom · c_per_length · length · num_parallel
+```
+
+and `export_to_csv_folder` writes **no type library**. It drops exactly the rows
+a fresh `Network()` was born with, correctly — they are library data, and PyPSA's
+own reader repopulates them from the installed package. A reader outside Python
+has nothing to repopulate from.
+
+So `network-model` ships the pinned library as a resource, and
+`StandardTypesSuite` holds that copy to a golden written from the same PyPSA. A
+version bump that changed an impedance then fails a comparison rather than
+silently changing every answer on a typed network. A network carrying its own
+`line_types.csv` — which is what PyPSA exports once a user adds a type — wins
+row by row over the shipped one.
+
+Expansion happens where PyPSA does it, in the physics entry points rather than
+at read time. Doing it in the reader would put computed columns into a
+round-tripped export that PyPSA's own export does not have.
+
+**Two asymmetries that are invisible at the default.** Parallel circuits divide
+the series impedance and multiply the shunt; and a transformer's `x` is formed
+from the *undivided* `r`:
+
+```
+r = vscr/100                    x = sqrt((vsc/100)² − r²)     then both ÷ num_parallel
+g = pfe/(1000 · s_nom)          b = −sqrt((i0/100)² − g²)     then both × num_parallel
+```
+
+Transposing the `num_parallel` direction is a factor of `num_parallel²`;
+computing `x` from the divided `r` is about 5e-9 on the 160 MVA type — far too
+small to show up in a flow comparison. Every other fixture in the repository
+sits at `num_parallel = 1`, where both mistakes are exactly invisible, which is
+why `standard-types` puts a 2 and a 4 in and asserts the ratios directly.
+
+`s_nom` comes from the transformer type and is **not** scaled by `num_parallel`.
+Two 160 MVA units in parallel are rated 160 MVA by PyPSA. Surprising, so it is
+pinned.
+
+The line shunt `b` only enters an AC solve, so `standard-types` also carries a
+`pf` golden — zeroing that term moves a 380 kV bus voltage by 2.7%, which is the
+measurement that says the term is load-bearing rather than decorative.
+
+### What `scigrid-de` cannot gate
+
+Its `optimize` dispatch. Adding the `standard-types` fixture rewrote 59,000 lines
+of the committed `scigrid-de` golden without touching anything that network uses,
+which is how this surfaced.
+
+Six runs in fresh processes land on exactly two answers, agreeing on the
+objective to 2e-8 relative and differing by up to **750 MW** at individual
+generators. The cause is upstream of the solver: `find_cycles` returns 364 cycles
+either way but a basis of either 2372 or 2469 nonzeros, and 2469 − 2372 = 97 is
+exactly the per-snapshot difference in the LP handed to HiGHS (261298 against
+263626 nonzeros over 24 snapshots). `PYTHONHASHSEED` does not pin it.
+
+Both bases span the same cycle space and both optima cost the same, so this is a
+property of the network rather than a defect in PyPSA. It does mean the objective
+and the marginal prices are gates there and the dispatch frames are not — the
+golden says so in a `dispatch_note` beside them. LOPF on `scigrid-de` is blocked
+on storage anyway; this is recorded so it is not discovered again later, from the
+other end.
+
+### Transformer standard types are implemented but reach a wall
+
+The conversion is there and validated. What is not implemented is what the
+library's own types mostly need: every transformer type carries a non-zero
+magnetising shunt, and `Transformer.model` defaults to `"t"`, under which PyPSA
+converts wye–delta before building `Y`. The `standard-types` fixture sets
+`model = "pi"` explicitly to isolate type expansion from that conversion.
+
+The 110/20 kV types are worse — they are Dyn5 with `phase_shift = 150°`, and
+phase shift is not modelled anywhere in this port. The fixture uses
+`160 MVA 380/110 kV`, which has none. So: a transformer standard type works
+today if it is a transmission-level unit declared `pi`. The T model and phase
+shift are the next two pieces, and both need goldens of their own.
 
 ## Known gaps
 

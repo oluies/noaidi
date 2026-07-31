@@ -89,7 +89,10 @@ object NewtonRaphson:
     */
   final case class Params(tolerance: Double = 1e-6, maxIterations: Int = 30)
 
-  def solve(network: Network, params: Params = Params()): PfResult =
+  def solve(input: Network, params: Params = Params()): PfResult =
+    // As in the linear flow: a typed branch has no impedance in the file, so
+    // this has to happen before anything reads `r` or `x`.
+    val network = StandardTypes.expand(input)
     rejectUnhandled(network)
 
     val subs   = Topology.subNetworks(network)

@@ -112,9 +112,10 @@ object UnitCommitment:
     def forcedValue: Double = if initiallyUp then 1.0 else 0.0
 
   def solve(
-      network: Network,
+      input: Network,
       params: BnbParams = BnbParams(),
   ): UcResult =
+    val network = StandardTypes.expand(input)
     reject(network)
 
     val snapshots = network.snapshots.indices

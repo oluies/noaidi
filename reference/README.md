@@ -32,6 +32,45 @@ it is the point.
 | `goldens/networks/<name>/` | PyPSA's own CSV directory export. This is the format L1 must round-trip, not a convenience dump. |
 | `goldens/results/<name>.json` | Linear power flow and optimisation outputs that L2 must reproduce within documented tolerances. |
 | `goldens/manifest.json` | Versions used, and a per-network summary of what carries time-varying data. |
+| `goldens/standard_types/` | PyPSA's line and transformer type library. Not part of any network export — see below. |
+
+## What a regeneration diff means
+
+Two kinds of churn are expected and say nothing:
+
+**The HDF5 containers rewrite themselves.** Exporting the same network twice
+gives byte-identical files, but a file written today differs from the committed
+one — 47409, 47483 and 47497 bytes for the same three-bus network across runs —
+while every variable, dimension and attribute compares equal. It is container
+layout, not content. Re-exported binaries whose content is unchanged are worth
+reverting so the diff stays reviewable.
+
+**`scigrid-de`'s optimal dispatch is not unique, and PyPSA does not pick the
+same one twice.** Six runs in fresh processes land on exactly two answers,
+agreeing on the objective to 2e-8 relative and differing by up to 750 MW at
+individual generators. The cause is upstream of the solver: `find_cycles`
+returns 364 cycles either way but a basis of either 2372 or 2469 nonzeros, and
+the 97-nonzero difference is exactly what shows up per snapshot in the LP handed
+to HiGHS. `PYTHONHASHSEED` does not pin it. Both bases span the same cycle space
+and both optima cost the same, so this is a property of the network rather than
+a defect — but it does mean the `optimize` dispatch frames on that network
+cannot gate an implementation, and the golden says so in a `dispatch_note`
+beside them.
+
+## The standard type library
+
+`goldens/standard_types/` holds PyPSA's 59 line types and 14 transformer types,
+which appear in **no** network export: `export_to_csv_folder` drops exactly the
+rows a fresh `Network()` was born with, on the correct grounds that they are
+library data. PyPSA's reader repopulates them from the installed package, and a
+reader outside Python cannot.
+
+This matters because `scigrid-de` is unreadable without them — all 852 of its
+lines carry `x = 0` and a type name, and the impedance comes from
+`x_per_length x length / num_parallel`. The port ships its own copy as a
+resource, and a test holds that copy to this one, so a version bump that changes
+an impedance fails a comparison instead of silently changing every answer on a
+typed network.
 
 ## Two things the schema already settles
 

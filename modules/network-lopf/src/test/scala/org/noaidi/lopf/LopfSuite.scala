@@ -435,3 +435,69 @@ class LopfSuite extends munit.FunSuite:
       }
     }
   }
+
+  test("a network whose impedance comes only from type names matches PyPSA's dispatch") {
+    assume(available, "goldens missing")
+    // Every branch in `standard-types` is typed, so the LP's Kirchhoff rows are
+    // built entirely out of values that appear nowhere in the network's files.
+    // Both cycles matter: the 380 kV triangle fixes the line expansion and the
+    // loop through both transformers fixes the transformer one, and neither is
+    // radial, so topology alone does not determine the split.
+    val expected = results("standard-types")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("standard-types")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    Seq("Line" -> expected("line_p0"), "Transformer" -> expected("transformer_p0")).foreach {
+      (component, frame) =>
+        n.snapshots.indices.foreach { t =>
+          n.require(component).ids.foreach { id =>
+            assertEqualsDouble(
+              result.dispatch(component, id, t),
+              frameValue(frame, t, id),
+              1e-3,
+              s"snapshot $t, $component $id",
+            )
+          }
+        }
+    }
+  }
+
+  test("a security-constrained solve expands types before computing outage factors") {
+    assume(available, "goldens missing")
+    // `Sclopf.build` has to expand before it reaches `Lodf`, not merely rely on
+    // `Lopf.build` doing it: the outage factors are computed from susceptance,
+    // so an unexpanded network would give the dispatch model the right
+    // impedances and the contingency rows `x = 0`.
+    //
+    // Exercised through `build` rather than `solve`, which is the whole point.
+    // `Sclopf.solve` expands on its own way in, so a test that only called it
+    // would pass with `build` left unexpanded -- which is exactly what happened
+    // on the first attempt at this test.
+    //
+    // Outages are named rather than defaulted: both transformers and the 110 kV
+    // line are bridges here, and outaging a bridge has no defined
+    // post-contingency flow.
+    val n = network("standard-types")
+    val outages =
+      IndexedSeq(Sclopf.Outage("Line", "hv12"), Sclopf.Outage("Line", "hv23"), Sclopf.Outage("Line", "hv31"))
+
+    val model  = Sclopf.build(n, Some(outages))
+    val plain  = Lopf.build(n)
+    assert(
+      model.problem.numConstraints > plain.problem.numConstraints,
+      "no contingency rows were added, so the factors were never built",
+    )
+
+    val result = Sclopf.solve(n, Some(outages), params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+    assert(
+      result.objective >= Lopf.solve(n, params).objective - 1e-6,
+      "a secure dispatch cannot cost less than an unconstrained one",
+    )
+  }

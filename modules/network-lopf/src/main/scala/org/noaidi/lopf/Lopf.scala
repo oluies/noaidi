@@ -59,7 +59,11 @@ object Lopf:
   final class UnsupportedNetwork(message: String) extends RuntimeException(message)
 
   /** Turn a network into a dispatch LP. */
-  def build(network: Network): Model =
+  def build(input: Network): Model =
+    // Idempotent, and called here as well as in `solve` so a caller that builds
+    // a model directly -- `Sclopf` does -- cannot get a network whose typed
+    // branches still have no impedance.
+    val network = StandardTypes.expand(input)
     rejectExtendable(network)
     rejectUnhandled(network)
     rejectDanglingBuses(network)
@@ -284,8 +288,14 @@ object Lopf:
     val (problem, translation) = builder.build()
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))
 
-  /** Solve, and map the answer back onto component names. */
-  def solve(network: Network, params: PdhgParams = PdhgParams.default): LopfResult =
+  /** Solve, and map the answer back onto component names.
+    *
+    * The result holds the '''expanded''' network — the one the model was built
+    * from — so an accessor reading a branch's impedance back sees what the
+    * constraints used rather than the `x = 0` a typed line carries in its file.
+    */
+  def solve(input: Network, params: PdhgParams = PdhgParams.default): LopfResult =
+    val network  = StandardTypes.expand(input)
     val model    = build(network)
     val solution = Pdhg.solve(model.problem, params)
     LopfResult(network, model, solution)

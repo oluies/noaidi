@@ -59,15 +59,20 @@ class GoldenNetworkSuite extends munit.FunSuite:
     assertEquals(generator.require("p_nom_max").defaultText, Some("inf"))
   }
 
-  /** Every golden network.
+  /** Every golden network, from the manifest rather than from a list here.
     *
-    * `ac-dc-dispatch` and `ac-dc-co2` were missing here, and they are the only two
-    * carrying solved output series and output columns -- exactly the shape the
-    * reader and writer had never been exercised on.
+    * The list this replaces had gone stale four fixtures in a row --
+    * `transformer-levels`, `lodf-mesh`, `standard-types` and `scigrid-de` were
+    * all absent, so the largest network in the repository and the only one whose
+    * impedance comes from a type name were never loaded at this layer at all. A
+    * hardcoded list fails by omission, which is the failure mode that leaves no
+    * trace: the suite stays green and the coverage quietly shrinks.
+    *
+    * The manifest is the authority for which networks exist, so a fixture added
+    * to `generate_goldens.py` is covered here without anyone remembering to.
     */
-  private val goldenNetworks =
-    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "unit-commitment",
-         "sclopf-triangle", "storage-hvdc")
+  private lazy val goldenNetworks: List[String] =
+    manifest("networks").obj.keys.toList.sorted
 
   goldenNetworks.foreach { name =>
     test(s"$name loads with the component counts PyPSA reported") {

@@ -61,15 +61,16 @@ class RoundTripSuite extends munit.FunSuite:
       }
     }
 
-  /** Every golden network.
+  /** Every golden network, from the manifest rather than from a list here.
     *
-    * `ac-dc-dispatch` and `ac-dc-co2` were missing here, and they are the only two
-    * carrying solved output series and output columns -- exactly the shape the
-    * reader and writer had never been exercised on.
+    * The list this replaces had gone stale four fixtures running, so the writer
+    * had never been asked to reproduce `scigrid-de`'s 852-line `lines.csv` or
+    * any file carrying a `type` column. Reading the manifest means a fixture
+    * added to `generate_goldens.py` is round-tripped without anyone remembering
+    * to add it here.
     */
-  private val goldenNetworks =
-    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "unit-commitment",
-         "sclopf-triangle", "storage-hvdc")
+  private lazy val goldenNetworks: List[String] =
+    ujson.read(Files.readString(goldens.resolve("manifest.json")))("networks").obj.keys.toList.sorted
 
   goldenNetworks.foreach { name =>
     test(s"$name round-trips to the same files PyPSA wrote") {

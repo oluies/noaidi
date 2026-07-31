@@ -12,11 +12,19 @@ class NewtonRaphsonSuite extends munit.FunSuite:
   private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
   private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
 
-  // Only these two. PyPSA 1.2.4 cannot run an AC power flow on the ac-dc
-  // networks at all -- it raises inside its own sub-network handling -- so their
-  // pf goldens record that error rather than an answer, and KNOWN_UNSUPPORTED in
-  // the generator says so.
-  private val networks = List("ac-pf-pv", "storage-hvdc")
+  // PyPSA 1.2.4 cannot run an AC power flow on the ac-dc networks at all -- it
+  // raises inside its own sub-network handling -- so their pf goldens record
+  // that error rather than an answer, and KNOWN_UNSUPPORTED in the generator
+  // says so. `scigrid-de` is absent for a different reason: PyPSA's own
+  // Newton-Raphson diverges on it from a flat start, so its golden holds the
+  // convergence flags and no values.
+  //
+  // `standard-types` is here because it is the only fixture where the shunt
+  // admittance comes from a type. A line's `b` is `2*pi*1e-9*f_nom*c_per_length
+  // *length*num_parallel` and a transformer's is a magnetising current, and
+  // neither enters a linear flow at all -- so this suite is the only thing that
+  // can tell whether they were derived correctly.
+  private val networks = List("ac-pf-pv", "storage-hvdc", "standard-types")
 
   private def network(name: String): Network =
     CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)

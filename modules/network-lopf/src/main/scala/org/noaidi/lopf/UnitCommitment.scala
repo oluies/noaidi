@@ -307,7 +307,13 @@ object UnitCommitment:
     // it is being solved with every bus forced to balance on its own. `Lopf`
     // models flows and refuses only what it cannot build; this refuses the whole
     // class, because a commitment model without flows is a single-bus model.
-    val handled = Set("Generator", "Load", "Bus", "Carrier", "GlobalConstraint",
+    // `GlobalConstraint` is deliberately absent, where `Lopf.rejectUnhandled`
+    // lists it. Lopf models primary-energy caps; this does not, and a commitment
+    // network carrying a CO2 cap would otherwise be solved with the cap deleted
+    // -- cheaper than the truth, silently, which is the failure class the rest of
+    // this rejection exists to close. The set was copied from Lopf and had the
+    // branches subtracted but not this.
+    val handled = Set("Generator", "Load", "Bus", "Carrier",
                       "SubNetwork", "LineType", "TransformerType", "Shape")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then
@@ -331,14 +337,28 @@ object UnitCommitment:
     // inconsistently until now.
     network.table("Generator").foreach { table =>
       Seq("stand_by_cost", "marginal_cost_quadratic").foreach { attribute =>
-        if table.static.contains(attribute) then
+        // Evaluated per snapshot, not read from the static column. Both are
+        // `static or series` with `varying: true`, and a value arriving as
+        // `generators-stand_by_cost.csv` with no static counterpart would slip
+        // past a `static.contains` check and be dropped -- the same
+        // under-pricing this guard exists to prevent. The ramp-limit check below
+        // is static-only because those attributes are genuinely `varying: false`,
+        // so the pattern does not transfer.
+        val present =
+          table.spec.attribute(attribute).isDefined ||
+            table.static.contains(attribute) ||
+            table.series.contains(attribute)
+        if present then
           table.ids.foreach { id =>
-            val value = table.float(attribute, id)
-            if value.isFinite && value != 0.0 then
-              throw new UnsupportedNetwork(
-                s"generator '$id' has $attribute = $value; it enters PyPSA's objective and not " +
-                  "this one, so ignoring it would price the schedule below the truth"
-              )
+            network.snapshots.indices.foreach { t =>
+              val value = table.valueAt(attribute, id, t)
+              if value.isFinite && value != 0.0 then
+                throw new UnsupportedNetwork(
+                  s"generator '$id' has $attribute = $value at snapshot $t; it enters PyPSA's " +
+                    "objective and not this one, so ignoring it would price the schedule below " +
+                    "the truth"
+                )
+            }
           }
       }
     }

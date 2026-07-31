@@ -177,6 +177,105 @@ class UnitCommitmentSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("ramp"), failure.getMessage)
   }
 
+  test("a network with transmission is refused rather than solved bus-by-bus") {
+    assume(available, "goldens missing")
+    // The balance rows carry no flow variables, so a multi-bus network would be
+    // solved with every bus forced to balance locally: import and export are
+    // deleted, and the answer comes back either spuriously infeasible or far
+    // more expensive than the real network's. Nothing caught this because the
+    // only fixture is a single bus with no branches.
+    val dir = Files.createTempDirectory("noaidi-uc-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("unit-commitment")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    Files.writeString(
+      dir.resolve("buses.csv"),
+      Files.readString(dir.resolve("buses.csv")).stripTrailing + "\nfar,110.0\n",
+    )
+    Files.writeString(dir.resolve("lines.csv"), "name,bus0,bus1,x,r,s_nom\nl,bus,far,1.0,0.0,500.0\n")
+
+    val broken  = CsvReader.read(dir, schema, "unit-commitment")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("Line"), failure.getMessage)
+  }
+
+  test("a load attached to a nonexistent bus is refused") {
+    assume(available, "goldens missing")
+    // It would match no balance row and simply vanish, and the schedule would
+    // come out cheaper with no diagnostic. Lopf already guarded this; leaving
+    // one entry point loud and the other silently wrong is the thing to avoid.
+    val dir = Files.createTempDirectory("noaidi-uc-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("unit-commitment")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    // Only the data rows: a blanket replace would rename the `bus` *column* too,
+    // which is a different (also rejected) error and not the one under test.
+    val loads = dir.resolve("loads.csv")
+    val rows  = Files.readString(loads).linesIterator.toIndexedSeq
+    Files.writeString(
+      loads,
+      (rows.head +: rows.tail.map(_.replace(",bus", ",buss"))).mkString("\n") + "\n",
+    )
+
+    val broken  = CsvReader.read(dir, schema, "unit-commitment")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("buss"), failure.getMessage)
+  }
+
+  test("a unit part-way through its minimum up time is held on at the horizon head") {
+    assume(available, "goldens missing")
+    // Two earlier versions of this test were vacuous, and the second taught me
+    // why the obvious construction does not work. Solving the stock fixture
+    // asserts nothing, because `base` runs throughout regardless. Making `base`
+    // expensive does not help either: a `min_up_time` of 3 means starting it
+    // later locks it on for three snapshots, so keeping it on from the start is
+    // genuinely cheaper and it stays committed with or without the residual rows
+    // -- PyPSA agrees, at the same 91500.
+    //
+    // So the case is built rather than mutated: one expensive committable unit
+    // that is never needed, beside ample cheap capacity. Nothing but the residual
+    // condition can justify running it. PyPSA holds it on at t = 0 and 1 at its
+    // 50 MW minimum and releases it after, for 57000 against the 8000 an
+    // unconstrained schedule costs. Disabling the residual rows makes this fail,
+    // which is what the previous versions could not do.
+    val dir = Files.createTempDirectory("noaidi-uc-residual-")
+    temporaries += dir
+    Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nbus,110.0,AC\n")
+    Files.writeString(
+      dir.resolve("generators.csv"),
+      "name,bus,p_nom,p_min_pu,marginal_cost,committable,min_up_time,min_down_time\n" +
+        "unit,bus,100.0,0.5,500.0,True,3,1\n" +
+        "cheap,bus,500.0,0.0,10.0,False,0,0\n",
+    )
+    Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nd,bus,200.0\n")
+    Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n0,0\n1,1\n2,2\n3,3\n")
+
+    val n      = CsvReader.read(dir, schema, "uc-residual")
+    val gens   = n.require("Generator")
+    val result = UnitCommitment.solve(n, params)
+    assertEquals(result.status, MilpStatus.Optimal, s"${result.solution}")
+
+    val forced = math.max(gens.int("min_up_time", "unit") - gens.int("up_time_before", "unit"), 0)
+    assertEquals(forced, 2, "the fixture should force exactly two snapshots")
+
+    (0 until forced).foreach { t =>
+      assert(result.committed("unit", t), s"unit must be held on at snapshot $t")
+      // Held on means held at its minimum, not merely flagged.
+      assertEqualsDouble(result.output("unit", t), 50.0, 1e-4, s"snapshot $t")
+    }
+    // And released once the residual expires -- otherwise this would pass for an
+    // implementation that commits everything always.
+    (forced until n.snapshots.length).foreach { t =>
+      assert(!result.committed("unit", t), s"unit should be free to shut down at snapshot $t")
+    }
+    // PyPSA's objective for this network. An unconstrained schedule costs 8000.
+    assertEqualsDouble(result.objective, 57000.0, 1e-3, s"${result.solution}")
+  }
+
   private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
 
   override def afterAll(): Unit =

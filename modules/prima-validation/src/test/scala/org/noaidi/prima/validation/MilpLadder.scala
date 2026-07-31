@@ -81,20 +81,6 @@ object MilpLadder:
     }
     Instance(s"random-mixed-$seed", b.build()._1, (0 until n).filter(_ % 2 == 0).toSet)
 
-  /** The ladder.
-    *
-    * Seeds are chosen, not arbitrary: `randomMixed(2)` and several neighbours
-    * produce an integral relaxation and so solve in one node without branching.
-    * `MilpAgreementSuite` asserts that every instance here is fractional, so a
-    * future edit cannot quietly reintroduce one that tests nothing.
-    */
-  /** The ladder.
-    *
-    * Seeds are chosen, not arbitrary: `randomMixed(2)` and several neighbours
-    * produce an integral relaxation and so solve in one node without branching.
-    * `MilpAgreementSuite` asserts that every instance here is fractional, so a
-    * future edit cannot quietly reintroduce one that tests nothing.
-    */
   /** The settings both the report and the agreement suite use.
     *
     * Shared so the node counts and gaps pinned in NOTES describe the same
@@ -105,6 +91,13 @@ object MilpLadder:
   val params: BnbParams =
     BnbParams(lp = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000), maxNodes = 50_000)
 
+  /** The ladder.
+    *
+    * Seeds are chosen, not arbitrary: `randomMixed(2)` and several neighbours
+    * produce an integral relaxation and so solve in one node without branching.
+    * `MilpAgreementSuite` asserts that every instance here is fractional, so a
+    * future edit cannot quietly reintroduce one that tests nothing.
+    */
   val instances: Seq[Instance] = Seq(
     fractionalPair,
     knapsack("knapsack-8", Seq(10, 13, 18, 31, 7, 15, 22, 9), Seq(3, 4, 5, 9, 2, 5, 7, 3), 17.0),

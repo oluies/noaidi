@@ -600,9 +600,14 @@ non-committable one, which is a placeholder rather than a decision — `peak` ha
 no status to report. `UcResult.committed` reports `true` for such a unit instead,
 since that is what the model does with it. The two are not compared.
 
-Ramp limits and time-dependent start-up costs are not modelled and are rejected
-rather than ignored, since either would yield a schedule the network cannot
-actually follow, at a cost lower than the truth.
+Ramp limits, `stand_by_cost`, `marginal_cost_quadratic` and global constraints
+are not modelled and are rejected rather than ignored, since each would yield a
+schedule cheaper than the network permits. `GlobalConstraint` in particular was
+briefly admitted by a `handled` set copied from `Lopf` — which does model
+primary-energy caps — so a commitment network carrying a CO2 cap would have been
+solved with the cap deleted. The two cost attributes are `static or series`, so
+they are checked per snapshot rather than from the static column, where a value
+arriving only as `generators-stand_by_cost.csv` would have slipped past.
 
 ## L2: security-constrained LOPF
 

@@ -1,0 +1,165 @@
+package org.noaidi.prima.validation
+
+import org.noaidi.prima.*
+import org.noaidi.prima.ojalgo.OjAlgoMilp
+import scala.util.Random
+
+/** Prima's branch-and-bound against ojAlgo's mixed-integer solver.
+  *
+  * This matters more than the LP cross-check it mirrors. Prima's search rests on
+  * an '''inexact''' bound, so its pruning rule is a judgement about how much
+  * slack to leave rather than a theorem — and the failure mode it guards against
+  * is silent: a discarded subtree returns a suboptimal answer labelled optimal.
+  * ojAlgo's bound is exact, so a disagreement here is exactly that failure.
+  *
+  * Objectives are compared, not solution vectors. Several integer points can
+  * share the optimal value, and which one a solver reaches is not determined —
+  * the same reasoning `OracleAgreementSuite` applies to LP vertices.
+  */
+class MilpAgreementSuite extends munit.FunSuite:
+
+  // Shared with the report, so the figures recorded in NOTES describe the same
+  // configuration this suite verifies.
+  private val params = MilpLadder.params
+
+  /** Delegates to the ladder's generator rather than copying it.
+    *
+    * There were two line-for-line identical generators in this package. Two
+    * copies drift, and the ladder's asserted fractionality would then say
+    * nothing about the instances this suite actually runs.
+    */
+  private def randomMilp(seed: Int, n: Int, m: Int): (LpProblem, Set[Int]) =
+    val instance = MilpLadder.randomMixed(seed, n, m)
+    (instance.problem, instance.integers)
+
+  test("Prima and ojAlgo agree on every random mixed-integer instance") {
+    var checked    = 0
+    var fractional = 0
+    (1 to 12).foreach { seed =>
+      val (problem, integers) = randomMilp(seed, 6 + seed % 4, 3 + seed % 3)
+
+      val relaxation = Pdhg.solve(problem, params.lp)
+      val isFractional = relaxation.status == SolveStatus.Optimal && integers.exists { j =>
+        val v = relaxation.primal(j)
+        math.abs(v - math.round(v).toDouble) > 1e-4
+      }
+      if isFractional then fractional += 1
+
+      val mine   = BranchAndBound.solve(problem, integers, params)
+      val theirs = OjAlgoMilp.solve(problem, integers)
+
+      if theirs.status == MilpStatus.Optimal then
+        assertEquals(mine.status, MilpStatus.Optimal, s"seed $seed: $mine vs ${theirs.status}")
+        assertEqualsDouble(
+          problem.primalObjective(mine.primal),
+          theirs.objectiveValue,
+          1e-5 * math.max(1.0, math.abs(theirs.objectiveValue)),
+          s"seed $seed: prima=${problem.primalObjective(mine.primal)} ojalgo=${theirs.objectiveValue}",
+        )
+        checked += 1
+      else if theirs.status == MilpStatus.Infeasible then
+        assertEquals(mine.status, MilpStatus.Infeasible, s"seed $seed: $mine")
+        checked += 1
+    }
+    assert(checked >= 10, s"only $checked instances were comparable; the suite is nearly vacuous")
+    // If no relaxation were fractional, branch-and-bound would never branch and
+    // agreement would say nothing about the search.
+    assert(fractional >= 5, s"only $fractional instances had a fractional relaxation")
+  }
+
+  test("Prima never reports an integer objective better than ojAlgo's optimum") {
+    // The asymmetric half, and the one that would catch a genuinely broken
+    // search: claiming an objective *below* the true optimum means the reported
+    // point is not feasible for the integer problem at all.
+    (1 to 12).foreach { seed =>
+      val (problem, integers) = randomMilp(seed, 7, 4)
+      val mine   = BranchAndBound.solve(problem, integers, params)
+      val theirs = OjAlgoMilp.solve(problem, integers)
+      if theirs.status == MilpStatus.Optimal && mine.primal.nonEmpty then
+        // The objective of the returned point, not the reported number. Those
+        // were computed from different things, so comparing the reported one
+        // could not support the inference this test exists to make.
+        val achieved = problem.primalObjective(mine.primal)
+        assert(
+          achieved >= theirs.objectiveValue - 1e-5,
+          s"seed $seed: prima claims $achieved, better than the true ${theirs.objectiveValue}",
+        )
+    }
+  }
+
+  test("every ladder instance actually requires branching") {
+    // The property the ladder's value rests on, asserted rather than asserted in
+    // prose. An instance whose relaxation is already integral is solved by
+    // returning it, so it would agree with the oracle while exercising none of
+    // the search -- and two such instances were in the ladder until the report's
+    // integrality-gap column exposed them solving in a single node.
+    MilpLadder.instances.foreach { instance =>
+      val relaxed = Pdhg.solve(instance.problem, params.lp)
+      assertEquals(relaxed.status, SolveStatus.Optimal, s"${instance.name} relaxation")
+      val fractional = instance.integers.count { j =>
+        val v = relaxed.primal(j)
+        math.abs(v - math.round(v).toDouble) > 1e-4
+      }
+      assert(fractional > 0, s"${instance.name}: relaxation is already integral, so it tests nothing")
+    }
+  }
+
+  test("Prima matches ojAlgo across the whole ladder") {
+    MilpLadder.instances.foreach { instance =>
+      val mine   = BranchAndBound.solve(instance.problem, instance.integers, params)
+      val theirs = OjAlgoMilp.solve(instance.problem, instance.integers)
+      assertEquals(theirs.status, MilpStatus.Optimal, s"${instance.name}: oracle did not solve it")
+      assertEquals(mine.status, MilpStatus.Optimal, s"${instance.name}: $mine")
+      assertEqualsDouble(
+        mine.objectiveValue,
+        theirs.objectiveValue,
+        1e-5 * math.max(1.0, math.abs(theirs.objectiveValue)),
+        s"${instance.name}: prima=${mine.objectiveValue} ojalgo=${theirs.objectiveValue}",
+      )
+    }
+  }
+
+  test("the returned point is integral and satisfies the constraints") {
+    // Nothing checked `mine.primal` itself -- not its integrality, not its
+    // residuals -- so a search returning a fractional or infeasible point while
+    // reporting a plausible objective would have passed everything. This is what
+    // makes "Prima never beats the true optimum" mean anything: an objective
+    // below the optimum is only impossible if the point is genuinely feasible.
+    MilpLadder.instances.foreach { instance =>
+      val mine = BranchAndBound.solve(instance.problem, instance.integers, params)
+      assertEquals(mine.status, MilpStatus.Optimal, s"${instance.name}: $mine")
+
+      instance.integers.foreach { j =>
+        val v = mine.primal(j)
+        assertEqualsDouble(
+          v,
+          math.round(v).toDouble,
+          0.0,
+          s"${instance.name}: column $j came back at $v",
+        )
+      }
+
+      val bounds = instance.problem
+      mine.primal.indices.foreach { j =>
+        assert(
+          mine.primal(j) >= bounds.variableLower(j) - 1e-6 &&
+            mine.primal(j) <= bounds.variableUpper(j) + 1e-6,
+          s"${instance.name}: column $j = ${mine.primal(j)} outside its bounds",
+        )
+      }
+
+      // Row residuals: equalities first, then `Kx >= q`.
+      val m = instance.problem.constraintMatrix
+      (0 until instance.problem.numConstraints).foreach { r =>
+        var value = 0.0
+        var p     = m.rowPtr(r)
+        while p < m.rowPtr(r + 1) do
+          value += m.values(p) * mine.primal(m.colIndices(p))
+          p += 1
+        val q = instance.problem.rhs(r)
+        if r < instance.problem.numEqualities then
+          assertEqualsDouble(value, q, 1e-5, s"${instance.name}: equality row $r")
+        else assert(value >= q - 1e-5, s"${instance.name}: row $r gives $value < $q")
+      }
+    }
+  }

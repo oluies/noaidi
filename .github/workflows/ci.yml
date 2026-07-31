@@ -108,6 +108,17 @@ jobs:
           sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.Report" \
             | tee report.txt
 
+      # The mixed-integer counterpart. Kept as a separate step so a MILP
+      # regression is attributed to branch-and-bound rather than to the LP
+      # solver, and because this report exits non-zero on disagreement -- the
+      # search rests on an inexact bound, so a silent divergence from an exact
+      # oracle is the failure that matters most.
+      - name: Prima vs ojAlgo (mixed-integer)
+        run: |
+          set -euo pipefail
+          sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
+            | tee milp-report.txt
+
       - name: Publish report to the job summary
         if: always()
         run: |
@@ -123,3 +134,19 @@ jobs:
             echo "$body"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # The MILP table too, and guarded on the file existing because that
+          # step exits non-zero on disagreement -- which is exactly when someone
+          # needs to see *which* instance diverged, rather than reading raw job
+          # logs while the summary shows the LP report as if nothing happened.
+          if [ -f milp-report.txt ]; then
+            milp=$(sed -n '/instance .*size .*int/,$p' milp-report.txt)
+            [ -n "$milp" ] || milp=$(cat milp-report.txt)
+            {
+              echo "## Prima vs ojAlgo, mixed-integer (JDK ${{ matrix.java }})"
+              echo
+              echo '```'
+              echo "$milp"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

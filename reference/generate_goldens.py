@@ -162,8 +162,59 @@ KNOWN_UNSUPPORTED = {
     ("ac-dc-co2", "pf"): "same as ac-dc-meshed, from which it is derived",
 }
 
+def unit_commitment():
+    """A single-bus network whose optimum is a commitment schedule.
+
+    Purpose-built, because no stock example commits anything and `ac-dc-dispatch`
+    cannot be adapted: two of its three gas units came out of the expansion
+    optimum at `p_nom = 0`, and forcing a `p_min_pu` onto wind whose `p_max_pu`
+    varies below it is infeasible on its face.
+
+    Three units and an eight-snapshot load, shaped so the interesting constraints
+    actually bite rather than merely being present:
+
+      * `base` is cheap and inflexible. It runs throughout, so its `min_up_time`
+        of 3 never binds -- said here rather than left for a reader to assume.
+      * `mid` is the unit that gets committed and de-committed: off at snapshots
+        3-5, on elsewhere. That matters because an all-ones status frame would be
+        matched by an implementation that never switches anything off.
+      * `min_down_time` on `mid` BINDS. At 0 the optimum cycles it off through the
+        single-snapshot dip at t=1 for 16700; at 2 it cannot afford the
+        two-snapshot outage that would force, and pays 17000 instead. The 300
+        difference is attributable to that constraint alone.
+      * `peak` is expensive and NOT committable. It exists so a non-committable
+        generator sits in the same model as committable ones, since the two take
+        different treatment -- ordinary bounds against a status variable. It is
+        INERT at the optimum: it produces nothing at any snapshot, and deleting
+        it leaves the objective at 17000. Recorded here so its presence is not
+        mistaken for load-bearing; it exercises a code path, not the economics.
+
+    PyPSA's status frame covers every generator, so it reports 0 for `peak` at
+    every snapshot. That is a placeholder rather than a commitment decision --
+    `peak` has no status to report -- which is why the Scala comparison is
+    restricted to the committable units.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(8))
+    n.add("Bus", "bus", v_nom=110.0)
+    n.add(
+        "Generator", "base", bus="bus", p_nom=150.0, marginal_cost=10.0,
+        committable=True, p_min_pu=0.4, start_up_cost=500.0, shut_down_cost=200.0,
+        min_up_time=3, min_down_time=2,
+    )
+    n.add(
+        "Generator", "mid", bus="bus", p_nom=100.0, marginal_cost=30.0,
+        committable=True, p_min_pu=0.3, start_up_cost=200.0, shut_down_cost=100.0,
+        min_up_time=1, min_down_time=2,
+    )
+    n.add("Generator", "peak", bus="bus", p_nom=80.0, marginal_cost=80.0)
+    n.add("Load", "d", bus="bus", p_set=[200.0, 100.0, 200.0, 120.0, 90.0, 100.0, 190.0, 210.0])
+    return n
+
+
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
+    "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
@@ -441,6 +492,11 @@ def capture_network(name: str, build) -> dict:
             "objective_constant": jsonable(m.objective_constant),
             "total_system_cost": jsonable(m.objective + m.objective_constant),
             "generator_p": frame_to_json(m.generators_t.p),
+            # Commitment decisions. Empty for every fixture with no committable
+            # generator, so it is recorded rather than assumed present -- and it
+            # is the frame that says whether an implementation reproduced the
+            # *schedule* or merely landed on the same cost.
+            "generator_status": frame_to_json(m.generators_t.status),
             "line_p0": frame_to_json(m.lines_t.p0),
             "link_p0": frame_to_json(m.links_t.p0),
             "bus_marginal_price": frame_to_json(m.buses_t.marginal_price),

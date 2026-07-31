@@ -22,7 +22,7 @@ trusting a number that came out of this module.
 | ojAlgo backend, doubling as the correctness oracle | complete |
 | ZIO effect boundary with cooperative interruption and streaming | complete |
 | Cyfra GPU backend | **not started** |
-| MILP / branch-and-bound | **not started** |
+| MILP: branch-and-bound over the LP relaxation | complete |
 | Presolve: exact reductions with dual postsolve | complete |
 
 ## How the answers were checked
@@ -439,6 +439,170 @@ start and the Jacobian is singular.
 
 The linear flow does handle DC islands, since `lpf` supports them. The asymmetry
 is PyPSA's, not this port's.
+
+## Branch-and-bound on an inexact bound
+
+`BranchAndBound` solves mixed-integer problems by branching over Prima's own LP
+relaxation. The textbook algorithm assumes an **exact** bound, and every
+published correctness argument rests on one. Prima is a first-order method: it
+returns a point converged to a tolerance, not a vertex, so a node's reported
+objective is accurate only to roughly that tolerance. Two consequences, both
+handled explicitly rather than hoped past.
+
+**Pruning needs a margin, everywhere.** A node whose true bound sits just below
+the incumbent can report just above it, and pruning on that discards the subtree holding the
+optimum — silently, returning a suboptimal answer labelled `Optimal`. So a node
+is pruned only when its bound exceeds the incumbent by more than a multiple of
+*that node's own duality gap*: the accuracy achieved, not the accuracy requested.
+The cost is exploring some nodes an exact solver would have cut.
+
+**A non-conclusive relaxation is not a bound at all.** If a node's LP hits its
+iteration limit, pruning on its objective is unsound and so is declaring its
+solution integral. Such a node is branched rather than pruned, and counted in
+`MilpSolution.unprovenNodes`; an incumbent found while any exist is reported
+`Feasible`, never `Optimal`, because optimality was not proven.
+
+The margin has to apply at *both* pruning points. The pre-solve skip — where a
+node is discarded on its parent's bound without being solved — originally used an
+exact comparison, so it bypassed the entire argument above and could drop the
+subtree holding the optimum while the answer stayed labelled `Optimal`. Each node
+now carries its parent's bound with the margin already subtracted, and a node
+descended from an inconclusive relaxation carries `-infinity`, since such an
+objective is not a bound at all.
+
+The reported objective is `c'x` at the **returned** point, not the relaxation's
+value at the fractional iterate it was snapped from. Those differ by up to
+`integralityTolerance` times the integer columns' costs, which for
+unit-commitment-scale coefficients is far more than the gap the result claims to
+have closed — so reporting the wrong one would make every downstream comparison
+measure the snapping rather than the search.
+
+The search is depth-first on the most fractional variable. Depth-first because it
+reaches an incumbent early — which is what makes pruning possible at all — and
+because a child differs from its parent in exactly one bound, so the parent's
+iterate warm-starts it well. That warm-start property is the reason a first-order
+method is attractive inside branch-and-bound in the first place, and it is
+asserted to leave the answer unchanged rather than assumed to, given the
+unexplained dense-instance warm-start regression recorded above.
+
+**Checked against ojAlgo's mixed-integer solver**, whose bound *is* exact, over
+random mixed instances with deliberately fractional relaxations. That cross-check
+matters more than the LP one it mirrors: the pruning rule is a judgement about
+how much slack to leave rather than a theorem, and the failure it guards against
+is invisible from inside. The suite also asserts the asymmetric half — Prima must
+never report an objective *better* than the true optimum, which would mean its
+reported point is not integer-feasible at all.
+
+### The MILP ladder, and a flaky oracle
+
+`MilpReport` runs the same comparison for mixed-integer problems that `Report`
+does for LPs, and CI runs it as a separate step so a MILP regression is
+attributed to branch-and-bound rather than to the LP solver.
+
+```
+instance           size              int prima     ojalgo         prima obj     ojalgo obj   rel gap   int gap   nodes  unprv
+fractional-pair    2v/2c/4nz           2 Optimal   Optimal       -20.000000     -20.000000  0.00e+00  5.00e-02       5      0
+knapsack-8         8v/1c/8nz           8 Optimal   Optimal       -59.000000     -59.000000  0.00e+00  5.65e-03      23      0
+knapsack-16        16v/1c/16nz        16 Optimal   Optimal      -271.000000    -271.000000  0.00e+00  1.26e-02     305      0
+set-cover-triangle 3v/3c/6nz           3 Optimal   Optimal         2.000000       2.000000  0.00e+00  2.50e-01       5      0
+set-cover-k5-edges 10v/5c/20nz        10 Optimal   Optimal         3.000000       3.000000  0.00e+00  1.67e-01      59      0
+random-mixed-1     8v/4c/22nz          4 Optimal   Optimal       -27.800000     -27.800000  1.01e-11  9.11e-02       5      0
+random-mixed-9     10v/5c/35nz         5 Optimal   Optimal       -31.400000     -31.400000  2.81e-12  6.46e-02       7      0
+random-mixed-3     12v/6c/51nz         6 Optimal   Optimal       -14.000000     -14.000000  9.07e-12  2.07e-01       9      0
+random-mixed-4     14v/7c/61nz         7 Optimal   Optimal       -33.512820     -33.512821  7.28e-10  1.70e-02       5      0
+```
+
+Worst relative objective gap against the oracle: **7.3e-10**. No instance where
+Prima reported an objective better than the true optimum, and no unproven nodes.
+
+The report's exit code gates all of that, and it gates it directly. It previously
+dropped a row from the comparison unless *both* solvers reported `Optimal`, so a
+regression that turned instances into `Feasible` removed them from the check
+rather than failing it — and had every instance degraded, the gap would have come
+out 0.0 over an empty set and the step would have exited green having compared
+nothing. Every status, every unproven node and every unsolved relaxation now
+fails it by name.
+
+The `int gap` column is there to stop the table flattering itself. It is the
+distance from the LP relaxation to the integer optimum, so a near-zero entry
+means the instance barely needed branching and its agreement says little about
+the search. Two instances in the first version of the ladder had an integrality
+gap of exactly zero and solved in one node; they are gone, and
+`MilpAgreementSuite` now asserts that every instance has a fractional relaxation
+so the same thing cannot creep back.
+
+**The oracle had to be pinned before it could be an oracle.** ojAlgo's integer
+solver stops on `time_suffice` once it holds a solution it considers good enough
+and reports that incumbent with state `OPTIMAL`, and its branch-and-bound is
+multi-threaded, so which node closes the search varies between runs. The same
+ladder on the same input gave a worst gap of 7.3e-10 and then 1.7e-2, with the
+report accusing Prima of "claiming a better objective than the oracle" — when
+what had happened was the oracle giving up early. Time limits are now pushed out
+of reach, the gap tolerance tightened to 1e-12 and parallelism set to one; four
+consecutive runs then agree bit-for-bit. An oracle that is sometimes right is
+worse than no oracle, because a disagreement stops meaning anything.
+
+## L3: unit commitment
+
+`UnitCommitment` reproduces PyPSA's mixed-integer commitment solve on the
+`unit-commitment` fixture: objective, dispatch and the commitment schedule
+itself. It runs on `BranchAndBound` over Prima, so nothing leaves this project's
+own solver.
+
+Formulated **without branch flows**, so it models a single bus. A network with
+any transmission is refused rather than solved with every bus forced to balance
+locally, which would delete import and export and return either a spurious
+infeasibility or a schedule far dearer than the real network's. Dangling bus
+references, ramp limits, `stand_by_cost` and `marginal_cost_quadratic` are
+refused for the same reason: each would price the schedule below the truth.
+
+The formulation is otherwise the standard one — a binary status per unit per
+snapshot, the disjunctive output bound `p_min_pu · p_nom · u <= p <= p_max_pu · p_nom · u`, and
+start-up/shut-down variables linked by `su − sd = u[t] − u[t−1]` with rolling
+windows for minimum up and down time. Start-up and shut-down are left
+**continuous**: the linking equality and the non-negative costs drive them to 0
+or 1 whenever the status is integral, so declaring them integer would multiply
+the search tree for decisions already determined.
+
+`up_time_before` defaults to **1**, meaning a unit counts as having run before
+the horizon. Not cosmetic: with the opposite convention every unit that starts
+the horizon committed is charged a spurious start-up at `t = 0`, and the
+objective is wrong by the sum of those costs while the schedule looks identical.
+
+Both counters are read as **counts, not flags**, because PyPSA enforces the
+*residual* initial condition: a unit that has already run `up_time_before`
+snapshots must stay committed for a further `min_up_time − up_time_before`, and
+the mirror holds for one that has been down. Seeding `u[-1]` for the linking
+equality alone leaves that unconstrained, and the model then accepts schedules
+PyPSA rejects — at a *lower* cost. In this fixture `base` has `min_up_time = 3`
+against `up_time_before = 1`, so it is held on at `t = 0` and `1`; that the
+omission went unnoticed is precisely because `base` runs throughout anyway.
+
+### What the fixture does and does not prove
+
+Built deliberately, and checked before anything was written against it:
+
+- `mid` is off at snapshots 3–5, so the golden's status frame is **not**
+  all-ones. An implementation that never switched anything off would reproduce an
+  all-ones frame and prove nothing.
+- `min_down_time` on `mid` **binds**: PyPSA gives 16700 without it and 17000 with
+  it, so an implementation that dropped it comes out 300 *cheap* — the direction
+  that cannot be caught downstream.
+- `base`'s `min_up_time` does **not** bind; it runs throughout. Said here rather
+  than left for a reader to infer coverage that is not there.
+- `peak` is **inert**: it produces nothing at any snapshot and deleting it leaves
+  the objective at 17000. It exists so a non-committable generator sits in the
+  same model as committable ones, which take different treatment — ordinary
+  bounds against a status variable. It exercises a code path, not the economics.
+
+PyPSA's `generators_t.status` spans every generator and reports 0 for a
+non-committable one, which is a placeholder rather than a decision — `peak` has
+no status to report. `UcResult.committed` reports `true` for such a unit instead,
+since that is what the model does with it. The two are not compared.
+
+Ramp limits and time-dependent start-up costs are not modelled and are rejected
+rather than ignored, since either would yield a schedule the network cannot
+actually follow, at a cost lower than the truth.
 
 ## Known gaps
 

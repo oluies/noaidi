@@ -52,7 +52,7 @@ class TopologySuite extends munit.FunSuite:
     * reader and writer had never been exercised on.
     */
   private val goldenNetworks =
-    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "storage-hvdc")
+    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "unit-commitment", "storage-hvdc")
 
   goldenNetworks.foreach { name =>
     test(s"$name decomposes into the sub-networks PyPSA found") {
@@ -343,11 +343,32 @@ class TopologySuite extends munit.FunSuite:
     assertEquals(Topology.isolatedBuses(orphaned), IndexedSeq("nowhere"))
   }
 
-  test("neither reference network has an isolated bus") {
+  test("no reference network with branches has an isolated bus") {
     assume(available, "goldens missing")
-    goldenNetworks.foreach { name =>
+    // Restricted to networks that have branches at all, and the restriction is
+    // the point rather than an escape hatch. `unit-commitment` is a single bus
+    // with no lines -- generation and load meet at one node -- so that bus is
+    // isolated by definition, and it is perfectly well formed. What
+    // `isolatedBuses` exists to catch is a bus left out of a network that does
+    // have a graph, where the infeasibility is a mistake rather than the shape.
+    // Both kinds of branch, because `isolatedBuses` considers both. A network
+    // wired only with links has a real graph and would be checked by it, yet a
+    // passive-only filter would drop it from this assertion.
+    val withBranches = goldenNetworks.filter { n =>
+      val g = network(n)
+      (Topology.passiveBranches(g) ++ Topology.controllableBranches(g)).nonEmpty
+    }
+    assert(withBranches.size >= 5, s"only ${withBranches.size} golden networks have branches")
+
+    withBranches.foreach { name =>
       assertEquals(Topology.isolatedBuses(network(name)), IndexedSeq.empty, name)
     }
+
+    // And the excluded one really is the degenerate shape, not a network whose
+    // branches failed to load.
+    val single = network("unit-commitment")
+    assertEquals(single.require("Bus").size, 1)
+    assertEquals(Topology.passiveBranches(single), IndexedSeq.empty)
   }
 
   test("a branch referencing an unknown bus is rejected") {

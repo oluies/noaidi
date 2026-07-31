@@ -675,6 +675,57 @@ solved pre-outage ones and checks it against the rating, which a model that buil
 the rows with a wrong sign or a transposed factor could not satisfy even if it
 happened to match an objective.
 
+## L1: PyPSA's binary formats
+
+`network-io` reads PyPSA's netCDF export into the same `Network` the CSV reader
+produces, checked across all seven goldens: snapshots, entity ids, column sets,
+values, time series — including *which* entities vary — and snapshot weightings.
+
+That comparison is worth more than a round-trip. The two formats share no code on
+this side and almost none on PyPSA's, so agreeing means both genuinely decode the
+network rather than each round-tripping its own representation.
+
+PyPSA's netCDF is **netCDF-4**, which is an HDF5 container — the file opens with
+the HDF5 signature, not `CDF` — so this needs an HDF5 reader rather than a
+netCDF-3 parser. jhdf is a pure-Java one (MIT), which keeps the module free of
+native libraries and their per-platform packaging.
+
+Two conventions the file does not advertise:
+
+- **Time is CF-encoded.** `snapshots_snapshot` holds `0, 1, 2` with a `units`
+  attribute of `hours since 2015-01-01 00:00:00`. Reading it raw gives integer
+  snapshots where the CSV says timestamps. A network whose index is *genuinely*
+  integers — `unit-commitment` — carries no `units` at all, so the attribute's
+  presence is what separates the two cases.
+- **Booleans are bytes.** netCDF has no boolean type, so xarray writes `int8` and
+  records the real type in a `dtype` attribute. Without checking it,
+  `p_nom_extendable` comes back as an integer column.
+
+One benign difference remains, and the suite states rather than hides it:
+`SubNetwork.obj` is PyPSA's in-memory object handle, not network data. It is
+absent from the schema, so its type is inferred, and each format writes its own
+placeholder — an empty string in CSV, NaN in netCDF. Both render to the same
+empty text. Types are therefore compared only where the schema declares one;
+values always.
+
+### Why PyPSA's `.h5` is not read
+
+It is not netCDF-in-HDF5. It is pandas' PyTables layout: each component is a
+group whose `table` dataset has compound fields named `values_block_0..3` rather
+than column names. The names live in `values_block_N_kind` attributes, and those
+are **Python pickles** — the bytes begin `(lp0\nVsub_network\np1\na.`, which is
+protocol 0.
+
+Reading it therefore means writing a pickle parser and reimplementing pandas'
+block-manager layout, brittle against pandas versions, for a format that needs an
+optional dependency (`tables`) even in Python and that PyPSA treats as secondary
+to netCDF. DuckDB is no help either: its community repository has no HDF5
+extension (`INSTALL hdf5 FROM community` 404s on v1.5.5), only unofficial
+third-party projects, and it would be a native dependency besides.
+
+The `.h5` goldens are still written, so the decision can be revisited against
+real files rather than re-derived.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The

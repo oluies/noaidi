@@ -109,11 +109,26 @@ object Sclopf:
     // the type system says so, and `LopfResult.marginalPrice` reads through that
     // map, so a future equality row added ahead of the balances would make SCLOPF
     // nodal prices silently wrong. Checked rather than trusted.
+    // The exact invariant, not a proxy for it. Every original row must map to
+    // the standard-form row of the same index, which is what makes re-emitting
+    // row `r` as row `r` preserve `base.map`.
+    //
+    // The earlier pair of checks was necessary but not sufficient:
+    // `balanceRows.values.max < numEqualities` passes even when inequalities were
+    // emitted first and the balances' standard indices are shifted, which is
+    // silently wrong nodal prices -- the outcome the guard exists to prevent. It
+    // also missed `Negated`: `Lopf.build` emits global constraints through
+    // `lessThan`, which the base records as negated while the copy re-emits the
+    // already-negated standard row directly, so `originalDuals` would come back
+    // with the opposite sign. Nothing reads those today, but `translation` is
+    // public API.
     val baseProblem = base.problem
     require(
-      base.map.balanceRows.isEmpty || base.map.balanceRows.values.max < baseProblem.numEqualities,
-      "balance rows are no longer the leading equalities, so reusing the base variable map " +
-        "would misindex the duals",
+      (0 until base.translation.numOriginalRows)
+        .forall(r => base.translation.expansionOf(r) == RowExpansion.Direct(r)),
+      "the base model does not map every original row directly onto the standard-form row of the " +
+        "same index (a range row, a negated row, or a reordering), so the row-by-row copy would " +
+        "misindex its duals",
     )
 
     // Copy the base problem's bounds, objective and rows.
@@ -132,14 +147,6 @@ object Sclopf:
       else builder.greaterThan(terms, q)
     }
 
-    // A range row in the base model would have been split into two independent
-    // `>=` rows by the copy above, and its dual could then no longer be
-    // recombined. `Lopf.build` emits only equalities and one-sided rows today.
-    require(
-      baseProblem.numConstraints == base.translation.numOriginalRows,
-      "the base model contains a range row, which the row-by-row copy would split",
-    )
-
     // The security rows.
     snapshots.foreach { t =>
       monitored.foreach { (_, lodf, affected) =>
@@ -149,12 +156,13 @@ object Sclopf:
         val column = base.map.column(component, id, t)
 
         requested.foreach { outage =>
-          // Only within one sub-network: an outage cannot move flow onto a
-          // branch it has no electrical path to, and `Lodf.factor` returns zero
-          // for such a pair rather than a missing entry.
-          if lodf.contains((outage.component, outage.id)) && (outage.component, outage.id) != affected
-          then
-            val factor = lodf.factor(affected, (outage.component, outage.id))
+          // `factorOrZero`, not `factor`: an outage cannot move flow onto a
+          // branch it has no electrical path to, and zero is the physically
+          // correct answer for a pair spanning two sub-networks. `factor` throws
+          // for a branch it does not know, which is right for a typo and wrong
+          // here -- this is the case the two accessors exist to separate.
+          if (outage.component, outage.id) != affected then
+            val factor = lodf.factorOrZero(affected, (outage.component, outage.id))
             if factor != 0.0 then
               val outageColumn = base.map.column(outage.component, outage.id, t)
               val terms        = Seq((column, 1.0), (outageColumn, factor))

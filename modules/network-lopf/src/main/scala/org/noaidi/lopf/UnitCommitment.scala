@@ -366,15 +366,17 @@ object UnitCommitment:
           table.ids.foreach { id =>
             // The static value too, not only the per-snapshot sweep: a network
             // with no snapshots would otherwise slip through a guard whose whole
-            // point is to let nothing priced past.
-            val everywhere = table.float(attribute, id) +: network.snapshots.indices.map(
-              table.valueAt(attribute, id, _)
-            )
-            everywhere.foreach { value =>
+            // point is to let nothing priced past. Each carries where it came
+            // from, so a value buried in a year-long series is reported with its
+            // snapshot rather than leaving the reader to search the file.
+            val everywhere =
+              ("statically", table.float(attribute, id)) +:
+                network.snapshots.indices.map(t => (s"at snapshot $t", table.valueAt(attribute, id, t)))
+            everywhere.foreach { (where, value) =>
               if value.isFinite && value != 0.0 then
                 throw new UnsupportedNetwork(
-                  s"generator '$id' has $attribute = $value; it enters PyPSA's objective and not " +
-                    "this one, so ignoring it would price the schedule below the truth"
+                  s"generator '$id' has $attribute = $value $where; it enters PyPSA's objective " +
+                    "and not this one, so ignoring it would price the schedule below the truth"
                 )
             }
           }

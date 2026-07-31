@@ -163,6 +163,7 @@ lazy val primaNetlib = project
 // set of case classes. The schema is read from the pinned PyPSA install's own
 // registry (reference/goldens/schema.json), which is why upickle is here.
 val upickleVersion = "4.4.3"
+val jhdfVersion    = "0.9.4"
 
 lazy val networkModel = project
   .in(file("modules/network-model"))
@@ -209,6 +210,21 @@ lazy val networkPf = project
       ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
   )
 
+// L1: PyPSA's binary formats. Both netCDF-4 and PyPSA's .h5 are HDF5
+// containers, so one pure-Java HDF5 reader serves both -- jhdf is MIT, which
+// sits fine alongside this build's Apache-2.0.
+lazy val networkIo = project
+  .in(file("modules/network-io"))
+  .dependsOn(networkModel % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name := "network-io",
+    libraryDependencies += "io.jhdf" % "jhdf" % jhdfVersion,
+    Test / fork := true,
+    Test / envVars += "NOAIDI_GOLDENS" ->
+      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+  )
+
 // Cross-backend validation: Prima vs ojAlgo on a ladder of LP instances.
 lazy val primaValidation = project
   .in(file("modules/prima-validation"))
@@ -230,6 +246,7 @@ lazy val root = project
     networkModel,
     networkLopf,
     networkPf,
+    networkIo,
   )
   .settings(
     name := "noaidi",

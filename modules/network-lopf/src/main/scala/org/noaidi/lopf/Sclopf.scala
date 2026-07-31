@@ -68,8 +68,18 @@ object Sclopf:
   def build(network: Network, outages: Option[IndexedSeq[Outage]] = None): Lopf.Model =
     val base = Lopf.build(network)
 
-    val subs  = Topology.subNetworks(network)
-    val lodfs = subs.map(sub => sub -> Lodf.of(network, sub))
+    // The empty case is exactly the dispatch model, and returning before any
+    // factors are computed matters: building them can refuse a network for a
+    // bridge that was never named as a contingency.
+    if outages.exists(_.isEmpty) then return base
+
+    val subs = Topology.subNetworks(network)
+
+    // Only the requested outages are validated. A radial spur elsewhere is
+    // ordinary and says nothing about whether a meshed branch is a credible
+    // contingency; checking every column refused almost any real network.
+    val wanted = outages.map(_.map(o => (o.component, o.id)).toSet)
+    val lodfs  = subs.map(sub => sub -> Lodf.of(network, sub, wanted))
 
     // Every passive branch, paired with the sub-network it belongs to.
     val monitored = lodfs.flatMap((sub, lodf) => lodf.branches.map(b => (sub, lodf, b)))
@@ -89,10 +99,22 @@ object Sclopf:
     val builder   = LpProblem.builder(base.map.numVariables)
 
     // The base model's rows are rebuilt rather than appended to, because
-    // `LpProblem` is immutable and its builder is the only way to add rows. The
-    // dispatch model is re-derived from the same network, so the two agree by
-    // construction rather than by being kept in step.
-    val (baseProblem, _) = (base.problem, base.translation)
+    // `LpProblem` is immutable and its builder is the only way to add rows.
+    //
+    // `base.map` is reused, and its `balanceRows` indices were assigned in the
+    // base builder's row numbering. They still line up only because the balance
+    // rows are the first rows `Lopf.build` emits, they are equalities, and
+    // `LpBuilder` puts equalities first in the order given -- so re-emitting
+    // standard-form row `r` as new original row `r` preserves them. Nothing in
+    // the type system says so, and `LopfResult.marginalPrice` reads through that
+    // map, so a future equality row added ahead of the balances would make SCLOPF
+    // nodal prices silently wrong. Checked rather than trusted.
+    val baseProblem = base.problem
+    require(
+      base.map.balanceRows.isEmpty || base.map.balanceRows.values.max < baseProblem.numEqualities,
+      "balance rows are no longer the leading equalities, so reusing the base variable map " +
+        "would misindex the duals",
+    )
 
     // Copy the base problem's bounds, objective and rows.
     (0 until baseProblem.numVariables).foreach { j =>
@@ -110,10 +132,17 @@ object Sclopf:
       else builder.greaterThan(terms, q)
     }
 
+    // A range row in the base model would have been split into two independent
+    // `>=` rows by the copy above, and its dual could then no longer be
+    // recombined. `Lopf.build` emits only equalities and one-sided rows today.
+    require(
+      baseProblem.numConstraints == base.translation.numOriginalRows,
+      "the base model contains a range row, which the row-by-row copy would split",
+    )
+
     // The security rows.
-    val branches = network.require("Line")
     snapshots.foreach { t =>
-      monitored.foreach { (sub, lodf, affected) =>
+      monitored.foreach { (_, lodf, affected) =>
         val (component, id) = affected
         val table  = network.require(component)
         val limit  = table.float("s_nom", id) * table.valueAt("s_max_pu", id, t)

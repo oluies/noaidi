@@ -173,6 +173,91 @@ class SclopfSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("nonexistent"), failure.getMessage)
   }
 
+  test("the default outage set is every passive branch") {
+    assume(available, "goldens missing")
+    // Every other test passes an explicit list, so the documented default --
+    // "every passive branch, matching PyPSA" -- was never exercised. On this
+    // fixture it is equivalent to the explicit list, which is what makes it a
+    // one-line check rather than a second golden.
+    val n = network("sclopf-triangle")
+    assertEqualsDouble(Sclopf.solve(n, params = params).objective, 14100.0, 1e-3)
+  }
+
+  test("an empty outage set is exactly the dispatch model") {
+    assume(available, "goldens missing")
+    // The documented early return. It has to happen before any factors are
+    // computed, because computing them can refuse a network over a bridge that
+    // was never named as a contingency.
+    val n     = network("sclopf-triangle")
+    val plain = Lopf.build(n)
+    val empty = Sclopf.build(n, Some(IndexedSeq.empty))
+    assertEquals(empty.problem.numConstraints, plain.problem.numConstraints)
+    assertEquals(empty.problem.numVariables, plain.problem.numVariables)
+  }
+
+  test("a bridge elsewhere does not block a contingency that is well posed") {
+    assume(available, "goldens missing")
+    // The refusal belongs to the outage column, not the whole matrix. Adding a
+    // radial spur -- ordinary in any real network -- used to make every SCLOPF
+    // solve throw, even for an outage on the meshed triangle that has nothing to
+    // do with it.
+    val dir = Files.createTempDirectory("noaidi-sclopf-spur-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("sclopf-triangle")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    val buses = dir.resolve("buses.csv")
+    Files.writeString(buses, Files.readString(buses).stripTrailing + "\nD,380.0\n")
+    val lines = dir.resolve("lines.csv")
+    Files.writeString(lines, Files.readString(lines).stripTrailing + "\nCD,C,D,0.1,0.0,150.0\n")
+    val loads = dir.resolve("loads.csv")
+    Files.writeString(loads, Files.readString(loads).stripTrailing + "\nld,D\n")
+
+    val spurred = CsvReader.read(dir, schema, "sclopf-triangle")
+    // The spur really is a bridge, so naming it is still refused.
+    intercept[Lodf.Unsupported](
+      Sclopf.build(spurred, Some(IndexedSeq(Sclopf.Outage("Line", "CD"))))
+    )
+    // But a triangle outage builds fine, which it did not before.
+    val model = Sclopf.build(spurred, Some(IndexedSeq(Sclopf.Outage("Line", "AB"))))
+    assert(model.problem.numConstraints > Lopf.build(spurred).problem.numConstraints)
+  }
+
+  test("no security rows cross a sub-network boundary") {
+    assume(available, "goldens missing")
+    // An outage cannot move flow onto a branch it has no electrical path to.
+    // With two islands, the row count must be what one island alone produces --
+    // otherwise the cross-island guard is emitting rows with zero coefficients or,
+    // worse, non-zero ones.
+    val dir = Files.createTempDirectory("noaidi-sclopf-split-")
+    temporaries += dir
+    Files.writeString(
+      dir.resolve("buses.csv"),
+      "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\nC,380.0,AC\nX,380.0,AC\nY,380.0,AC\n",
+    )
+    Files.writeString(
+      dir.resolve("lines.csv"),
+      "name,bus0,bus1,x,r,s_nom\n" +
+        "AB,A,B,0.1,0.0,150.0\nBC,B,C,0.1,0.0,150.0\nAC,A,C,0.1,0.0,150.0\n" +
+        "XY1,X,Y,0.1,0.0,150.0\nXY2,X,Y,0.1,0.0,150.0\n",
+    )
+    Files.writeString(
+      dir.resolve("generators.csv"),
+      "name,bus,p_nom,marginal_cost\ng1,A,400.0,10.0\ng2,X,400.0,10.0\n",
+    )
+    Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nl1,C,100.0\nl2,Y,100.0\n")
+    Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n0,0\n")
+    val split = CsvReader.read(dir, schema, "split")
+
+    assertEquals(Topology.subNetworks(split).length, 2, "the fixture should have two islands")
+
+    val base = Lopf.build(split).problem.numConstraints
+    // Outaging only AB: rows for the two other triangle branches, none for XY.
+    val one = Sclopf.build(split, Some(IndexedSeq(Sclopf.Outage("Line", "AB"))))
+    assertEquals(one.problem.numConstraints - base, 4, "expected two two-sided rows")
+  }
+
   private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
 
   override def afterAll(): Unit =

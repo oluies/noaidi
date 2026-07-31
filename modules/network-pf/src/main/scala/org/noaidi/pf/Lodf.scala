@@ -21,12 +21,29 @@ final class Lodf private[pf] (
   val size: Int = branches.length
   private val indexOf: Map[(String, String), Int] = branches.zipWithIndex.toMap
 
+  /** The factor for two branches of this sub-network.
+    *
+    * Throws for a branch this `Lodf` does not know. Returning zero for an
+    * unrecognised key conflated "these are in different sub-networks", which is
+    * physically zero, with "you passed an id that does not exist", which is a
+    * bug -- and a typo in a test then reduced a post-contingency check to
+    * `|f| <= rating`, which the variable bounds already guarantee, so it passed
+    * vacuously. Use [[factorOrZero]] where the cross-sub-network case is meant.
+    */
   def factor(affected: (String, String), outage: (String, String)): Double =
+    val i = indexOf.getOrElse(affected, throw new NoSuchElementException(s"no branch $affected here"))
+    val j = indexOf.getOrElse(outage, throw new NoSuchElementException(s"no branch $outage here"))
+    values(i * size + j)
+
+  /** As [[factor]], but zero when either branch belongs to another sub-network.
+    *
+    * That is the physically correct answer: an outage cannot move flow onto a
+    * branch it has no electrical path to.
+    */
+  def factorOrZero(affected: (String, String), outage: (String, String)): Double =
     (indexOf.get(affected), indexOf.get(outage)) match
       case (Some(i), Some(j)) => values(i * size + j)
-      // Branches in different sub-networks do not affect each other, which is
-      // the physically correct answer rather than a missing entry.
-      case _ => 0.0
+      case _                  => 0.0
 
   def contains(branch: (String, String)): Boolean = indexOf.contains(branch)
 
@@ -55,18 +72,30 @@ object Lodf:
     * rather than allowed to produce an infinity — the reference network's
     * Bremen–Frankfurt line is exactly such a branch.
     */
-  def of(network: Network, sub: SubNetwork): Lodf =
+  def of(network: Network, sub: SubNetwork): Lodf = of(network, sub, None)
+
+  /** As [[of]], validating only the branches named as contingencies.
+    *
+    * The bridge check belongs to the '''outage''' column, not to the whole matrix: a
+    * radial spur elsewhere in the network is perfectly ordinary and says nothing
+    * about whether some meshed branch is a credible contingency. Checking every
+    * column made the refusal far broader than the contract, and since almost any
+    * real network has a radial branch somewhere it made SCLOPF unusable outside
+    * purpose-built meshed fixtures. `None` keeps the behaviour of validating
+    * everything, which is right when every branch is a contingency.
+    */
+  def of(network: Network, sub: SubNetwork, outages: Option[Set[(String, String)]]): Lodf =
     val slack = Slack.of(network, sub).bus
     val free  = sub.buses.filterNot(_ == slack)
     val index = free.zipWithIndex.toMap
     val n     = free.length
 
-    val edges = passiveEdges(network, sub)
+    val edges = Branches.within(network, sub)
     val m     = edges.length
 
     if m == 0 then return new Lodf(IndexedSeq.empty, IArray.empty)
 
-    val susceptance = edges.map(e => susceptanceOf(network, sub, e))
+    val susceptance = edges.map(e => Branches.susceptance(network, sub, e, new Unsupported(_)))
 
     // The reduced susceptance matrix, assembled exactly as the linear flow does.
     val b = new Array[Double](n * n)
@@ -132,57 +161,41 @@ object Lodf:
 
     val lodf = new Array[Double](m * m)
     (0 until m).foreach { j =>
+      val key       = (edges(j).component, edges(j).id)
+      val requested = outages.forall(_.contains(key))
       val self = branchPtdf(j)(j)
       val denominator = 1.0 - self
       // A branch whose removal disconnects the network takes the whole flow with
       // it, and `1 - branchPTDF[o,o]` goes to zero. Producing an infinity here
       // would put one into a constraint coefficient and the LP would come back
       // infeasible with no indication why.
-      if math.abs(denominator) < 1e-9 then
+      // Scaled rather than absolute. For a true bridge this is analytically
+      // exactly 1, but it comes through a Cholesky solve of B, so on an
+      // ill-conditioned sub-network the residual can exceed a fixed 1e-9 -- the
+      // guard would pass and a factor of order 1e8 would land in a constraint
+      // coefficient, which is what it exists to prevent. The factors themselves
+      // are checked too, since that is the quantity that matters downstream.
+      val bridge = math.abs(denominator) < 1e-7 * math.max(1.0, math.abs(self))
+      if requested && bridge then
         throw new Unsupported(
           s"${edges(j).component} '${edges(j).id}' is a bridge: removing it disconnects the " +
             "sub-network, so there is no post-outage flow to redistribute and it is not a " +
             "credible contingency"
         )
-      (0 until m).foreach { l =>
-        lodf(l * m + j) = if l == j then -1.0 else branchPtdf(l)(j) / denominator
-      }
-    }
-
-    new Lodf(edges.map(e => (e.component, e.id)), IArray.unsafeFromArray(lodf))
-
-  private final case class Edge(component: String, id: String, bus0: String, bus1: String)
-
-  private def passiveEdges(network: Network, sub: SubNetwork): IndexedSeq[Edge] =
-    val members = sub.buses.toSet
-    network.tables.values.toIndexedSeq.flatMap { table =>
-      if Role.of(table.spec) != Role.PassiveBranch then IndexedSeq.empty
+      if bridge then
+        // Not a requested contingency, so this column is never read. Left at zero
+        // rather than filled with a ratio that means nothing.
+        (0 until m).foreach(l => lodf(l * m + j) = if l == j then -1.0 else 0.0)
       else
-        table.ids.flatMap { id =>
-          val bus0 = table.string("bus0", id)
-          val bus1 = table.string("bus1", id)
-          if members.contains(bus0) && members.contains(bus1) then
-            Some(Edge(table.spec.name, id, bus0, bus1))
-          else None
+        (0 until m).foreach { l =>
+          val value = if l == j then -1.0 else branchPtdf(l)(j) / denominator
+          if requested && !value.isFinite then
+            throw new Unsupported(
+              s"outage of ${edges(j).component} '${edges(j).id}' gives a non-finite factor on " +
+                s"${edges(l).component} '${edges(l).id}'"
+            )
+          lodf(l * m + j) = value
         }
     }
 
-  /** Per-unit susceptance, on the same convention as the linear flow.
-    *
-    * Reactance for AC and resistance for DC, scaled by `v_nom²`. The scale
-    * cancels out of the factors themselves — they are ratios of flows — but
-    * getting the AC/DC split wrong does not cancel, since the reference DC lines
-    * carry `x = 0`.
-    */
-  private def susceptanceOf(network: Network, sub: SubNetwork, edge: Edge): Double =
-    val table = network.require(edge.component)
-    val z     = if sub.carrier == "DC" then table.float("r", edge.id) else table.float("x", edge.id)
-    val vNom  = network.require("Bus").float("v_nom", edge.bus0)
-    if !(z > 0.0) then
-      throw new Unsupported(
-        s"${edge.component} '${edge.id}' has ${if sub.carrier == "DC" then "r" else "x"} = $z in a " +
-          s"${sub.carrier} sub-network, so it has no susceptance"
-      )
-    if !(vNom > 0.0) then
-      throw new Unsupported(s"bus '${edge.bus0}' has v_nom = $vNom, so there is no per-unit base")
-    vNom * vNom / z
+    new Lodf(edges.map(e => (e.component, e.id)), IArray.unsafeFromArray(lodf))

@@ -315,7 +315,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       // Reuse the module's own guard by asking for a DC reading of an AC branch.
       LinearPowerFlow.solve(swapCarrier(n))
     }
-    assert(failure.getMessage.contains("positive impedance"), failure.getMessage)
+    assert(failure.getMessage.contains("no susceptance"), failure.getMessage)
   }
 
   /** The same network with every bus relabelled DC.

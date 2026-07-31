@@ -36,7 +36,7 @@ optimisation.
 | `network-lopf` | L2: linear optimal power flow, N-1 security-constrained LOPF, and unit commitment via Prima's branch-and-bound. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-371 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+375 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.

@@ -110,7 +110,7 @@ object LinearPowerFlow:
       val index = free.zipWithIndex.toMap
       val n     = free.length
 
-      val susceptances = branches.map(edge => (edge.component, edge.id) -> susceptance(network, edge, sub.carrier)).toMap
+      val susceptances = branches.map(edge => (edge.component, edge.id) -> susceptance(network, sub, edge)).toMap
 
       val b = new Array[Double](n * n)
       branches.foreach { edge =>
@@ -180,7 +180,6 @@ object LinearPowerFlow:
 
     LpfResult(angles.toMap, flows.toMap, busPowers.toMap, dispatch.toMap, slacks)
 
-  private final case class Edge(component: String, id: String, bus0: String, bus1: String)
 
   /** Passive branches with both ends inside one sub-network.
     *
@@ -190,53 +189,17 @@ object LinearPowerFlow:
     * a validation, and it is documented as such rather than as a check it does
     * not perform.
     */
-  private def internalBranches(network: Network, sub: SubNetwork): IndexedSeq[Edge] =
-    val members = sub.buses.toSet
-    network.tables.values.toIndexedSeq.flatMap { table =>
-      if Role.of(table.spec) != Role.PassiveBranch then IndexedSeq.empty
-      else
-        table.ids.flatMap { id =>
-          val bus0 = table.string("bus0", id)
-          val bus1 = table.string("bus1", id)
-          if members.contains(bus0) && members.contains(bus1) then
-            Some(Edge(table.spec.name, id, bus0, bus1))
-          else None
-        }
-    }
+  private def internalBranches(network: Network, sub: SubNetwork): IndexedSeq[Branches.Edge] =
+    Branches.within(network, sub)
 
-  /** Per-unit susceptance of a branch.
+  /** Per-unit susceptance, from the definition shared with [[Lodf]].
     *
-    * '''Reactance for an AC sub-network, resistance for a DC one.''' Not a
-    * simplification: the reference network's DC lines carry `x = 0` with `r`
-    * non-zero, so using reactance unconditionally divides by zero and the AC
-    * lines carry `r = 0`, so the mirror mistake does too. PyPSA emits a warning
-    * about exactly this pair of conditions on import.
-    *
-    * Scaled by `v_nom²`, PyPSA's per-unit base at its default 1 MVA. Unlike the
-    * cycle constraints in `network-lopf` — where a constraint is homogeneous and
-    * the scale cancels within one voltage level — here it does not cancel: it sets
-    * the magnitude of every angle.
+    * Reactance on AC and resistance on DC, scaled by `v_nom^2`. Both consumers
+    * had their own copy of this until it was lifted into [[Branches]]; two copies
+    * would drift the day transformer per-unit conversion lands in one of them.
     */
-  private def susceptance(network: Network, edge: Edge, carrier: String): Double =
-    val table = network.require(edge.component)
-    val z     = if carrier == "DC" then table.float("r", edge.id) else table.float("x", edge.id)
-    val vNom  = network.require("Bus").float("v_nom", edge.bus0)
-    if !(z > 0.0) then
-      throw new UnsupportedNetwork(
-        s"${edge.component} '${edge.id}' has ${if carrier == "DC" then "r" else "x"} = $z in a " +
-          s"$carrier sub-network; a branch needs a positive impedance to carry a linear flow"
-      )
-    // A missing or zero v_nom used to fall back to a different per-unit base.
-    // That is the same class of bad data the impedance guard above refuses, and
-    // worse in effect: v_nom² does not cancel, so the offending branch ends up
-    // scaled differently from every other branch in its island and every angle in
-    // that island comes out wrong.
-    if !(vNom > 0.0) then
-      throw new UnsupportedNetwork(
-        s"bus '${edge.bus0}' has v_nom = $vNom, so ${edge.component} '${edge.id}' has no per-unit " +
-          "base; every branch in a sub-network must share one"
-      )
-    vNom * vNom / z
+  private def susceptance(network: Network, sub: SubNetwork, edge: Branches.Edge): Double =
+    Branches.susceptance(network, sub, edge, new UnsupportedNetwork(_))
 
   /** Net injection at every bus of a sub-network, in MW, from everything whose
     * flow is fixed.

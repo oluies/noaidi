@@ -643,6 +643,17 @@ coefficient and the LP would come back infeasible with nothing to explain it.
 `ac-dc-meshed`'s Bremen–Frankfurt line is exactly such a branch, which is part of
 why that network cannot serve as an SCLOPF fixture.
 
+The refusal belongs to the **outage column**, not the whole matrix, and getting
+that wrong made the module far less usable than the contract said. Validating
+every column meant a single radial load spur anywhere in the network refused
+every solve — including outages on a meshed part with nothing to do with it, and
+including the empty-outage case that is supposed to be exactly the dispatch
+model. Since almost any real network has a radial branch somewhere, SCLOPF worked
+only on purpose-built meshed fixtures. The bridge test is scaled to the
+self-sensitivity rather than absolute, too: for a true bridge the quantity is
+analytically 1, but it arrives through a Cholesky solve, so a fixed `1e-9` could
+pass on an ill-conditioned island and let a factor of order `1e8` through.
+
 ### Why the fixture is purpose-built
 
 `ac-dc-dispatch` cannot be adapted, and finding out why corrected an assumption.

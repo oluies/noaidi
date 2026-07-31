@@ -260,7 +260,7 @@ object BranchAndBound:
       // increment, the same silent subtree loss this margin exists to prevent,
       // reached by a different route. `safe` is forced to -infinity below when
       // it cannot be computed, and this is the second line of defence.
-      if incumbent.isEmpty || !(node.safeBound >= incumbentValue) then
+      if !skipsBeforeSolving(node.safeBound, incumbentValue, incumbent.nonEmpty) then
         val sub = LpProblem(
           objective = problem.objective,
           constraintMatrix = problem.constraintMatrix,
@@ -308,11 +308,7 @@ object BranchAndBound:
             // nothing at all if this relaxation was not conclusive.
             // -infinity means "nothing is known about this subtree", which is
             // the only safe reading of a bound that is absent or not a number.
-            val safe =
-              if !conclusive then Double.NegativeInfinity
-              else
-                val candidate = bound - slack
-                if candidate.isFinite then candidate else Double.NegativeInfinity
+            val safe = safeBoundOf(conclusive, bound, slack)
 
             val prunable = conclusive && incumbent.nonEmpty && safe >= incumbentValue
 
@@ -394,6 +390,34 @@ object BranchAndBound:
       unprovenNodes = unproven,
       solveTimeMillis = elapsed,
     )
+
+  /** Whether a node can be discarded without being solved.
+    *
+    * Extracted so the NaN case is decidable in a test rather than only reachable
+    * through a search that never produces one. Written as a negation of `>=`
+    * because `safeBound < incumbent` is '''false''' for NaN, which would skip the
+    * node — no children, no `unproven` increment — the same silent subtree loss
+    * the margin exists to prevent, reached by a different route.
+    */
+  private[prima] def skipsBeforeSolving(
+      safeBound: Double,
+      incumbent: Double,
+      haveIncumbent: Boolean,
+  ): Boolean =
+    haveIncumbent && safeBound >= incumbent
+
+  /** The bound a node's children may prune against.
+    *
+    * `-infinity` means "nothing is known about this subtree", the only safe
+    * reading of a bound that is absent or not a number. An inconclusive
+    * relaxation has no bound at all; a conclusive one can still yield NaN if its
+    * objective or KKT gap is NaN, since `math.max(NaN, eps)` propagates it.
+    */
+  private[prima] def safeBoundOf(conclusive: Boolean, bound: Double, slack: Double): Double =
+    if !conclusive then Double.NegativeInfinity
+    else
+      val candidate = bound - slack
+      if candidate.isFinite then candidate else Double.NegativeInfinity
 
   private def closed(incumbent: Double, bound: Double, params: BnbParams): Boolean =
     val absolute = math.abs(incumbent - bound)

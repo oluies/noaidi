@@ -307,7 +307,22 @@ object UnitCommitment:
     // it is being solved with every bus forced to balance on its own. `Lopf`
     // models flows and refuses only what it cannot build; this refuses the whole
     // class, because a commitment model without flows is a single-bus model.
-    val handled = Set("Generator", "Load", "Bus", "Carrier", "GlobalConstraint",
+    // Global constraints get their own refusal, ahead of the branch check.
+    // Merely dropping them from `handled` routed a CO2 cap into the
+    // transmission diagnostic -- "this network carries GlobalConstraint (1)"
+    // under a message about branch flows -- which states the wrong cause and
+    // points the reader at the wrong fix. Lopf models primary-energy caps; this
+    // does not, and solving with the cap deleted prices the schedule below the
+    // truth.
+    network.table("GlobalConstraint").foreach { table =>
+      if table.size > 0 then
+        throw new UnsupportedNetwork(
+          s"network has ${table.size} global constraint(s); emissions and primary-energy caps " +
+            "are not modelled here, and dropping one would price the schedule below the truth"
+        )
+    }
+
+    val handled = Set("Generator", "Load", "Bus", "Carrier",
                       "SubNetwork", "LineType", "TransformerType", "Shape")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then
@@ -331,14 +346,37 @@ object UnitCommitment:
     // inconsistently until now.
     network.table("Generator").foreach { table =>
       Seq("stand_by_cost", "marginal_cost_quadratic").foreach { attribute =>
-        if table.static.contains(attribute) then
+        // Evaluated per snapshot, not read from the static column. Both are
+        // `static or series` with `varying: true`, and a value arriving as
+        // `generators-stand_by_cost.csv` with no static counterpart would slip
+        // past a `static.contains` check and be dropped -- the same
+        // under-pricing this guard exists to prevent. The ramp-limit check below
+        // is static-only because those attributes are genuinely `varying: false`,
+        // so the pattern does not transfer.
+        // Gated on the *data*, not the spec. Both attributes are declared in the
+        // schema, so `spec.attribute(...).isDefined` is unconditionally true and
+        // the sweep ran for every solve even when neither appears in the file --
+        // and each `valueAt` on an absent column re-parses the default string, so
+        // a few thousand generators over a year is tens of millions of parses to
+        // find nothing. Checking the columns that exist still catches the
+        // series-only case, since `valueAt` resolves the override where there is
+        // one and the static or default value elsewhere.
+        val present = table.static.contains(attribute) || table.series.contains(attribute)
+        if present then
           table.ids.foreach { id =>
-            val value = table.float(attribute, id)
-            if value.isFinite && value != 0.0 then
-              throw new UnsupportedNetwork(
-                s"generator '$id' has $attribute = $value; it enters PyPSA's objective and not " +
-                  "this one, so ignoring it would price the schedule below the truth"
-              )
+            // The static value too, not only the per-snapshot sweep: a network
+            // with no snapshots would otherwise slip through a guard whose whole
+            // point is to let nothing priced past.
+            val everywhere = table.float(attribute, id) +: network.snapshots.indices.map(
+              table.valueAt(attribute, id, _)
+            )
+            everywhere.foreach { value =>
+              if value.isFinite && value != 0.0 then
+                throw new UnsupportedNetwork(
+                  s"generator '$id' has $attribute = $value; it enters PyPSA's objective and not " +
+                    "this one, so ignoring it would price the schedule below the truth"
+                )
+            }
           }
       }
     }

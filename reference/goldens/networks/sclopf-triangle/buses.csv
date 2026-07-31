@@ -1,0 +1,4 @@
+name,v_nom,control,generator,sub_network
+A,380.0,Slack,cheap,0
+B,380.0,PQ,,0
+C,380.0,PQ,,0

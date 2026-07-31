@@ -177,16 +177,6 @@ class UnitCommitmentSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("ramp"), failure.getMessage)
   }
 
-  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
-
-  override def afterAll(): Unit =
-    temporaries.foreach { dir =>
-      if Files.exists(dir) then
-        scala.util.Using.resource(Files.walk(dir)) { paths =>
-          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
-        }
-    }
-
   test("a network with transmission is refused rather than solved bus-by-bus") {
     assume(available, "goldens missing")
     // The balance rows carry no flow variables, so a multi-bus network would be
@@ -238,20 +228,127 @@ class UnitCommitmentSuite extends munit.FunSuite:
 
   test("a unit part-way through its minimum up time is held on at the horizon head") {
     assume(available, "goldens missing")
-    // PyPSA enforces the residual initial condition, not just a seed for the
-    // linking equality: `base` has min_up_time 3 against up_time_before 1, so it
-    // is held on at t = 0 and 1. This model dropped that silently, and it went
-    // unnoticed because `base` runs throughout anyway -- so the check is that the
-    // rows exist and bind, by forcing the unit to want to be off.
-    val n      = network("unit-commitment")
-    val result = UnitCommitment.solve(n, params)
-    val gens   = n.require("Generator")
+    // Two earlier versions of this test were vacuous, and the second taught me
+    // why the obvious construction does not work. Solving the stock fixture
+    // asserts nothing, because `base` runs throughout regardless. Making `base`
+    // expensive does not help either: a `min_up_time` of 3 means starting it
+    // later locks it on for three snapshots, so keeping it on from the start is
+    // genuinely cheaper and it stays committed with or without the residual rows
+    // -- PyPSA agrees, at the same 91500.
+    //
+    // So the case is built rather than mutated: one expensive committable unit
+    // that is never needed, beside ample cheap capacity. Nothing but the residual
+    // condition can justify running it. PyPSA holds it on at t = 0 and 1 at its
+    // 50 MW minimum and releases it after, for 57000 against the 8000 an
+    // unconstrained schedule costs. Disabling the residual rows makes this fail,
+    // which is what the previous versions could not do.
+    val dir = Files.createTempDirectory("noaidi-uc-residual-")
+    temporaries += dir
+    Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nbus,110.0,AC\n")
+    Files.writeString(
+      dir.resolve("generators.csv"),
+      "name,bus,p_nom,p_min_pu,marginal_cost,committable,min_up_time,min_down_time\n" +
+        "unit,bus,100.0,0.5,500.0,True,3,1\n" +
+        "cheap,bus,500.0,0.0,10.0,False,0,0\n",
+    )
+    Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nd,bus,200.0\n")
+    Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n0,0\n1,1\n2,2\n3,3\n")
 
-    val minUp  = gens.int("min_up_time", "base")
-    val before = gens.int("up_time_before", "base")
-    val forced = math.max(minUp - before, 0)
-    assert(forced > 0, s"the fixture no longer exercises the residual condition ($minUp, $before)")
+    val n      = CsvReader.read(dir, schema, "uc-residual")
+    val gens   = n.require("Generator")
+    val result = UnitCommitment.solve(n, params)
+    assertEquals(result.status, MilpStatus.Optimal, s"${result.solution}")
+
+    val forced = math.max(gens.int("min_up_time", "unit") - gens.int("up_time_before", "unit"), 0)
+    assertEquals(forced, 2, "the fixture should force exactly two snapshots")
+
     (0 until forced).foreach { t =>
-      assert(result.committed("base", t), s"base must be held on at snapshot $t")
+      assert(result.committed("unit", t), s"unit must be held on at snapshot $t")
+      // Held on means held at its minimum, not merely flagged.
+      assertEqualsDouble(result.output("unit", t), 50.0, 1e-4, s"snapshot $t")
     }
+    // And released once the residual expires -- otherwise this would pass for an
+    // implementation that commits everything always.
+    (forced until n.snapshots.length).foreach { t =>
+      assert(!result.committed("unit", t), s"unit should be free to shut down at snapshot $t")
+    }
+    // PyPSA's objective for this network. An unconstrained schedule costs 8000.
+    assertEqualsDouble(result.objective, 57000.0, 1e-3, s"${result.solution}")
   }
+
+  /** A copy of the commitment golden with extra or rewritten files. */
+  private def fixtureWith(files: (String, String)*): Network =
+    val dir = Files.createTempDirectory("noaidi-uc-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("unit-commitment")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    files.foreach((name, content) => Files.writeString(dir.resolve(name), content))
+    CsvReader.read(dir, schema, "unit-commitment")
+
+  test("a global constraint is refused, naming its own reason") {
+    assume(available, "goldens missing")
+    // Lopf models primary-energy caps and this does not, so a commitment network
+    // carrying one would be solved with the cap deleted -- cheaper than the truth.
+    // The message has to name that: routing it into the branch-flow diagnostic
+    // reported "this network carries GlobalConstraint (1)" under a heading about
+    // transmission, which states the wrong cause.
+    val broken = fixtureWith(
+      "global_constraints.csv" ->
+        "name,type,carrier_attribute,sense,constant\nco2_limit,primary_energy,co2_emissions,<=,1000.0\n"
+    )
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("global constraint"), failure.getMessage)
+    assert(!failure.getMessage.contains("branch flows"), failure.getMessage)
+  }
+
+  test("a series-only stand-by cost is refused") {
+    assume(available, "goldens missing")
+    // The shape that slipped past a `static.contains` check: the attribute is
+    // `static or series`, and PyPSA writes it as its own file when only the time
+    // series is non-default. There is no static column here at all, so a guard
+    // reading only the static value finds nothing and the cost is dropped --
+    // over-committing becomes free and the schedule prices below the truth.
+    val broken = fixtureWith(
+      "generators-stand_by_cost.csv" ->
+        ",base\n0,0.0\n1,0.0\n2,25.0\n3,0.0\n4,0.0\n5,0.0\n6,0.0\n7,0.0\n"
+    )
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("stand_by_cost"), failure.getMessage)
+  }
+
+  test("a priced attribute is refused even with no snapshots to sweep") {
+    assume(available, "goldens missing")
+    // The per-snapshot sweep replaced a static read, which narrowed the guard: a
+    // network with no snapshots evaluated nothing at all. Degenerate, but a guard
+    // whose whole purpose is to let nothing priced through should not have a
+    // hole. Built from scratch rather than by emptying the golden's snapshots,
+    // because the reader rightly refuses a series file with more rows than the
+    // network has snapshots.
+    val dir = Files.createTempDirectory("noaidi-uc-empty-")
+    temporaries += dir
+    Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nbus,110.0,AC\n")
+    Files.writeString(
+      dir.resolve("generators.csv"),
+      "name,bus,p_nom,p_min_pu,marginal_cost,committable,stand_by_cost\n" +
+        "unit,bus,100.0,0.5,10.0,True,25.0\n",
+    )
+    Files.writeString(dir.resolve("loads.csv"), "name,bus,p_set\nd,bus,50.0\n")
+    Files.writeString(dir.resolve("snapshots.csv"), ",snapshot\n")
+
+    val broken  = CsvReader.read(dir, schema, "uc-empty")
+    assertEquals(broken.snapshots.length, 0, "the fixture should have no snapshots")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("stand_by_cost"), failure.getMessage)
+  }
+
+  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
+
+  override def afterAll(): Unit =
+    temporaries.foreach { dir =>
+      if Files.exists(dir) then
+        scala.util.Using.resource(Files.walk(dir)) { paths =>
+          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        }
+    }

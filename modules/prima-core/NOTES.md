@@ -600,9 +600,80 @@ non-committable one, which is a placeholder rather than a decision — `peak` ha
 no status to report. `UcResult.committed` reports `true` for such a unit instead,
 since that is what the model does with it. The two are not compared.
 
-Ramp limits and time-dependent start-up costs are not modelled and are rejected
-rather than ignored, since either would yield a schedule the network cannot
-actually follow, at a cost lower than the truth.
+Ramp limits, `stand_by_cost`, `marginal_cost_quadratic` and global constraints
+are not modelled and are rejected rather than ignored, since each would yield a
+schedule cheaper than the network permits. `GlobalConstraint` in particular was
+briefly admitted by a `handled` set copied from `Lopf` — which does model
+primary-energy caps — so a commitment network carrying a CO2 cap would have been
+solved with the cap deleted. The two cost attributes are `static or series`, so
+they are checked per snapshot rather than from the static column, where a value
+arriving only as `generators-stand_by_cost.csv` would have slipped past.
+
+## L2: security-constrained LOPF
+
+`Sclopf` reproduces PyPSA's `optimize_security_constrained` on the
+`sclopf-triangle` fixture — objective, generator dispatch and line flows.
+
+**No post-contingency variables.** Removing a branch redistributes its flow onto
+the rest by factors that depend only on the impedances, so the post-outage flow
+is a linear function of the pre-outage ones and security is just more rating rows
+on variables the dispatch model already has:
+
+```
+−s_nom · s_max_pu  <=  f_l + LODF[l, o] · f_o  <=  s_nom · s_max_pu
+```
+
+one pair per monitored branch per credible outage per snapshot. The obvious
+alternative — a full copy of the flow variables per contingency — multiplies the
+problem size by the number of outages for the same answer.
+
+The factors live in `network-pf` as `Lodf`, not in the optimisation module, since
+they are a power-flow sensitivity; `network-lopf` depends on `network-pf` for
+them, which keeps one definition of susceptance and slack across both layers.
+They follow PyPSA's construction exactly: `PTDF = H · B⁻¹` with the slack row and
+column struck out, `branchPTDF = PTDF · K`, then
+`LODF[l,o] = branchPTDF[l,o] / (1 − branchPTDF[o,o])` with `−1` on the diagonal.
+`B⁻¹` is obtained by solving against the same Cholesky factorisation the linear
+flow builds, one column per free bus, rather than inverting a matrix.
+
+**A bridge is not a credible contingency**, and is refused rather than
+approximated. Removing one disconnects the network, so `1 − branchPTDF[o,o]` goes
+to zero and the factor diverges; an infinity would land in a constraint
+coefficient and the LP would come back infeasible with nothing to explain it.
+`ac-dc-meshed`'s Bremen–Frankfurt line is exactly such a branch, which is part of
+why that network cannot serve as an SCLOPF fixture.
+
+The refusal belongs to the **outage column**, not the whole matrix, and getting
+that wrong made the module far less usable than the contract said. Validating
+every column meant a single radial load spur anywhere in the network refused
+every solve — including outages on a meshed part with nothing to do with it, and
+including the empty-outage case that is supposed to be exactly the dispatch
+model. Since almost any real network has a radial branch somewhere, SCLOPF worked
+only on purpose-built meshed fixtures. The bridge test is scaled to the
+self-sensitivity rather than absolute, too: for a true bridge the quantity is
+analytically 1, but it arrives through a Cholesky solve, so a fixed `1e-9` could
+pass on an ill-conditioned island and let a factor of order `1e8` through.
+
+### Why the fixture is purpose-built
+
+`ac-dc-dispatch` cannot be adapted, and finding out why corrected an assumption.
+The obvious reading is that N-1 needs transmission headroom, so I scaled its line
+ratings to 3× — still infeasible. The real obstacle is *generation*: capacity
+there comes from the expansion optimum, and at six of ten snapshots every
+generator sits exactly at its limit with total output equal to total load. With
+zero redispatch headroom no rating makes an outage survivable.
+
+`sclopf-triangle` is three buses in a triangle, so every single-line outage
+leaves the network connected. Its rating of 150 is chosen: the plain LOPF costs
+6900 there, exactly what it costs at 200, so the pre-contingency limits are slack
+and the **only** thing separating LOPF from SCLOPF is the contingency constraint.
+The secure optimum is 14100 — an implementation that dropped the N-1 rows returns
+6900, wrong by more than a factor of two rather than by a tolerance.
+
+Beyond matching PyPSA, the suite reconstructs each post-outage flow from the
+solved pre-outage ones and checks it against the rating, which a model that built
+the rows with a wrong sign or a transposed factor could not satisfy even if it
+happened to match an objective.
 
 ## Known gaps
 

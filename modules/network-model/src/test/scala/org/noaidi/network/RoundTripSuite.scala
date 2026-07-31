@@ -68,7 +68,8 @@ class RoundTripSuite extends munit.FunSuite:
     * reader and writer had never been exercised on.
     */
   private val goldenNetworks =
-    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "unit-commitment", "storage-hvdc")
+    List("ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "unit-commitment",
+         "sclopf-triangle", "storage-hvdc")
 
   goldenNetworks.foreach { name =>
     test(s"$name round-trips to the same files PyPSA wrote") {

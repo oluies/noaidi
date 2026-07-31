@@ -131,40 +131,42 @@ class BranchAndBoundSuite extends munit.FunSuite:
     intercept[IllegalArgumentException](BranchAndBound.solve(knapsackish, Set(0, 7), params))
   }
 
-  test("a node is never skipped on a bound that was never established") {
-    // The previous version of this test passed against the pre-fix code, so it
-    // guarded nothing: the old pre-solve test used the *unmargined* parent bound
-    // for both `pruningSafetyFactor` settings, and the post-solve prune was
-    // already margin-aware, so both of its assertions held either way.
+  test("a NaN bound is never a licence to skip a node") {
+    // The previous version of this test asserted Optimal and a finite bound on a
+    // clean instance, all of which held against the pre-fix code, because no
+    // safeBound is ever NaN there. The property is only decidable where a NaN can
+    // actually be supplied, so the predicate is exercised directly.
     //
-    // What actually distinguishes the fix is the pre-solve path itself. Starve
-    // the LP so relaxations end inconclusive: their bounds are not bounds, every
-    // node must therefore be solved rather than skipped on one, and the search
-    // must report that it could not prove anything. The old code stored the raw
-    // objective of an inconclusive relaxation as `parentBound` and pruned
-    // against it; this asserts the outcome that forbids.
-    val starved = params.copy(lp = PdhgParams(epsAbs = 1e-14, epsRel = 1e-14, maxIterations = 2))
-    val milp    = BranchAndBound.solve(knapsackish, Set(0, 1), starved)
-
-    assert(milp.unprovenNodes > 0, s"the fixture did not produce an inconclusive node: $milp")
-    // Every node reached was solved: an inconclusive parent cannot license a skip,
-    // so the explored count is the number pushed, not a subset of it.
-    assert(milp.nodesExplored >= milp.unprovenNodes, s"$milp")
-    assertNotEquals(milp.status, MilpStatus.Optimal, s"$milp")
-    // And nothing was concluded from those bounds: a proven gap is impossible here.
-    assert(!milp.status.isConclusive, s"$milp")
+    // `safeBound < incumbent` is false for NaN, which would skip the node: no
+    // children, no unproven increment, subtree gone.
+    assert(!BranchAndBound.skipsBeforeSolving(Double.NaN, 10.0, haveIncumbent = true))
+    assert(!BranchAndBound.skipsBeforeSolving(Double.NegativeInfinity, 10.0, haveIncumbent = true))
+    // A genuine bound above the incumbent still prunes, so the guard has not
+    // simply disabled pruning.
+    assert(BranchAndBound.skipsBeforeSolving(11.0, 10.0, haveIncumbent = true))
+    assert(!BranchAndBound.skipsBeforeSolving(9.0, 10.0, haveIncumbent = true))
+    // And nothing is skipped before there is anything to compare against.
+    assert(!BranchAndBound.skipsBeforeSolving(11.0, Double.PositiveInfinity, haveIncumbent = false))
   }
 
-  test("a NaN bound falls through to solving rather than skipping the subtree") {
-    // `safeBound < incumbentValue` is false for NaN, which would skip the node
-    // silently -- no children, no `unproven` increment -- the same subtree loss
-    // the margin exists to prevent, by another route. The predicate is written
-    // as a negation and `safe` is forced to -infinity when it cannot be
-    // computed; this pins the behaviour those two produce.
-    val milp = BranchAndBound.solve(knapsackish, Set(0, 1), params)
-    assertEquals(milp.status, MilpStatus.Optimal, s"$milp")
-    assert(milp.bestBound.isFinite, s"a non-finite bound reached the result: $milp")
-    assert(milp.primal.forall(_.isFinite), s"$milp")
+  test("a bound that cannot be computed becomes negative infinity") {
+    // The other half: `math.max(NaN, eps)` propagates, so a conclusive relaxation
+    // with a NaN objective or KKT gap yields a NaN margin. -infinity is the only
+    // safe reading -- it says nothing is known about the subtree.
+    assertEquals(BranchAndBound.safeBoundOf(conclusive = true, 5.0, 1.0), 4.0)
+    assertEquals(
+      BranchAndBound.safeBoundOf(conclusive = true, Double.NaN, 1.0),
+      Double.NegativeInfinity,
+    )
+    assertEquals(
+      BranchAndBound.safeBoundOf(conclusive = true, 5.0, Double.NaN),
+      Double.NegativeInfinity,
+    )
+    // An inconclusive relaxation has no bound at all, whatever it reported.
+    assertEquals(
+      BranchAndBound.safeBoundOf(conclusive = false, 5.0, 1.0),
+      Double.NegativeInfinity,
+    )
   }
 
   test("the pruning margin costs nodes on an instance where it binds") {

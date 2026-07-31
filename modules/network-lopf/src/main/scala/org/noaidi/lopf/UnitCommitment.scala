@@ -85,8 +85,31 @@ object UnitCommitment:
       shutDownCost: Double,
       minUp: Int,
       minDown: Int,
-      initiallyUp: Boolean,
-  )
+      upTimeBefore: Int,
+      downTimeBefore: Int,
+  ):
+    def initiallyUp: Boolean = upTimeBefore > 0
+
+    /** Snapshots at the head of the horizon whose status is already determined
+      * by what the unit was doing before it.
+      *
+      * PyPSA enforces the '''residual''' condition, not merely a seed for the
+      * linking equality: a unit that has already run `up_time_before` snapshots
+      * must stay committed for a further `min_up_time − up_time_before`, and the
+      * mirror holds for one that has been down. Seeding `u[-1]` alone leaves that
+      * unconstrained, so this model would accept a schedule PyPSA rejects — and
+      * accept it at a '''lower''' cost, the direction that cannot be caught
+      * downstream.
+      *
+      * In the reference fixture `base` has `min_up_time = 3` against an
+      * `up_time_before` of 1, so PyPSA holds it on at t = 0 and 1. That went
+      * unnoticed because `base` runs throughout anyway.
+      */
+    def forcedPrefix: Int =
+      if initiallyUp then math.max(minUp - upTimeBefore, 0)
+      else math.max(minDown - downTimeBefore, 0)
+
+    def forcedValue: Double = if initiallyUp then 1.0 else 0.0
 
   def solve(
       network: Network,
@@ -106,18 +129,44 @@ object UnitCommitment:
         table = generators,
         id = id,
         pNom = generators.float("p_nom", id),
-        startUpCost = optional(generators, "start_up_cost", id),
-        shutDownCost = optional(generators, "shut_down_cost", id),
-        minUp = optionalInt(generators, "min_up_time", id),
-        minDown = optionalInt(generators, "min_down_time", id),
-        // PyPSA's `up_time_before` defaults to 1, so a unit is treated as having
-        // been running before the horizon. That is not cosmetic: with the
-        // opposite convention every unit that starts the horizon on would be
-        // charged a start-up at t=0, and the objective would be wrong by the sum
-        // of those costs while the schedule looked identical.
-        initiallyUp = optionalInt(generators, "up_time_before", id, default = 1) > 0,
+        // `ComponentTable.float`/`int` already fall back to the schema default
+        // when a column is absent, which is the normal case since PyPSA omits
+        // columns left at their default. The local helpers that used to wrap
+        // these re-implemented that fallback and hardcoded a default the schema
+        // already carries -- two places to change, with the code silently
+        // winning.
+        startUpCost = generators.float("start_up_cost", id),
+        shutDownCost = generators.float("shut_down_cost", id),
+        minUp = generators.int("min_up_time", id),
+        minDown = generators.int("min_down_time", id),
+        // Read as counts rather than collapsed to a flag. PyPSA's
+        // `up_time_before` defaults to 1, so a unit counts as having run before
+        // the horizon -- not cosmetic, since the opposite convention charges a
+        // start-up at t=0 to every unit that begins committed and the objective
+        // comes out wrong by the sum of those while the schedule looks
+        // identical. The magnitudes matter too, for `forcedPrefix`.
+        upTimeBefore = generators.int("up_time_before", id),
+        downTimeBefore = generators.int("down_time_before", id),
       )
     }
+
+    // Derived once per (generator, snapshot) and read by all three loops. The
+    // column bound and the `p - hi*u <= 0` row have to agree about `hi`, and
+    // computing it twice from the same lookups left nothing enforcing that a
+    // change to one site would reach the other.
+    final case class Limits(lo: Double, hi: Double, committable: Boolean)
+    val limits: Map[(String, Int), Limits] =
+      (for
+        t  <- snapshots
+        id <- generators.ids
+      yield
+        val pNom = generators.float("p_nom", id)
+        (id, t) -> Limits(
+          lo = pNom * generators.valueAt("p_min_pu", id, t),
+          hi = pNom * generators.valueAt("p_max_pu", id, t),
+          committable = isCommittable(generators, id),
+        )
+      ).toMap
 
     val columns = mutable.LinkedHashMap.empty[(String, String, Int), Int]
     val bounds  = mutable.ArrayBuffer.empty[(Double, Double)]
@@ -133,14 +182,13 @@ object UnitCommitment:
     snapshots.foreach { t =>
       val weight = network.weighting("objective", t)
       generators.ids.foreach { id =>
-        val pNom = generators.float("p_nom", id)
-        val hi   = pNom * generators.valueAt("p_max_pu", id, t)
-        val lo   = pNom * generators.valueAt("p_min_pu", id, t)
-        val cost = generators.valueAt("marginal_cost", id, t) * weight
+        val limit = limits((id, t))
+        val cost  = generators.valueAt("marginal_cost", id, t) * weight
         // A committable unit's lower bound is enforced by its status variable,
         // not by its box: the whole point is that zero is also allowed.
-        if isCommittable(generators, id) then declare("p", id, t, 0.0, math.max(hi, 0.0), cost): Unit
-        else declare("p", id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+        if limit.committable then declare("p", id, t, 0.0, math.max(limit.hi, 0.0), cost): Unit
+        else
+          declare("p", id, t, math.min(limit.lo, limit.hi), math.max(limit.lo, limit.hi), cost): Unit
       }
       units.foreach { u =>
         declare("u", u.id, t, 0.0, 1.0, 0.0): Unit
@@ -153,8 +201,11 @@ object UnitCommitment:
     bounds.zipWithIndex.foreach { case ((lo, hi), i) => builder.bounds(i, lo, hi) }
     costs.zipWithIndex.foreach { (c, i) => builder.objectiveCoefficient(i, c) }
 
-    // Bus balance. Single-bus networks are the common shape for a commitment
-    // study, but nothing here assumes one.
+    // Bus balance over generators and load only: there are no flow variables,
+    // so this holds *locally* at each bus. That is why `reject` refuses a
+    // network with any branch -- without flows, import and export are silently
+    // deleted and a multi-bus network comes back either spuriously infeasible or
+    // with a schedule far more expensive than the real one.
     snapshots.foreach { t =>
       buses.foreach { bus =>
         val terms = generators.ids
@@ -175,12 +226,12 @@ object UnitCommitment:
         val su = columns(("su", u.id, t))
         val sd = columns(("sd", u.id, t))
 
-        val lo = u.pNom * generators.valueAt("p_min_pu", u.id, t)
-        val hi = u.pNom * generators.valueAt("p_max_pu", u.id, t)
+        val limit = limits((u.id, t))
 
-        // p - p_max * u <= 0  and  p - p_min * u >= 0.
-        builder.lessThan(Seq((p, 1.0), (on, -hi)), 0.0)
-        builder.greaterThan(Seq((p, 1.0), (on, -lo)), 0.0)
+        // p - p_max * u <= 0  and  p - p_min * u >= 0, with the same `hi` the
+        // column bound was built from.
+        builder.lessThan(Seq((p, 1.0), (on, -limit.hi)), 0.0)
+        builder.greaterThan(Seq((p, 1.0), (on, -limit.lo)), 0.0)
 
         // su - sd = u[t] - u[t-1], which pins both switch variables at once:
         // they cannot both be positive at an optimum because both carry a
@@ -192,6 +243,10 @@ object UnitCommitment:
           case None =>
             val initial = if u.initiallyUp then 1.0 else 0.0
             builder.equalityConstraint(Seq((su, 1.0), (sd, -1.0), (on, -1.0)), -initial)
+
+        // The pre-horizon residual: what the unit was doing before t=0 can
+        // still be binding at the head of the horizon.
+        if t < u.forcedPrefix then builder.equalityConstraint(Seq((on, 1.0)), u.forcedValue)
 
         // Minimum up time: having started within the last `minUp` snapshots
         // forces the unit to still be on now.
@@ -220,7 +275,7 @@ object UnitCommitment:
         generators.ids.foreach { id =>
           dispatch((id, t)) = milp.primal(columns(("p", id, t)))
           commitment((id, t)) =
-            if isCommittable(generators, id) then milp.primal(columns(("u", id, t))) > 0.5
+            if limits((id, t)).committable then milp.primal(columns(("u", id, t))) > 0.5
             else true
         }
       }
@@ -240,36 +295,54 @@ object UnitCommitment:
       table.static.contains("committable") &&
       table.bool("committable", id)
 
-  /** An int-typed attribute, absent-tolerant.
-    *
-    * Separate from [[optional]] because the store is genuinely typed: PyPSA
-    * declares `min_up_time` as an int, and reading it as a float throws rather
-    * than coercing — which is the point of having the types.
-    */
-  private def optionalInt(
-      table: ComponentTable,
-      attribute: String,
-      id: String,
-      default: Int = 0,
-  ): Int =
-    if table.spec.attribute(attribute).isEmpty && !table.static.contains(attribute) then default
-    else if !table.static.contains(attribute) then default
-    else table.int(attribute, id)
-
-  private def optional(table: ComponentTable, attribute: String, id: String): Double =
-    if table.spec.attribute(attribute).isEmpty && !table.static.contains(attribute) then 0.0
-    else
-      val value = table.float(attribute, id)
-      if value.isFinite then value else 0.0
-
   /** Refuse what this formulation does not model.
     *
-    * Ramp limits and time-dependent start-up costs are ordinary in a real
-    * commitment study and are simply absent here. Silently dropping either gives
-    * a cheaper schedule than the network permits — the same failure the rest of
-    * this port keeps designing against — so they are refused.
+    * Everything here would otherwise be dropped silently and produce a schedule
+    * cheaper than the network permits — the direction that cannot be caught
+    * downstream, and the failure this port keeps designing against.
     */
   private def reject(network: Network): Unit =
+    // Any transmission at all. The balance rows carry no flow variables, so a
+    // network with branches is not being solved with its transmission ignored --
+    // it is being solved with every bus forced to balance on its own. `Lopf`
+    // models flows and refuses only what it cannot build; this refuses the whole
+    // class, because a commitment model without flows is a single-bus model.
+    val handled = Set("Generator", "Load", "Bus", "Carrier", "GlobalConstraint",
+                      "SubNetwork", "LineType", "TransformerType", "Shape")
+    val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
+    if unhandled.nonEmpty then
+      throw new UnsupportedNetwork(
+        "unit commitment is formulated without branch flows, so it models a single bus; " +
+          "this network carries " + unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
+      )
+
+    // A one-port whose bus does not exist matches no balance row, so it simply
+    // vanishes -- a load disappears and the schedule comes out cheaper, with no
+    // diagnostic. `Lopf` guards this through the same helper; leaving one entry
+    // point loud and the other silently wrong is the thing to avoid.
+    Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
+      throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")
+    }
+
+    // Costs PyPSA charges and this objective does not. `stand_by_cost` is levied
+    // per committed unit per snapshot, so ignoring it makes over-committing free
+    // and the schedule comes out below the true cost -- the same reason ramp
+    // limits are refused rather than ignored, and they were treated
+    // inconsistently until now.
+    network.table("Generator").foreach { table =>
+      Seq("stand_by_cost", "marginal_cost_quadratic").foreach { attribute =>
+        if table.static.contains(attribute) then
+          table.ids.foreach { id =>
+            val value = table.float(attribute, id)
+            if value.isFinite && value != 0.0 then
+              throw new UnsupportedNetwork(
+                s"generator '$id' has $attribute = $value; it enters PyPSA's objective and not " +
+                  "this one, so ignoring it would price the schedule below the truth"
+              )
+          }
+      }
+    }
+
     val generators = network.table("Generator")
     generators.foreach { table =>
       Seq("ramp_limit_up", "ramp_limit_down", "ramp_limit_start_up", "ramp_limit_shut_down")

@@ -351,8 +351,14 @@ class TopologySuite extends munit.FunSuite:
     // isolated by definition, and it is perfectly well formed. What
     // `isolatedBuses` exists to catch is a bus left out of a network that does
     // have a graph, where the infeasibility is a mistake rather than the shape.
-    val withBranches = goldenNetworks.filter(n => Topology.passiveBranches(network(n)).nonEmpty)
-    assert(withBranches.size >= 4, s"only ${withBranches.size} golden networks have branches")
+    // Both kinds of branch, because `isolatedBuses` considers both. A network
+    // wired only with links has a real graph and would be checked by it, yet a
+    // passive-only filter would drop it from this assertion.
+    val withBranches = goldenNetworks.filter { n =>
+      val g = network(n)
+      (Topology.passiveBranches(g) ++ Topology.controllableBranches(g)).nonEmpty
+    }
+    assert(withBranches.size >= 5, s"only ${withBranches.size} golden networks have branches")
 
     withBranches.foreach { name =>
       assertEquals(Topology.isolatedBuses(network(name)), IndexedSeq.empty, name)

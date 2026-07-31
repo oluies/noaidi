@@ -549,8 +549,15 @@ worse than no oracle, because a disagreement stops meaning anything.
 itself. It runs on `BranchAndBound` over Prima, so nothing leaves this project's
 own solver.
 
-The formulation is the standard one — a binary status per unit per snapshot, the
-disjunctive output bound `p_min_pu · p_nom · u <= p <= p_max_pu · p_nom · u`, and
+Formulated **without branch flows**, so it models a single bus. A network with
+any transmission is refused rather than solved with every bus forced to balance
+locally, which would delete import and export and return either a spurious
+infeasibility or a schedule far dearer than the real network's. Dangling bus
+references, ramp limits, `stand_by_cost` and `marginal_cost_quadratic` are
+refused for the same reason: each would price the schedule below the truth.
+
+The formulation is otherwise the standard one — a binary status per unit per
+snapshot, the disjunctive output bound `p_min_pu · p_nom · u <= p <= p_max_pu · p_nom · u`, and
 start-up/shut-down variables linked by `su − sd = u[t] − u[t−1]` with rolling
 windows for minimum up and down time. Start-up and shut-down are left
 **continuous**: the linking equality and the non-negative costs drive them to 0
@@ -561,6 +568,15 @@ the search tree for decisions already determined.
 the horizon. Not cosmetic: with the opposite convention every unit that starts
 the horizon committed is charged a spurious start-up at `t = 0`, and the
 objective is wrong by the sum of those costs while the schedule looks identical.
+
+Both counters are read as **counts, not flags**, because PyPSA enforces the
+*residual* initial condition: a unit that has already run `up_time_before`
+snapshots must stay committed for a further `min_up_time − up_time_before`, and
+the mirror holds for one that has been down. Seeding `u[-1]` for the linking
+equality alone leaves that unconstrained, and the model then accepts schedules
+PyPSA rejects — at a *lower* cost. In this fixture `base` has `min_up_time = 3`
+against `up_time_before = 1`, so it is held on at `t = 0` and `1`; that the
+omission went unnoticed is precisely because `base` runs throughout anyway.
 
 ### What the fixture does and does not prove
 

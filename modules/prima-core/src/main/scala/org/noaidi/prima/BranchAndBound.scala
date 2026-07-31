@@ -255,7 +255,12 @@ object BranchAndBound:
       // the subtree holding the optimum could be dropped and the answer still
       // labelled `Optimal`. Skipping a node here has to meet exactly the bar
       // that pruning one after solving does.
-      if incumbent.isEmpty || node.safeBound < incumbentValue then
+      // Written as a negation so a NaN bound falls through to *solving*. `<`
+      // would be false for NaN and skip the node -- no children, no `unproven`
+      // increment, the same silent subtree loss this margin exists to prevent,
+      // reached by a different route. `safe` is forced to -infinity below when
+      // it cannot be computed, and this is the second line of defence.
+      if incumbent.isEmpty || !(node.safeBound >= incumbentValue) then
         val sub = LpProblem(
           objective = problem.objective,
           constraintMatrix = problem.constraintMatrix,
@@ -301,7 +306,13 @@ object BranchAndBound:
 
             // What children may prune against: the bound less its margin, or
             // nothing at all if this relaxation was not conclusive.
-            val safe = if conclusive then bound - slack else Double.NegativeInfinity
+            // -infinity means "nothing is known about this subtree", which is
+            // the only safe reading of a bound that is absent or not a number.
+            val safe =
+              if !conclusive then Double.NegativeInfinity
+              else
+                val candidate = bound - slack
+                if candidate.isFinite then candidate else Double.NegativeInfinity
 
             val prunable = conclusive && incumbent.nonEmpty && safe >= incumbentValue
 
@@ -339,16 +350,20 @@ object BranchAndBound:
                   val value = relaxation.primal(j)
                   val floor  = math.floor(value)
                   val ceil   = math.ceil(value)
-                  // `Pdhg.WarmStart` throws on a non-finite primal or dual, and
-                  // a NumericalError node can have a primal finite enough to
-                  // yield a branching variable while its dual is poisoned. That
-                  // would abort the whole search from inside a branch the design
-                  // says should merely be counted -- and silently, since warm
-                  // starting is on by default. Such a node degrades to a
-                  // cold-started child instead.
-                  val usable =
-                    relaxation.primal.forall(_.isFinite) && relaxation.dual.forall(_.isFinite)
-                  val warm = if params.warmStart && usable then Some(Pdhg.WarmStart(relaxation)) else None
+                  // `Pdhg.WarmStart` throws when its preconditions fail -- a
+                  // non-finite primal or dual today -- and a NumericalError node
+                  // can have a primal finite enough to yield a branching
+                  // variable while its dual is poisoned. That would abort the
+                  // whole search from inside a branch the design says is merely
+                  // counted, silently, since warm starting is on by default.
+                  //
+                  // Guarded by attempting the construction rather than by
+                  // restating its preconditions here: a second copy of them
+                  // would stop covering the case the day the factory grows a
+                  // third, and the aborted search would come back unobservably.
+                  val warm =
+                    if params.warmStart then scala.util.Try(Pdhg.WarmStart(relaxation)).toOption
+                    else None
 
                   // Pushed ceiling-first so the floor branch is explored first,
                   // which on a minimisation with mostly-zero binaries reaches a

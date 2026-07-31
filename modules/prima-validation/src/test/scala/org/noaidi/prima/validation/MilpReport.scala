@@ -33,6 +33,7 @@ object MilpReport:
       oracleMillis: Long,
       relaxation: Double,
       relaxationStatus: SolveStatus,
+      primaPrimal: IArray[Double],
   ):
     def relativeGap: Double =
       math.abs(primaObjective - oracleObjective) / math.max(1.0, math.abs(oracleObjective))
@@ -42,11 +43,10 @@ object MilpReport:
       * The distance from the relaxation to the integer optimum. Near zero means
       * the instance barely needed branching, so it is weak evidence about the
       * search — worth showing rather than leaving the reader to assume.
-      */
-    /** Only meaningful if the relaxation actually solved. This column is the one
-      * used to certify that an instance exercises the search, so a value taken
-      * from whatever an unconverged solve last held would be worse than no
-      * column at all.
+      *
+      * `None` unless the relaxation actually solved: this column is what
+      * certifies that an instance exercises the search, so a value taken from
+      * whatever an unconverged solve last held would be worse than no column.
       */
     def integralityGap: Option[Double] =
       if relaxationStatus != SolveStatus.Optimal then None
@@ -84,6 +84,7 @@ object MilpReport:
         oracleMillis = theirsMs,
         relaxation = relaxed.objectiveValue,
         relaxationStatus = relaxed.status,
+        primaPrimal = mine.primal,
       )
     }
 
@@ -145,10 +146,12 @@ object MilpReport:
     // snap displacement rather than search quality. Checked here so the two
     // cannot drift apart again unnoticed.
     rows.zip(MilpLadder.instances).foreach { (r, instance) =>
+      // Against the primal from the solve already performed above, not a second
+      // one. Re-solving doubled the step's wall time, and comparing against a
+      // different run would surface any nondeterminism here as a spurious
+      // failure rather than at its cause.
       if r.primaStatus == MilpStatus.Optimal then
-        val achieved = instance.problem.primalObjective(
-          BranchAndBound.solve(instance.problem, instance.integers, params).primal
-        )
+        val achieved = instance.problem.primalObjective(r.primaPrimal)
         if math.abs(achieved - r.primaObjective) > 1e-9 * math.max(1.0, math.abs(achieved)) then
           fail(s"${r.name}: reported objective ${r.primaObjective} is not c'x = $achieved")
     }

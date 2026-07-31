@@ -88,6 +88,13 @@ object MilpLadder:
     * `MilpAgreementSuite` asserts that every instance here is fractional, so a
     * future edit cannot quietly reintroduce one that tests nothing.
     */
+  /** The ladder.
+    *
+    * Seeds are chosen, not arbitrary: `randomMixed(2)` and several neighbours
+    * produce an integral relaxation and so solve in one node without branching.
+    * `MilpAgreementSuite` asserts that every instance here is fractional, so a
+    * future edit cannot quietly reintroduce one that tests nothing.
+    */
   /** The settings both the report and the agreement suite use.
     *
     * Shared so the node counts and gaps pinned in NOTES describe the same

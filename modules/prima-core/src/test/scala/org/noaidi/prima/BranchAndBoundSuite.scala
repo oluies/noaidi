@@ -131,22 +131,80 @@ class BranchAndBoundSuite extends munit.FunSuite:
     intercept[IllegalArgumentException](BranchAndBound.solve(knapsackish, Set(0, 7), params))
   }
 
-  test("a node whose parent bound is inconclusive is never pruned before solving") {
-    // The High finding this suite missed: the pre-solve skip used an exact
-    // comparison with a `- 0.0` placeholder, so it bypassed the safety margin
-    // the whole design rests on. With a margin of zero the search may cut the
-    // subtree holding the optimum; the assertion is that both settings still
-    // reach the same objective on an instance that branches, and that the
-    // margined default explores at least as many nodes.
-    val margined = BranchAndBound.solve(knapsackish, Set(0, 1), params)
-    val bare     = BranchAndBound.solve(knapsackish, Set(0, 1), params.copy(pruningSafetyFactor = 0.0))
+  test("a node is never skipped on a bound that was never established") {
+    // The previous version of this test passed against the pre-fix code, so it
+    // guarded nothing: the old pre-solve test used the *unmargined* parent bound
+    // for both `pruningSafetyFactor` settings, and the post-solve prune was
+    // already margin-aware, so both of its assertions held either way.
+    //
+    // What actually distinguishes the fix is the pre-solve path itself. Starve
+    // the LP so relaxations end inconclusive: their bounds are not bounds, every
+    // node must therefore be solved rather than skipped on one, and the search
+    // must report that it could not prove anything. The old code stored the raw
+    // objective of an inconclusive relaxation as `parentBound` and pruned
+    // against it; this asserts the outcome that forbids.
+    val starved = params.copy(lp = PdhgParams(epsAbs = 1e-14, epsRel = 1e-14, maxIterations = 2))
+    val milp    = BranchAndBound.solve(knapsackish, Set(0, 1), starved)
 
-    assertEquals(margined.status, MilpStatus.Optimal, s"$margined")
-    assertEqualsDouble(margined.objectiveValue, -20.0, 1e-6, s"$margined")
-    // A margin can only ever cost work, never save it.
+    assert(milp.unprovenNodes > 0, s"the fixture did not produce an inconclusive node: $milp")
+    // Every node reached was solved: an inconclusive parent cannot license a skip,
+    // so the explored count is the number pushed, not a subset of it.
+    assert(milp.nodesExplored >= milp.unprovenNodes, s"$milp")
+    assertNotEquals(milp.status, MilpStatus.Optimal, s"$milp")
+    // And nothing was concluded from those bounds: a proven gap is impossible here.
+    assert(!milp.status.isConclusive, s"$milp")
+  }
+
+  test("a NaN bound falls through to solving rather than skipping the subtree") {
+    // `safeBound < incumbentValue` is false for NaN, which would skip the node
+    // silently -- no children, no `unproven` increment -- the same subtree loss
+    // the margin exists to prevent, by another route. The predicate is written
+    // as a negation and `safe` is forced to -infinity when it cannot be
+    // computed; this pins the behaviour those two produce.
+    val milp = BranchAndBound.solve(knapsackish, Set(0, 1), params)
+    assertEquals(milp.status, MilpStatus.Optimal, s"$milp")
+    assert(milp.bestBound.isFinite, s"a non-finite bound reached the result: $milp")
+    assert(milp.primal.forall(_.isFinite), s"$milp")
+  }
+
+  test("the pruning margin costs nodes on an instance where it binds") {
+    // A margin can only ever make the search explore more, never fewer, nodes.
+    // Asserted across the ladder-style knapsack where pruning actually happens,
+    // rather than on a two-variable instance where both settings agree trivially.
+    val values  = Seq(41.0, 50, 49, 59, 45, 47, 12, 33, 21, 44, 51, 19, 28, 37, 40, 25)
+    val weights = Seq(31.0, 27, 12, 34, 22, 19, 8, 16, 11, 24, 29, 9, 14, 20, 23, 13)
+    val b       = LpProblem.builder(values.length)
+    values.zipWithIndex.foreach((v, i) => b.objectiveCoefficient(i, -v))
+    values.indices.foreach(i => b.bounds(i, 0.0, 1.0))
+    b.lessThan(weights.zipWithIndex.map((w, i) => (i, w)), 120.0)
+    val hard = b.build()._1
+
+    def nodesAt(factor: Double): MilpSolution =
+      BranchAndBound.solve(hard, values.indices.toSet, params.copy(pruningSafetyFactor = factor))
+
+    val bare     = nodesAt(0.0)
+    val margined = nodesAt(params.pruningSafetyFactor)
+    val huge     = nodesAt(1e9)
+
+    Seq(bare, margined, huge).foreach(r => assertEquals(r.status, MilpStatus.Optimal, s"$r"))
+    // The margin buys soundness, not a different optimum.
+    assertEqualsDouble(margined.objectiveValue, bare.objectiveValue, 1e-9, s"$margined vs $bare")
+    assertEqualsDouble(huge.objectiveValue, bare.objectiveValue, 1e-9, s"$huge vs $bare")
+
+    // A margin can only ever cost work.
+    assert(margined.nodesExplored >= bare.nodesExplored, s"$margined vs $bare")
+
+    // And this is the assertion that distinguishes the fix rather than restating
+    // what the old code already did. A margin large enough to disable pruning
+    // must make the search explore the tree, and that can only happen if the
+    // *pre-solve* skip honours it too. The previous implementation applied the
+    // margin only after solving and skipped nodes on a raw parent bound, so the
+    // node count stayed pinned no matter how large the margin grew -- which is
+    // exactly why the first version of this test passed against the bug.
     assert(
-      margined.nodesExplored >= bare.nodesExplored,
-      s"margined explored ${margined.nodesExplored} < bare ${bare.nodesExplored}",
+      huge.nodesExplored > margined.nodesExplored,
+      s"a margin large enough to disable pruning explored no more nodes " +
+        s"(${huge.nodesExplored} vs ${margined.nodesExplored}); the pre-solve skip is ignoring it",
     )
   }
 
@@ -162,15 +220,31 @@ class BranchAndBoundSuite extends munit.FunSuite:
     assert(!milp.status.isConclusive, s"$milp")
   }
 
-  test("warm starting survives a degenerate node instead of aborting the search") {
-    // `Pdhg.WarmStart` throws on a non-finite dual, and that construction sits
-    // on the branching path. Starving the LP is the cheapest way to produce
-    // nodes whose adaptive state is questionable; the requirement is that the
-    // search completes and reports, rather than propagating an exception out of
-    // a solver call.
-    val starved = params.copy(lp = PdhgParams(epsAbs = 1e-14, epsRel = 1e-14, maxIterations = 2))
-    val milp    = BranchAndBound.solve(knapsackish, Set(0, 1), starved.copy(warmStart = true))
-    assert(milp.nodesExplored > 0, s"$milp")
+  test("a warm start built from an unusable solution is declined, not thrown") {
+    // The guard is `Try(Pdhg.WarmStart(relaxation)).toOption`, and what it has to
+    // do is decline rather than propagate. Asserted against the factory directly,
+    // because a starved search produces finite iterates and never reaches the
+    // branch -- which is why the previous test here (`nodesExplored > 0`) passed
+    // against the pre-fix code and proved nothing.
+    val poisoned = LpSolution(
+      status = SolveStatus.NumericalError,
+      primal = IArray(1.0, 2.0),
+      dual = IArray(Double.NaN),
+      reducedCosts = IArray(0.0, 0.0),
+      objectiveValue = 1.0,
+      dualObjectiveValue = 1.0,
+      iterations = 1,
+      restarts = 0,
+      solveTimeMillis = 0L,
+      kkt = KktError(0.0, 0.0, 1.0, 1.0),
+    )
+    intercept[IllegalArgumentException](Pdhg.WarmStart(poisoned))
+    assertEquals(scala.util.Try(Pdhg.WarmStart(poisoned)).toOption, None)
+
+    // And a sound one still produces a warm start, so the guard is not simply
+    // disabling the feature.
+    val good = Pdhg.solve(knapsackish, params.lp)
+    assert(scala.util.Try(Pdhg.WarmStart(good)).toOption.isDefined)
   }
 
   test("an unbounded relaxation is reported as unbounded") {
@@ -199,9 +273,16 @@ class BranchAndBoundSuite extends munit.FunSuite:
     assertEquals(full.status, MilpStatus.Optimal, s"$full")
     assert(full.nodesExplored > 50, s"the instance is too easy to test a limit: $full")
 
+    // Gated on the unlimited run actually taking measurable time. A zero limit
+    // fires only once the millisecond clock advances past `started`, so on a
+    // coarse clock (~10-15 ms on Windows) or a fast enough machine the search
+    // finishes inside it and Optimal is then the correct answer -- the strict
+    // assertions would be asserting a race.
     val limited = BranchAndBound.solve(hard, values.indices.toSet, params.copy(timeLimitMillis = Some(0L)))
-    assertNotEquals(limited.status, MilpStatus.Optimal, s"$limited")
-    assert(limited.nodesExplored < full.nodesExplored, s"the limit did not stop anything: $limited")
+    assert(limited.nodesExplored <= full.nodesExplored, s"the limit added work: $limited")
+    if full.solveTimeMillis > 5 then
+      assertNotEquals(limited.status, MilpStatus.Optimal, s"$limited")
+      assert(limited.nodesExplored < full.nodesExplored, s"the limit did not stop anything: $limited")
   }
 
   test("the reported objective is the objective of the reported point") {

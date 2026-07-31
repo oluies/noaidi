@@ -186,3 +186,72 @@ class UnitCommitmentSuite extends munit.FunSuite:
           paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
         }
     }
+
+  test("a network with transmission is refused rather than solved bus-by-bus") {
+    assume(available, "goldens missing")
+    // The balance rows carry no flow variables, so a multi-bus network would be
+    // solved with every bus forced to balance locally: import and export are
+    // deleted, and the answer comes back either spuriously infeasible or far
+    // more expensive than the real network's. Nothing caught this because the
+    // only fixture is a single bus with no branches.
+    val dir = Files.createTempDirectory("noaidi-uc-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("unit-commitment")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    Files.writeString(
+      dir.resolve("buses.csv"),
+      Files.readString(dir.resolve("buses.csv")).stripTrailing + "\nfar,110.0\n",
+    )
+    Files.writeString(dir.resolve("lines.csv"), "name,bus0,bus1,x,r,s_nom\nl,bus,far,1.0,0.0,500.0\n")
+
+    val broken  = CsvReader.read(dir, schema, "unit-commitment")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("Line"), failure.getMessage)
+  }
+
+  test("a load attached to a nonexistent bus is refused") {
+    assume(available, "goldens missing")
+    // It would match no balance row and simply vanish, and the schedule would
+    // come out cheaper with no diagnostic. Lopf already guarded this; leaving
+    // one entry point loud and the other silently wrong is the thing to avoid.
+    val dir = Files.createTempDirectory("noaidi-uc-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("unit-commitment")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    // Only the data rows: a blanket replace would rename the `bus` *column* too,
+    // which is a different (also rejected) error and not the one under test.
+    val loads = dir.resolve("loads.csv")
+    val rows  = Files.readString(loads).linesIterator.toIndexedSeq
+    Files.writeString(
+      loads,
+      (rows.head +: rows.tail.map(_.replace(",bus", ",buss"))).mkString("\n") + "\n",
+    )
+
+    val broken  = CsvReader.read(dir, schema, "unit-commitment")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("buss"), failure.getMessage)
+  }
+
+  test("a unit part-way through its minimum up time is held on at the horizon head") {
+    assume(available, "goldens missing")
+    // PyPSA enforces the residual initial condition, not just a seed for the
+    // linking equality: `base` has min_up_time 3 against up_time_before 1, so it
+    // is held on at t = 0 and 1. This model dropped that silently, and it went
+    // unnoticed because `base` runs throughout anyway -- so the check is that the
+    // rows exist and bind, by forcing the unit to want to be off.
+    val n      = network("unit-commitment")
+    val result = UnitCommitment.solve(n, params)
+    val gens   = n.require("Generator")
+
+    val minUp  = gens.int("min_up_time", "base")
+    val before = gens.int("up_time_before", "base")
+    val forced = math.max(minUp - before, 0)
+    assert(forced > 0, s"the fixture no longer exercises the residual condition ($minUp, $before)")
+    (0 until forced).foreach { t =>
+      assert(result.committed("base", t), s"base must be held on at snapshot $t")
+    }
+  }

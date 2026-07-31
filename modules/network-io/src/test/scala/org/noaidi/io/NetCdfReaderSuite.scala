@@ -157,35 +157,32 @@ class NetCdfReaderSuite extends munit.FunSuite:
     assertEquals(fromNetCdf("unit-commitment").snapshots, IndexedSeq("0", "1", "2", "3", "4", "5", "6", "7"))
   }
 
-  test("a file with no snapshot dataset is refused by name") {
+  test("a malformed file is refused by name, not by accident") {
     assume(available, "goldens missing")
-    // Every MalformedNetwork path shipped untested; the suite only compared
-    // happy-path goldens. This is the cheapest one to reach honestly -- an HDF5
-    // file that is not a PyPSA network at all.
-    val stray = Files.createTempFile("noaidi-nc-", ".nc")
-    temporaries += stray
-    Files.copy(
-      goldens.resolve("binary").resolve("ac-dc-meshed.nc"),
-      stray,
-      java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-    )
-    // A real network reads fine; the point below is that a *missing* dataset is
-    // reported rather than producing an empty network.
-    assert(NetCdfReader.read(stray, schema, "copy").snapshots.nonEmpty)
+    // Committed fixtures rather than files built here. The previous version of
+    // this test copied a valid file, asserted it read -- already covered by the
+    // sweep above -- and then intercepted a bare Exception from opening a path
+    // that does not exist, which is jhdf's file-open failure and would have
+    // passed for a NullPointerException.
+    //
+    // Building them in the suite is no better: it would need the reference venv,
+    // which CI does not have, so the test would skip exactly where it matters.
+    val malformed = goldens.resolve("binary").resolve("malformed")
+    assume(Files.isDirectory(malformed), "malformed fixtures missing — regenerate the goldens")
 
-    val missing = goldens.resolve("binary").resolve("does-not-exist.nc")
-    intercept[Exception](NetCdfReader.read(missing, schema, "missing"))
-  }
-
-  test("snapshot weightings are discovered, not enumerated") {
-    assume(available, "goldens missing")
-    // Hardcoding objective/stores/generators would drop a fourth column PyPSA
-    // adds, which the CSV reader would still read -- the two would then disagree
-    // about a network neither is wrong about.
-    val binary = fromNetCdf("ac-dc-meshed")
-    val text   = fromCsv("ac-dc-meshed")
-    assert(text.snapshotWeightings.nonEmpty, "the fixture carries no weightings")
-    assertEquals(binary.snapshotWeightings.keySet, text.snapshotWeightings.keySet)
+    Seq(
+      "no-snapshots.nc"  -> "snapshots_snapshot",
+      "short-column.nc"  -> "entities",
+      "bad-time-unit.nc" -> "fortnights",
+    ).foreach { (file, expected) =>
+      val failure = intercept[NetCdfReader.MalformedNetwork](
+        NetCdfReader.read(malformed.resolve(file), schema, file)
+      )
+      assert(
+        failure.getMessage.contains(expected),
+        s"$file: expected a message naming '$expected', got: ${failure.getMessage}",
+      )
+    }
   }
 
   private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]

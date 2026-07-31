@@ -361,9 +361,9 @@ object NewtonRaphson:
       )
 
   private def rejectUnhandled(network: Network): Unit =
-    val handled = Set("Bus", "Line", "Link", "Generator", "Load", "StorageUnit", "Store",
-                      "Carrier", "GlobalConstraint", "SubNetwork", "LineType",
-                      "TransformerType", "Shape")
+    val handled = Set("Bus", "Line", "Transformer", "Link", "Generator", "Load",
+                      "StorageUnit", "Store", "Carrier", "GlobalConstraint", "SubNetwork",
+                      "LineType", "TransformerType", "Shape")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then
       throw new UnsupportedNetwork(

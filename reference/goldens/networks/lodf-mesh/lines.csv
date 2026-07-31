@@ -1,0 +1,6 @@
+name,bus0,bus1,x,s_nom,sub_network
+AB,A,B,0.1,500.0,0
+CA,C,A,0.15,500.0,0
+BD,B,D,0.2,500.0,0
+DC,D,C,0.25,500.0,0
+BC,B,C,0.3,500.0,0

@@ -643,15 +643,30 @@ coefficient and the LP would come back infeasible with nothing to explain it.
 `ac-dc-meshed`'s Bremen–Frankfurt line is exactly such a branch, which is part of
 why that network cannot serve as an SCLOPF fixture.
 
-There is deliberately **no bound on the factors themselves**, and measuring is
-what settled it. A bound of 1e6 was added on the reasoning that a denominator
-just past the threshold would yield a huge finite factor the LP would swallow.
-Driving a network towards a bridge — a stiff branch parallel to a path whose
-impedance is raised through 1e2, 1e4, 1e6 — leaves the largest factor at exactly
-1.0000 at every step, and the denominator check fires before anything grows. That
-is the physics: all of an outaged branch's flow moves to the alternative path, so
-the ratio is one. The bound was a branch no input could reach, justified by a
-claim that does not hold; it is gone, and the measurement is a test.
+There is **no bound on the factors themselves**, and the reasoning behind that
+needed correcting twice.
+
+A bound of 1e6 was added on the argument that a denominator just past the
+threshold would yield a huge finite factor. I removed it after measuring the
+largest factor at exactly 1.0000 while driving a network towards a bridge — but
+that measurement was taken on a **single cycle**, where `|LODF| = 1` is a
+topological identity: one alternative path means the whole outaged flow moves to
+it, whatever the impedances. The sweep varied nothing and could not have produced
+another answer.
+
+Repeated on a two-loop network with impedances spread over eight orders of
+magnitude, the largest factor is still 1.0000 — and **PyPSA's own BODF agrees**,
+maxing at 1.0000 with interior values of −0.333 and −0.500. So the conclusion
+survives a test that could have refuted it, which the first one could not. The
+bound stays out; only a non-finite factor is refused.
+
+That exercise exposed a real gap. `sclopf-triangle` cannot validate the LODF
+computation at all: every factor there is ±1 by topology, so an implementation
+returning ±1 unconditionally would match it *and* match the SCLOPF objective it
+feeds. `lodf-mesh` — two loops sharing an edge, PyPSA's factors including
+−0.5455, −0.6429 and +0.3571 — is now checked against PyPSA's BODF entry by
+entry, with an assertion that enough entries differ from ±1 for the fixture to
+discriminate.
 
 The refusal belongs to the **outage column**, not the whole matrix, and getting
 that wrong made the module far less usable than the contract said. Validating
@@ -735,6 +750,43 @@ third-party projects, and it would be a native dependency besides.
 
 The `.h5` goldens are still written, so the decision can be revisited against
 real files rather than re-derived.
+
+## Transformers
+
+Transformers are modelled rather than refused, in all three L2 modules.
+
+The per-unit base differs by component, and that is the whole reason they were
+refused:
+
+```
+Line:        z_pu = z / v_nom²         susceptance = v_nom² / z
+Transformer: z_pu = z / s_nom          susceptance = s_nom / (z · tap_ratio)
+             z_pu_eff = z_pu · tap_ratio
+```
+
+The difference is not a rounding matter. On `scigrid-de` a transformer comes out
+at 20000 against a line's 3707 — a factor of five — and on a 380 kV unit rated
+500 MVA it is six orders of magnitude. Reusing the line formula gives a feasible
+LP with wrong flows and no diagnostic, which is why refusing was the right call
+until there was a golden.
+
+`transformer-levels` is that golden: two voltage levels, a line at each, and a
+transformer at each end, so the network has a cycle crossing both transformers.
+The cycle matters — in a radial network the flows are fixed by topology and any
+per-unit base reproduces them, so a radial fixture would validate nothing.
+
+**Nominal taps only.** `tap_ratio` folds into the linear models as a plain
+multiplier, exactly as PyPSA does it, so `Cycles.impedance` and the linear flow
+honour it. The AC admittance is different: an off-nominal tap makes `Y`
+asymmetric, and `model = "t"` with a non-zero shunt needs a wye–delta conversion
+before `Y` is built at all. Both are refused in `Admittance` rather than
+approximated. `scigrid-de`'s 96 transformers all sit at `tap_ratio = 1` with
+`b = g = 0`, so the T-model path there is inert.
+
+The shared `Branches` object is now public. Its stated purpose was one definition
+of susceptance across the power-flow modules, and the transformer conversion was
+the case that would have been added to one and not the other — `network-lopf`'s
+cycle constraints read it rather than carrying a third copy.
 
 ## Known gaps
 

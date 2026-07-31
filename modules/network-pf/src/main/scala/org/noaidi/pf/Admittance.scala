@@ -59,12 +59,50 @@ object Admittance:
           val bus1 = table.string("bus1", id)
           (index.get(bus0), index.get(bus1)) match
             case (Some(i), Some(k)) =>
-              val vNom = busTable.float("v_nom", bus0)
-              if !(vNom > 0.0) then
-                throw new Unsupported(
-                  s"bus '$bus0' has v_nom = $vNom, so ${table.spec.name} '$id' has no per-unit base"
-                )
-              val base = vNom * vNom
+              // The per-unit base differs by component: a line is referred to
+              // voltage and a transformer to its own rating. Impedance is
+              // divided by the base and admittance multiplied by it, which is
+              // why `base` appears on both sides below.
+              val base = table.spec.name match
+                case "Line" =>
+                  val vNom = busTable.float("v_nom", bus0)
+                  if !(vNom > 0.0) then
+                    throw new Unsupported(
+                      s"bus '$bus0' has v_nom = $vNom, so ${table.spec.name} '$id' has no " +
+                        "per-unit base"
+                    )
+                  vNom * vNom
+                case "Transformer" =>
+                  val sNom = table.float("s_nom", id)
+                  if !(sNom > 0.0) then
+                    throw new Unsupported(s"Transformer '$id' has s_nom = $sNom, its per-unit base")
+                  // Off-nominal taps and the T-model are refused rather than
+                  // approximated. PyPSA folds `tap_ratio` into `x_pu_eff` for the
+                  // *linear* models, which this module's linear counterpart
+                  // follows, but the AC admittance of an off-nominal transformer
+                  // is an ideal-transformer model that makes Y asymmetric -- not
+                  // a scalar. And `model = "t"` with a non-zero shunt is a
+                  // wye-delta conversion before Y is built at all. No golden has
+                  // either, so neither is written blind.
+                  val tap = Branches.tapRatio(table, id)
+                  if math.abs(tap - 1.0) > 1e-12 then
+                    throw new Unsupported(
+                      s"Transformer '$id' has tap_ratio = $tap; an off-nominal tap changes the AC " +
+                        "admittance by more than a scalar and is not modelled"
+                    )
+                  val shunt = optional(table, "b", id) + optional(table, "g", id)
+                  val isT   = table.static.contains("model") && table.string("model", id) == "t"
+                  if isT && shunt != 0.0 then
+                    throw new Unsupported(
+                      s"Transformer '$id' uses the T model with a non-zero shunt, which PyPSA " +
+                        "converts to an equivalent pi model before building Y; that is not " +
+                        "implemented"
+                    )
+                  sNom
+                case other =>
+                  throw new Unsupported(
+                    s"$other '$id' is a passive branch whose per-unit base is not known here"
+                  )
 
               val rPu = table.float("r", id) / base
               val xPu = table.float("x", id) / base

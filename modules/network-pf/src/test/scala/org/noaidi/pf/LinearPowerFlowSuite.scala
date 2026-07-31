@@ -1,7 +1,7 @@
 package org.noaidi.pf
 
 import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema, Topology}
+import org.noaidi.network.{CsvReader, Network, Role, Schema, Topology}
 
 /** Linear power flow against PyPSA's `n.lpf()`.
   *
@@ -30,7 +30,16 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   // generator marginal costs and a CO2 cap, neither of which is an input to a
   // power flow, so its LPF golden is identical and would add a duplicate run
   // rather than coverage.
-  private val networks = List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc")
+  // `scigrid-de` is deliberately absent, and it is the network this module most
+  // wants: 585 buses, 852 lines and 96 transformers against the nine-bus
+  // fixtures everything else runs on. It cannot be read yet. All 852 of its
+  // lines carry `x = 0` and a *line type*, so the impedance comes from
+  // `LineType` + `length` + `num_parallel`, and PyPSA omits the standard type
+  // library from its export because its own reader repopulates it. Line-type
+  // expansion is the next piece; the transformer conversion this commit adds is
+  // validated on `transformer-levels` instead, which isolates it.
+  private val networks =
+    List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc", "transformer-levels")
 
   private def network(name: String): Network =
     CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
@@ -50,7 +59,12 @@ class LinearPowerFlowSuite extends munit.FunSuite:
     * moment either side reorders.
     */
   private def frameValue(frame: ujson.Value, row: Int, column: String, snapshot: String): Double =
-    val stamp = frame("index")(row).str.replace('T', ' ')
+    // A snapshot label need not be a timestamp: `transformer-levels` indexes by
+    // integers, which arrive as JSON numbers rather than strings.
+    val stamp = (frame("index")(row) match
+      case ujson.Str(v) => v
+      case other        => other.toString
+    ).replace('T', ' ')
     assertEquals(stamp, snapshot.replace('T', ' '), s"golden row $row is not the expected snapshot")
     val index = frame("columns").arr.indexWhere(_.str == column)
     assert(index >= 0, s"golden frame has no column '$column'")
@@ -159,14 +173,19 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       // which a comparison against PyPSA could only report as a diffuse mismatch.
       val n      = network(name)
       val result = LinearPowerFlow.solve(n)
-      val lines  = n.require("Line")
+      // Every passive branch, not only lines. A transformer carries flow the same
+      // way, so summing lines alone made the balance look violated the moment a
+      // network had one -- the test's own blind spot, not the model's.
+      val branches = n.tables.values.filter(t => Role.of(t.spec) == Role.PassiveBranch).toIndexedSeq
 
       n.snapshots.indices.foreach { t =>
         n.require("Bus").ids.foreach { bus =>
           var outflow = 0.0
-          lines.ids.foreach { l =>
-            if lines.string("bus0", l) == bus then outflow += result.flow("Line", l, t)
-            if lines.string("bus1", l) == bus then outflow -= result.flow("Line", l, t)
+          branches.foreach { table =>
+            table.ids.foreach { b =>
+              if table.string("bus0", b) == bus then outflow += result.flow(table.spec.name, b, t)
+              if table.string("bus1", b) == bus then outflow -= result.flow(table.spec.name, b, t)
+            }
           }
           assertEqualsDouble(outflow, result.busPower(bus, t), 1e-6, s"$name snapshot $t, bus $bus")
         }
@@ -349,3 +368,41 @@ class LinearPowerFlowSuite extends munit.FunSuite:
           paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
         }
     }
+
+  test("a transformer is referred to its own rating, not to voltage") {
+    assume(available, "goldens missing")
+    // The conversion transformers were refused for. A transformer's per-unit base
+    // is `s_nom`, a line's is `v_nom^2`, and using the line formula for a
+    // transformer gives a plausible answer rather than a failure -- which is why
+    // it was refused rather than approximated. Asserted directly against the
+    // numbers as well as through the golden comparison above, so the reason is
+    // visible and not buried in a sweep.
+    val n = network("transformer-levels")
+    val expected = lpf("transformer-levels")("transformer_p0")
+
+    n.snapshots.indices.foreach { t =>
+      n.require("Transformer").ids.foreach { id =>
+        assertEqualsDouble(
+          result(n).flow("Transformer", id, t),
+          frameValue(expected, t, id, n.snapshots(t)),
+          1e-6,
+          s"snapshot $t, transformer $id",
+        )
+      }
+    }
+
+    // And the two bases really do differ here, so the comparison is not passing
+    // because they happen to coincide.
+    val transformers = n.require("Transformer")
+    val lines        = n.require("Line")
+    val tByRating    = transformers.float("s_nom", "t1") / transformers.float("x", "t1")
+    val vNom         = n.require("Bus").float("v_nom", "hv1")
+    val tByVoltage   = vNom * vNom / transformers.float("x", "t1")
+    assert(
+      math.abs(tByRating - tByVoltage) / tByVoltage > 0.5,
+      s"the fixture no longer distinguishes the two per-unit bases ($tByRating vs $tByVoltage)",
+    )
+    assert(lines.size > 0)
+  }
+
+  private def result(n: Network): LpfResult = LinearPowerFlow.solve(n)

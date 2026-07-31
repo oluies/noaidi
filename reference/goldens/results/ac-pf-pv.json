@@ -1,4 +1,39 @@
 {
+ "bodf": {
+  "0": {
+   "bodf": [
+    [
+     -1.0,
+     -1.0000000000000007,
+     1.0
+    ],
+    [
+     -1.0000000000000009,
+     -1.0,
+     1.0
+    ],
+    [
+     1.0000000000000007,
+     1.0000000000000004,
+     -1.0
+    ]
+   ],
+   "branches": [
+    [
+     "Line",
+     "l1"
+    ],
+    [
+     "Line",
+     "l2"
+    ],
+    [
+     "Line",
+     "l3"
+    ]
+   ]
+  }
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [
@@ -77,7 +112,18 @@
     []
    ]
   },
-  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set"
+  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  }
  },
  "optimize": {
   "bus_marginal_price": {
@@ -173,7 +219,18 @@
   "objective": 7650.0,
   "objective_constant": 0.0,
   "status": "ok",
-  "total_system_cost": 7650.0
+  "total_system_cost": 7650.0,
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  }
  },
  "pf": {
   "bus_p": {

@@ -182,7 +182,11 @@ lazy val networkModel = project
 // the solution back.
 lazy val networkLopf = project
   .in(file("modules/network-lopf"))
-  .dependsOn(networkModel % "compile->compile;test->test", primaCore)
+  // Depends on network-pf for the outage factors SCLOPF needs. Those are a
+  // power-flow sensitivity, not an optimisation concept, so they belong there --
+  // and having the security-constrained model import them is what keeps one
+  // definition of susceptance and slack across both layers.
+  .dependsOn(networkModel % "compile->compile;test->test", networkPf, primaCore)
   .settings(commonSettings)
   .settings(
     name := "network-lopf",

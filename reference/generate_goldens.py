@@ -212,8 +212,55 @@ def unit_commitment():
     return n
 
 
+def sclopf_triangle():
+    """A meshed triangle whose optimum is set by N-1 security, not by dispatch.
+
+    Purpose-built. `ac-dc-dispatch` cannot be adapted: its capacity comes from
+    the expansion optimum, so at six of ten snapshots every generator sits
+    exactly at its limit with total output equal to total load. There is zero
+    redispatch headroom, and no line rating makes an outage survivable -- SCLOPF
+    on it is infeasible at any transmission scale. Its line 6 is also a bridge,
+    so outaging it islands Frankfurt regardless.
+
+    Three buses in a triangle, so any single line outage leaves the network
+    connected and every contingency is well posed. Generation is deliberately
+    ample (400/300/300 against a peak load of 230) so the binding constraint is
+    security rather than capacity.
+
+    The rating of 150 is chosen, not arbitrary. At 150 the plain LOPF costs 6900,
+    exactly what it costs at 200 -- so the pre-contingency ratings are slack and
+    the ONLY thing separating LOPF from SCLOPF is the contingency constraint.
+    SCLOPF costs 14100. An implementation that dropped the N-1 rows entirely
+    would return 6900, so the fixture cannot be satisfied without them.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    for bus in ("A", "B", "C"):
+        n.add("Bus", bus, v_nom=380.0)
+    n.add("Line", "AB", bus0="A", bus1="B", x=0.1, r=0.0, s_nom=150.0)
+    n.add("Line", "BC", bus0="B", bus1="C", x=0.1, r=0.0, s_nom=150.0)
+    n.add("Line", "AC", bus0="A", bus1="C", x=0.1, r=0.0, s_nom=150.0)
+    n.add("Generator", "cheap", bus="A", p_nom=400.0, marginal_cost=10.0)
+    n.add("Generator", "mid", bus="B", p_nom=300.0, marginal_cost=40.0)
+    n.add("Generator", "dear", bus="C", p_nom=300.0, marginal_cost=90.0)
+    n.add("Load", "lb", bus="B", p_set=[120.0, 140.0, 100.0])
+    n.add("Load", "lc", bus="C", p_set=[110.0, 90.0, 130.0])
+    return n
+
+
+# Which branches each fixture treats as credible outages.
+#
+# Not every branch is a valid contingency: outaging a bridge disconnects the
+# network and the post-contingency flow is undefined rather than large, which is
+# why ac-dc-meshed's line 6 (Bremen-Frankfurt) can never appear here.
+SCLOPF_OUTAGES = {
+    "sclopf-triangle": ["AB", "BC", "AC"],
+}
+
+
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
+    "sclopf-triangle": sclopf_triangle,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
@@ -469,6 +516,30 @@ def capture_network(name: str, build) -> dict:
         # own sub-network handling. Recorded so the absence is visibly PyPSA's
         # rather than an oversight in this script.
         results["pf"] = {"error": f"{type(exc).__name__}: {exc}"}
+
+    # Security-constrained optimisation, for the fixtures that declare
+    # contingencies. Run on a fresh network so the plain solve below is not
+    # seeded by it.
+    if name in SCLOPF_OUTAGES:
+        print(f"  {name}: security-constrained optimisation")
+        try:
+            sc = build()
+            outages = SCLOPF_OUTAGES[name]
+            status, condition = sc.optimize.optimize_security_constrained(
+                branch_outages=outages
+            )
+            if status != "ok" or condition != "optimal":
+                raise RuntimeError(f"solve did not converge: status={status} condition={condition}")
+            results["sclopf"] = {
+                "status": status,
+                "condition": condition,
+                "branch_outages": list(outages),
+                "objective": jsonable(sc.objective),
+                "generator_p": frame_to_json(sc.generators_t.p),
+                "line_p0": frame_to_json(sc.lines_t.p0),
+            }
+        except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+            results["sclopf"] = {"error": f"{type(exc).__name__}: {exc}"}
 
     print(f"  {name}: optimisation")
     try:

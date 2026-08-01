@@ -4442,6 +4442,209 @@
     }
    ]
   },
+  "storage-cycle": {
+   "components": {
+    "Bus": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "marginal_cost"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt"
+     ],
+     "varying": {
+      "marginal_cost": [
+       "cheap"
+      ]
+     }
+    },
+    "Load": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "bus"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "d"
+      ]
+     }
+    },
+    "StorageUnit": {
+     "count": 3,
+     "exported_columns": [
+      "name",
+      "bus",
+      "p_nom",
+      "marginal_cost",
+      "state_of_charge_initial",
+      "cyclic_state_of_charge",
+      "max_hours",
+      "efficiency_store",
+      "efficiency_dispatch",
+      "standing_loss"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "q_set",
+      "p_dispatch_set",
+      "p_store_set",
+      "sign",
+      "carrier",
+      "spill_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "marginal_cost_storage",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "active",
+      "build_year",
+      "lifetime",
+      "state_of_charge_initial",
+      "state_of_charge_initial_per_period",
+      "state_of_charge_set",
+      "cyclic_state_of_charge",
+      "cyclic_state_of_charge_per_period",
+      "max_hours",
+      "efficiency_store",
+      "efficiency_dispatch",
+      "standing_loss",
+      "inflow",
+      "p_nom_opt"
+     ],
+     "varying": {
+      "inflow": [
+       "hydro"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "name": "storage-cycle",
+   "snapshots": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "b"
+     ],
+     "carrier": "AC",
+     "slack_bus": "b"
+    }
+   ]
+  },
   "storage-hvdc": {
    "components": {
     "Bus": {

@@ -1,0 +1,3 @@
+name,bus,control,p_nom,marginal_cost
+cheap,b,Slack,120.0,0.0
+peak,b,PQ,400.0,200.0

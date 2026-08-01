@@ -323,9 +323,10 @@ Not implemented, and rejected rather than mis-solved in every case:
 
 - **Capacity expansion.** `p_nom_extendable` poses a strictly larger problem with
   investment variables and capital costs.
-- **Storage.** A storage unit's energy balance couples consecutive snapshots,
-  which dispatch alone cannot represent. `network-pf` handles the same networks
-  fine, because there dispatch is an input rather than an unknown.
+- **`Store`.** Not `StorageUnit`, which is implemented — see *Storage* below. A
+  Store is a different component rather than the same one renamed: one signed
+  power variable against a StorageUnit's four, and `e_nom` for its capacity
+  rather than `p_nom · max_hours`. No golden here has one.
 - **Off-nominal tap ratios and the transformer T model, in the AC path only.**
   Transformers themselves are modelled — see *Transformers* below — but an
   off-nominal tap makes `Y` asymmetric rather than scaled, and `model = "t"` with
@@ -839,6 +840,87 @@ pinned.
 The line shunt `b` only enters an AC solve, so `standard-types` also carries a
 `pf` golden — zeroing that term moves a 380 kV bus voltage by 2.7%, which is the
 measurement that says the term is load-bearing rather than decorative.
+
+## Storage, and the first realistic LOPF
+
+`StorageUnit` is modelled, and with it `scigrid-de` solves an optimal power flow
+— 60,552 variables and 23,688 rows, against the few hundred every other fixture
+poses. Storage was the only thing blocking it: that network has no extendable
+component, no committable generator and no global constraint.
+
+Storage is the **only** constraint in this model that couples two snapshots.
+Everything else is separable — a generator's output at 3am constrains nothing at
+4am — so a dispatch model without it is really a sequence of independent LPs
+sharing one matrix. The energy balance is what makes the horizon a single
+problem:
+
+```
+soc(t) = (1 − standing_loss)^eh · soc(t−1)
+       + eh · efficiency_store · p_store(t)
+       − eh / efficiency_dispatch · p_dispatch(t)
+       − eh · spill(t)
+       + eh · inflow(t)
+```
+
+**Four variables per unit, not one.** Charging and discharging meet the state of
+charge through *different* efficiencies, so a single signed power variable cannot
+carry both — it would be exact only when both efficiencies are 1, which no real
+unit has. `spill` exists so inflow that will not fit has somewhere to go; without
+it a unit whose inflow exceeds its remaining capacity makes the LP **infeasible**
+rather than merely different, which is how that term is tested.
+
+At `t = 0` the previous state of charge is either the *last* snapshot's variable
+(cyclic) or absent, with `state_of_charge_initial` moving to the right-hand side.
+Those are different constraint matrices rather than different numbers.
+
+### Why `storage-cycle` exists when `scigrid-de` already has 38 units
+
+Because those 38 exercise one path. They are all non-cyclic with no inflow, no
+standing loss, a zero initial state of charge, and snapshot weightings of exactly
+1 — so they validate the plain balance and nothing around it.
+
+Two design points in the purpose-built fixture were arrived at by getting them
+wrong first:
+
+- **The optimum has to be unique.** The first version gave the cheap generator a
+  flat marginal cost, so charging at one snapshot cost exactly what charging at
+  another did. Prima and HiGHS agreed on the objective to 6e-10 and disagreed on
+  the whole trajectory — a degenerate optimum, useless as a golden. Giving the
+  generator a per-snapshot price made it unique, and the two now agree cell for
+  cell.
+- **A flag that is set but never binds tests nothing.** The first version's
+  spills all came out zero, and its cyclic unit ended the horizon empty — which
+  makes its wrap indistinguishable from a non-cyclic unit starting at zero. The
+  fixture now forces at least 8.98 MW of spill by construction, and its cyclic
+  unit ends holding 120 MWh and discharges it at the first snapshot. A separate
+  test asserts both, so the fixture cannot quietly stop discriminating.
+
+The three snapshot weightings are deliberately three different numbers.
+PyPSA scales the energy balance by `snapshot_weightings.stores` and the objective
+by `snapshot_weightings.objective`; every other fixture in the repository holds
+both at 1.0, where confusing the two is exactly invisible.
+
+### Prima on a 60,000-variable LP: it converges, slowly
+
+The first large power-system LP this solver has met, and the numbers are worth
+recording because they bear directly on the GPU case:
+
+| tolerance | iterations | wall clock | relative objective error |
+| --- | --- | --- | --- |
+| 1e-4 | 14,848 | 12.7 s | −1.05e-04 (Optimal) |
+| 1e-6 | 100,000 | 50 s | 4.06e-06 (iteration limit) |
+| 1e-6 | 200,000 | 91 s | 1.29e-06 (iteration limit) |
+| 1e-6 | 281,792 | 145 s | 2.66e-07 (Optimal) |
+
+So it is a first-order method being slow on a large problem, not a stall — the
+error falls monotonically and it does terminate. The default 100,000-iteration
+limit is simply not enough here. The suite gates at 1e-4, which is 13 s; 145 s on
+every commit is not worth the extra digits.
+
+This is also the concrete case for the GPU backend. 281,792 iterations at two
+sparse matrix-vector products each is precisely the workload `Kernels` exists to
+move, and it is the first instance in this repository large enough for the
+question to matter.
 
 ### What `scigrid-de` cannot gate
 

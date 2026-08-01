@@ -259,6 +259,61 @@
   "objective": 1300.0,
   "objective_constant": 0.0,
   "status": "ok",
+  "storage_p": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_p_dispatch": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_p_store": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_spill": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_state_of_charge": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
   "total_system_cost": 1300.0,
   "transformer_p0": {
    "columns": [],

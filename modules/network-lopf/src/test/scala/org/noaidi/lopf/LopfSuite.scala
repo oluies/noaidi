@@ -227,15 +227,158 @@ class LopfSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("extendable"), failure.getMessage)
   }
 
-  test("a network with storage is rejected") {
+  test("storage-hvdc is still rejected, and for capacity expansion rather than storage") {
     assume(available, "goldens missing")
-    // storage-hvdc carries StorageUnits, whose energy balance couples
-    // consecutive snapshots — dispatch alone cannot represent that.
+    // Worth pinning the *reason*. Storage was what blocked this fixture until
+    // now, so the obvious reading of a continued rejection is that storage is
+    // still missing. It is not: 10 of its 12 generators, 5 of 6 lines and 5 of 6
+    // storage units are extendable, so it poses a capacity expansion problem and
+    // would be rejected with storage fully implemented -- which it now is.
     val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(network("storage-hvdc"), params))
+    assert(failure.getMessage.contains("extendable"), failure.getMessage)
     assert(
-      failure.getMessage.contains("StorageUnit") || failure.getMessage.contains("extendable"),
-      failure.getMessage,
+      !failure.getMessage.contains("inter-snapshot"),
+      s"rejected for storage, which is implemented: ${failure.getMessage}",
     )
+  }
+
+  test("a Store is refused rather than solved as a StorageUnit") {
+    assume(available, "goldens missing")
+    // The two are not the same component renamed. A Store has one signed power
+    // variable where a StorageUnit has four, and its capacity is `e_nom` rather
+    // than `p_nom * max_hours`. No golden here has one, so building it from the
+    // formula alone would be untested code that returns plausible numbers.
+    val n = withExtraFile(
+      "storage-cycle",
+      "stores.csv",
+      "name,bus,e_nom,e_initial\ns,b,100.0,20.0\n",
+    )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("Store"), failure.getMessage)
+  }
+
+  test("storage dispatch, state of charge and spill match PyPSA's") {
+    assume(available, "goldens missing")
+    // The whole storage model against PyPSA, cell by cell. All five frames are
+    // compared and not just the net injection: `p = p_dispatch - p_store`, so an
+    // implementation with the two efficiencies transposed can reproduce every
+    // bus balance exactly and still hold a different amount of energy at every
+    // snapshot.
+    val expected = results("storage-cycle")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("storage-cycle")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val units = n.require("StorageUnit")
+    val frames = Seq[(String, (String, Int) => Double)](
+      "storage_state_of_charge" -> result.stateOfCharge,
+      "storage_p_dispatch"      -> result.discharging,
+      "storage_p_store"         -> result.charging,
+      "storage_spill"           -> result.spill,
+      "storage_p"               -> ((id, t) => result.dispatch("StorageUnit", id, t)),
+    )
+
+    frames.foreach { (name, read) =>
+      val frame = expected(name)
+      n.snapshots.indices.foreach { t =>
+        units.ids.foreach { id =>
+          assertEqualsDouble(read(id, t), frameValue(frame, t, id), 1e-4, s"$name, $id at snapshot $t")
+        }
+      }
+    }
+  }
+
+  test("the fixture's storage flags are load-bearing, not merely present") {
+    assume(available, "goldens missing")
+    // Guarding the guard. Each of these could be set in the fixture and change
+    // nothing about the answer, in which case the comparison above would pass
+    // for an implementation that ignored the flag entirely. The first attempt at
+    // this fixture had exactly that problem twice over -- every spill came out
+    // zero, and the cyclic unit ended its horizon empty, which makes its wrap
+    // indistinguishable from a non-cyclic unit starting from zero.
+    val expected = results("storage-cycle")("optimize")
+    val soc      = expected("storage_state_of_charge")
+    val spill    = expected("storage_spill")
+    val last     = network("storage-cycle").snapshots.length - 1
+
+    // Cyclic: the unit ends holding energy, and that energy is what it starts
+    // with. Under a non-cyclic reading it would begin at zero and could not
+    // discharge at the first snapshot, which it does.
+    val endsCharged = frameValue(soc, last, "cyclic")
+    assert(endsCharged > 1.0, s"the cyclic unit ends at $endsCharged, so its wrap carries nothing")
+    assertEqualsDouble(
+      frameValue(expected("storage_p_dispatch"), 0, "cyclic"),
+      34.0,
+      1e-3,
+      "the cyclic unit does not discharge at the first snapshot, so the wrap is not observable",
+    )
+
+    // Spill: forced, not optional. Inflow arrives faster than the unit can hold
+    // or discharge it.
+    val spilled = (0 to last).map(frameValue(spill, _, "hydro")).max
+    assert(spilled > 1.0, s"no spill anywhere ($spilled), so the spill variable is untested")
+  }
+
+  test("scigrid-de solves at scale, which storage is what unblocked") {
+    assume(available, "goldens missing")
+    // 60,552 variables and 23,688 rows: two orders of magnitude past every other
+    // fixture, and the first realistic network this module has been able to
+    // build at all. Storage was the only thing blocking it -- it has no
+    // extendable component, no committable generator and no global constraint.
+    //
+    // Solved at 1e-4 rather than the suite's 1e-9, and that is a real limitation
+    // rather than a convenience. Prima reaches 1e-4 in 14,848 iterations and
+    // about 13 s here; reaching 1e-6 takes 281,792 iterations and about 145 s,
+    // which is too slow to run on every commit. It does converge -- 100,000
+    // iterations leaves it at 4.06e-06 relative, 200,000 at 1.29e-06 -- so this
+    // is a first-order method being slow on a large problem, not a stall. NOTES
+    // records the progression.
+    //
+    // Only the objective is asserted. The dispatch cannot be: PyPSA's own
+    // Kirchhoff cycle basis differs between runs, and the two optima it reaches
+    // differ by up to 750 MW at individual generators for the same cost. The
+    // golden says so in a `dispatch_note` beside those frames.
+    val expected = results("scigrid-de")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(
+      expected.obj.contains("dispatch_note"),
+      "the golden no longer warns that this network's dispatch is degenerate",
+    )
+
+    val n     = network("scigrid-de")
+    val model = Lopf.build(n)
+    assert(model.problem.numVariables > 50_000, s"only ${model.problem.numVariables} variables")
+
+    val loose  = PdhgParams(epsAbs = 1e-4, epsRel = 1e-4, maxIterations = 100_000)
+    val result = Lopf.solve(n, loose)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 2e-4 * math.abs(target), s"against PyPSA's $target")
+  }
+
+  test("a storage set point is refused rather than ignored") {
+    assume(available, "goldens missing")
+    // Dropping a fixing constraint leaves the trajectory free, which is a
+    // strictly cheaper problem returning `Optimal` -- the worst shape of wrong
+    // answer. `storage-hvdc` carries one of these, which is why the refusal is
+    // explicit.
+    val n = mutate(
+      "storage-cycle",
+      "storage_units.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",state_of_charge_set") ::
+          lines.tail.map(_ + ",50.0") mkString "\n"
+      },
+    )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("state_of_charge_set"), failure.getMessage)
   }
 
   test("the dual solution is optimal, though not the same one PyPSA reports") {

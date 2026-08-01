@@ -101,6 +101,16 @@ object Lopf:
 
     val generators = attached.filter(_.spec.name == "Generator")
     val loadTables = attached.filter(_.spec.name == "Load")
+    val storage    = attached.find(_.spec.name == "StorageUnit")
+
+    storage.foreach(Storage.reject)
+
+    // Elapsed hours per snapshot, from the `stores` weighting rather than the
+    // `objective` one. They are separate columns of snapshots.csv and PyPSA
+    // reads them for different purposes -- one scales energy, the other cost.
+    // Every fixture but `storage-cycle` holds both at 1.0, so the confusion is
+    // invisible everywhere else.
+    def elapsedHours(t: Int): Double = network.weighting("stores", t)
 
     snapshots.foreach { t =>
       // The objective weighting scales this snapshot's cost. It is not
@@ -140,6 +150,31 @@ object Lopf:
           declare(branch.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
         }
       }
+
+      // Four variables per storage unit, not one. Charging and discharging are
+      // separate non-negative variables because they meet the state of charge
+      // through different efficiencies -- a single signed variable cannot carry
+      // `· eff_store` one way and `/ eff_dispatch` the other. `spill` exists so
+      // inflow that will not fit has somewhere to go; without it a unit whose
+      // inflow exceeds its remaining capacity makes the LP infeasible rather
+      // than merely different.
+      storage.foreach { s =>
+        s.ids.foreach { id =>
+          val pNom = s.float("p_nom", id)
+          declare(Storage.Dispatch, id, t, 0.0, pNom * s.valueAt("p_max_pu", id, t),
+                  s.valueAt("marginal_cost", id, t) * weight): Unit
+          // `p_min_pu` is negative for a storage unit -- it is how far the unit
+          // may run *backwards* -- so the charging bound is its negation.
+          declare(Storage.Store, id, t, 0.0, pNom * -s.valueAt("p_min_pu", id, t), 0.0): Unit
+          declare(Storage.SoC, id, t, 0.0, pNom * s.float("max_hours", id),
+                  s.valueAt("marginal_cost_storage", id, t) * weight): Unit
+          // Bounded by the inflow itself, so a snapshot with none gets [0, 0] --
+          // which is what PyPSA's masking amounts to, without a second shape of
+          // variable map to carry it.
+          declare(Storage.Spill, id, t, 0.0, math.max(0.0, s.valueAt("inflow", id, t)),
+                  s.valueAt("spill_cost", id, t) * weight): Unit
+        }
+      }
     }
 
     val builder = LpProblem.builder(bounds.length)
@@ -157,6 +192,16 @@ object Lopf:
         generators.foreach { g =>
           g.ids.filter(id => g.string("bus", id) == bus).foreach { id =>
             terms += ((columns((g.spec.name, id, t)), 1.0))
+          }
+        }
+
+        // A storage unit injects what it discharges and withdraws what it
+        // charges. `spill` never reaches the bus -- it is inflow leaving the
+        // system unused, not power.
+        storage.foreach { s =>
+          s.ids.filter(id => s.string("bus", id) == bus).foreach { id =>
+            terms += ((columns((Storage.Dispatch, id, t)), 1.0))
+            terms += ((columns((Storage.Store, id, t)), -1.0))
           }
         }
 
@@ -183,6 +228,59 @@ object Lopf:
         builder.equalityConstraint(terms.toSeq, demand)
         balanceRows((bus, t)) = rowIndex
         rowIndex += 1
+      }
+    }
+
+    // The storage energy balance, which is the only constraint in this model
+    // that couples two snapshots. Everything else is separable by snapshot; this
+    // is what makes a storage network a single LP over the horizon rather than
+    // one LP per snapshot.
+    //
+    //   soc(t) = eff_stand · soc(t-1)
+    //          + eh · eff_store · p_store(t)
+    //          - eh / eff_dispatch · p_dispatch(t)
+    //          - eh · spill(t)
+    //          + eh · inflow(t)
+    //
+    // with `eff_stand = (1 - standing_loss)^eh`. Written with every variable on
+    // the left and the constants on the right, as an equality.
+    //
+    // `soc(t-1)` is the previous snapshot's variable; at t = 0 it is either the
+    // *last* snapshot's variable (cyclic) or absent, with `state_of_charge_initial`
+    // moving to the right-hand side. Those are different constraint matrices, not
+    // different numbers, which is why `storage-cycle` carries one unit of each.
+    storage.foreach { s =>
+      s.ids.foreach { id =>
+        val effDispatch = (t: Int) => s.valueAt("efficiency_dispatch", id, t)
+        val effStore    = (t: Int) => s.valueAt("efficiency_store", id, t)
+        val cyclic      = Storage.isCyclic(s, id)
+        val initial     = s.float("state_of_charge_initial", id)
+
+        snapshots.foreach { t =>
+          val eh = elapsedHours(t)
+          if !(effDispatch(t) > 0.0) then
+            throw new UnsupportedNetwork(
+              s"StorageUnit '$id' has efficiency_dispatch = ${effDispatch(t)} at snapshot $t, " +
+                "which the energy balance divides by"
+            )
+
+          val standing  = s.valueAt("standing_loss", id, t)
+          val effStand  = math.pow(1.0 - standing, eh)
+          val terms     = mutable.ArrayBuffer.empty[(Int, Double)]
+
+          terms += ((columns((Storage.SoC, id, t)), 1.0))
+          terms += ((columns((Storage.Dispatch, id, t)), eh / effDispatch(t)))
+          terms += ((columns((Storage.Store, id, t)), -eh * effStore(t)))
+          terms += ((columns((Storage.Spill, id, t)), eh))
+
+          val previous = if t > 0 then Some(t - 1) else if cyclic then Some(snapshots.last) else None
+          previous.foreach(p => terms += ((columns((Storage.SoC, id, p)), -effStand)))
+
+          // Inflow is a rate, so it is energy only after multiplying by the
+          // elapsed hours -- the same scaling the dispatch terms get.
+          val rhs = eh * s.valueAt("inflow", id, t) + (if previous.isEmpty then initial else 0.0)
+          builder.equalityConstraint(terms.toSeq, rhs)
+        }
       }
     }
 
@@ -321,15 +419,16 @@ object Lopf:
           "dispatch would answer a different question."
       )
 
-    // Storage and stores carry state across snapshots, which dispatch alone
-    // cannot represent -- their energy balance couples consecutive snapshots.
-    Seq("StorageUnit", "Store").foreach { component =>
-      network.table(component).foreach { table =>
-        if table.size > 0 then
-          throw new UnsupportedNetwork(
-            s"network has ${table.size} $component(s); inter-snapshot storage balance is not implemented"
-          )
-      }
+    // `Store` is a separate component with its own energy balance -- one signed
+    // power variable against a StorageUnit's four, and `e_nom` rather than
+    // `p_nom · max_hours` for its capacity. No golden here has one, so it is
+    // refused rather than written from the formula alone.
+    network.table("Store").foreach { table =>
+      if table.size > 0 then
+        throw new UnsupportedNetwork(
+          s"network has ${table.size} Store(s); only StorageUnit is implemented, and a Store's " +
+            "energy balance is a different constraint rather than the same one renamed"
+        )
     }
 
   /** Reject component classes the builder does not model.
@@ -342,7 +441,7 @@ object Lopf:
   private def rejectUnhandled(network: Network): Unit =
     val handled = Set("Generator", "Load", "Line", "Transformer", "Link", "Bus",
                       "Carrier", "GlobalConstraint", "SubNetwork", "LineType",
-                      "TransformerType", "Shape")
+                      "TransformerType", "Shape", "StorageUnit")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then
       throw new UnsupportedNetwork(
@@ -390,9 +489,33 @@ final case class LopfResult(
   /** Total cost, which for a dispatch problem is the objective. */
   def objective: Double = solution.objectiveValue
 
-  /** Dispatch of one entity at one snapshot. */
+  /** Dispatch of one entity at one snapshot.
+    *
+    * For a `StorageUnit` this is the net injection `p_dispatch − p_store`, which
+    * is what PyPSA's `storage_units_t.p` holds — the unit has no single dispatch
+    * variable, and returning either half alone would report a charging unit as
+    * idle.
+    */
   def dispatch(component: String, entity: String, snapshot: Int): Double =
-    solution.primal(model.map.column(component, entity, snapshot))
+    if component == "StorageUnit" then
+      storage(Storage.Dispatch, entity, snapshot) - storage(Storage.Store, entity, snapshot)
+    else solution.primal(model.map.column(component, entity, snapshot))
+
+  /** A storage unit's state of charge at the '''end''' of a snapshot.
+    *
+    * PyPSA's convention, and the one the energy balance is written in: the value
+    * recorded against snapshot `t` is what remains after that snapshot's
+    * charging and discharging, not what was there before it.
+    */
+  def stateOfCharge(entity: String, snapshot: Int): Double =
+    storage(Storage.SoC, entity, snapshot)
+
+  def charging(entity: String, snapshot: Int): Double   = storage(Storage.Store, entity, snapshot)
+  def discharging(entity: String, snapshot: Int): Double = storage(Storage.Dispatch, entity, snapshot)
+  def spill(entity: String, snapshot: Int): Double      = storage(Storage.Spill, entity, snapshot)
+
+  private def storage(variable: String, entity: String, snapshot: Int): Double =
+    solution.primal(model.map.column(variable, entity, snapshot))
 
   /** Marginal price at a bus: the dual of its balance constraint.
     *

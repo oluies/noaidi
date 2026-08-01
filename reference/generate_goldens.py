@@ -250,6 +250,71 @@ def transformer_levels():
     return n
 
 
+def storage_cycle():
+    """Storage that has to be arbitraged, with every flag `scigrid-de` leaves off.
+
+    `scigrid-de` is the network storage is being implemented for -- it is the
+    only thing standing between that network and LOPF -- but it exercises one
+    path. Its 38 pumped-hydro units are all non-cyclic with no inflow, no
+    standing loss, a zero initial state of charge, and snapshot weightings of
+    exactly 1. So it validates the plain energy balance and nothing around it.
+
+    This one is built for the rest:
+
+      - `battery` is non-cyclic with a **non-zero initial state of charge** and a
+        standing loss, so the `(1 - standing_loss)^elapsed_hours` factor and the
+        `+ soc_initial` on the first snapshot both bind.
+      - `cyclic` wraps: its first snapshot's previous state is its *last*
+        snapshot's, which is a different constraint matrix rather than a
+        different number, and is the case an implementation is most likely to
+        get by writing `soc(-1) = 0`.
+      - `hydro` has inflow, and at the second snapshot 180 MWh arrives into a
+        unit already at its 100 MWh cap which can discharge at most 153 MWh, so
+        **spilling is forced** -- at least 8.98 MW of it. A model without a spill
+        variable is infeasible there rather than merely different, which is the
+        strongest form this check can take. The first attempt at this fixture had
+        inflow that the unit could simply discharge, and every spill came out
+        zero.
+
+    The weightings are deliberately three different numbers. PyPSA scales the
+    energy balance by `snapshot_weightings.stores` and the objective by
+    `snapshot_weightings.objective`, and every other fixture in this repository
+    holds both at 1.0 -- where confusing the two is exactly invisible. Here
+    stores is 3 and objective is 2, so reading the wrong column changes the
+    answer.
+
+    Efficiencies are distinct and none is 1: charging and discharging enter the
+    balance on opposite sides (`* eff_store` against `/ eff_dispatch`), and equal
+    values would let a transposed pair pass.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(6))
+    # Three different numbers, on purpose -- see the docstring.
+    n.snapshot_weightings.loc[:, "stores"] = 3.0
+    n.snapshot_weightings.loc[:, "objective"] = 2.0
+    n.snapshot_weightings.loc[:, "generators"] = 1.0
+
+    n.add("Bus", "b", v_nom=110.0)
+    # Cheap capacity well under peak demand, so the expensive unit sets the price
+    # unless storage moves energy into the peak. That is what makes the state of
+    # charge load-bearing rather than free.
+    n.add("Generator", "cheap", bus="b", p_nom=120.0,
+          marginal_cost=[10.0, 11.0, 17.0, 15.0, 13.0, 19.0])
+    n.add("Generator", "peak", bus="b", p_nom=400.0, marginal_cost=200.0)
+    n.add("Load", "d", bus="b", p_set=[240.0, 60.0, 90.0, 200.0, 70.0, 65.0])
+
+    n.add("StorageUnit", "battery", bus="b", p_nom=60.0, max_hours=4.0,
+          efficiency_store=0.90, efficiency_dispatch=0.95,
+          state_of_charge_initial=50.0, standing_loss=0.02, marginal_cost=1.0)
+    n.add("StorageUnit", "cyclic", bus="b", p_nom=40.0, max_hours=3.0,
+          cyclic_state_of_charge=True,
+          efficiency_store=0.95, efficiency_dispatch=0.85, marginal_cost=4.0)
+    n.add("StorageUnit", "hydro", bus="b", p_nom=50.0, max_hours=2.0,
+          efficiency_store=0.80, efficiency_dispatch=0.98,
+          inflow=[30.0, 200.0, 0.0, 40.0, 0.0, 0.0], marginal_cost=2.0)
+    return n
+
+
 def standard_types_network():
     """Impedance that exists nowhere in the exported files, only in a type name.
 
@@ -430,6 +495,7 @@ NETWORKS = {
     "lodf-mesh": lodf_mesh,
     "transformer-levels": transformer_levels,
     "standard-types": standard_types_network,
+    "storage-cycle": storage_cycle,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
@@ -830,6 +896,17 @@ def capture_network(name: str, build) -> dict:
             "global_constraint_mu": {
                 str(k): jsonable(v) for k, v in m.global_constraints.get("mu", {}).items()
             },
+            # Storage state, which is the only part of a dispatch that is not a
+            # function of its own snapshot. Recorded as all five frames rather
+            # than just the net `p`, because `p = p_dispatch - p_store` and an
+            # implementation can reproduce the net injection at every snapshot
+            # while getting the charge/discharge split -- and therefore the
+            # efficiencies and the whole trajectory -- wrong.
+            "storage_state_of_charge": frame_to_json(m.storage_units_t.state_of_charge),
+            "storage_p_dispatch": frame_to_json(m.storage_units_t.p_dispatch),
+            "storage_p_store": frame_to_json(m.storage_units_t.p_store),
+            "storage_spill": frame_to_json(m.storage_units_t.spill),
+            "storage_p": frame_to_json(m.storage_units_t.p),
         }
         if name in DEGENERATE_DISPATCH:
             results["optimize"]["dispatch_note"] = DEGENERATE_DISPATCH[name]

@@ -321,8 +321,11 @@ That 12.7% spread is what a silent drop would have cost, and it is now a golden.
 
 Not implemented, and rejected rather than mis-solved in every case:
 
-- **Capacity expansion.** `p_nom_extendable` poses a strictly larger problem with
-  investment variables and capital costs.
+- **Annuitised and modular capacity.** Capacity expansion itself is implemented —
+  see *Capacity expansion* below — but `overnight_cost` is annuitised over
+  `lifetime` at `discount_rate`, and `p_nom_mod` makes capacity an integer number
+  of blocks. Its default is NaN rather than zero, so it cannot be handled by
+  falling back to `capital_cost`.
 - **`Store`.** Not `StorageUnit`, which is implemented — see *Storage* below. A
   Store is a different component rather than the same one renamed: one signed
   power variable against a StorageUnit's four, and `e_nom` for its capacity
@@ -840,6 +843,63 @@ pinned.
 The line shunt `b` only enters an AC solve, so `standard-types` also carries a
 `pf` golden — zeroing that term moves a 380 kV bus voltage by 2.7%, which is the
 measurement that says the term is load-bearing rather than decorative.
+
+## Capacity expansion
+
+Capacity is a decision, not a given. `ac-dc-meshed` — the brief's own starting
+network — and `storage-hvdc` both solve, and both were rejected until now. They
+were the last two stock PyPSA examples the port could not touch.
+
+The formulation is small. A capacity variable per extendable entity, bounded by
+`<attr>_min` and `<attr>_max`; the operational limits move out of the dispatch
+column and into two rows per snapshot:
+
+```
+min_pu · capacity  <=  dispatch  <=  max_pu · capacity
+```
+
+which is why the dispatch column itself becomes unbounded. Leaving the old
+`p_nom` bound on it would silently cap the expansion at the capacity the network
+came with — a feasible answer, reported `Optimal`.
+
+### The objective is the cost of the change, and reads negative
+
+This is the part that is not guessable, and it is worth stating in full because
+three different numbers are all called "the objective" somewhere:
+
+```
+objective          = Σ capital_cost · capacity  −  Σ capital_cost · p_nom  +  operating cost
+objective_constant = Σ capital_cost · p_nom                      (extendables only)
+total_system_cost  = objective + objective_constant
+```
+
+PyPSA charges capital cost on the **whole** optimal capacity and then subtracts
+the capital cost of what was already there. So on `ac-dc-meshed` the objective is
+**−3,474,256** against a total system cost of 18,441,021: the optimum builds less
+than the network came with, and the saving is what gets reported.
+
+An implementation that reported the total instead would be out by 21.9 million
+and look entirely plausible. Deleting the subtraction in the port produces
+exactly 18,441,021.478 — the total, to the digit — which is why all three numbers
+are asserted rather than just the first.
+
+Agreement is 3.1e-10 relative on `ac-dc-meshed` and 2.0e-11 on `storage-hvdc`,
+with the chosen capacities compared entity by entity. The objective alone would
+not be enough: a wrong build-out that happens to cost the right amount is exactly
+the failure a single scalar cannot see.
+
+### What `storage-hvdc` needed beyond expansion
+
+One more thing: `state_of_charge_set`, which pins a storage unit's energy at a
+given snapshot. It is sparse — two values across 6 units and 12 snapshots, with
+NaN meaning "not set" rather than zero — and it binds: deleting it moves that
+fixture's objective from 14,670,509 to 14,661,496. I had assumed it did not, and
+wrote that into a comment before a sabotage run showed otherwise.
+
+The three *power* set points (`p_set`, `p_dispatch_set`, `p_store_set`) are still
+refused. They are three different constraints — PyPSA fixes `p_set` on the net
+`p_dispatch − p_store` rather than on either variable — and no golden uses any of
+them.
 
 ## Storage, and the first realistic LOPF
 

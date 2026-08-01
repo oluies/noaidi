@@ -64,9 +64,10 @@ object Lopf:
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
     val network = StandardTypes.expand(input)
-    rejectExtendable(network)
     rejectUnhandled(network)
+    rejectUnmodelledComponents(network)
     rejectDanglingBuses(network)
+    Expansion.reject(network)
 
     val snapshots = network.snapshots.indices
     if snapshots.isEmpty then throw new UnsupportedNetwork("network has no snapshots")
@@ -112,19 +113,52 @@ object Lopf:
     // invisible everywhere else.
     def elapsedHours(t: Int): Double = network.weighting("stores", t)
 
+    // Capacity variables: one per extendable entity for the whole horizon, not
+    // one per snapshot. They are declared before anything else so that a network
+    // with none produces exactly the column layout it did before expansion
+    // existed.
+    val expandable = (passive ++ controllable ++ attached)
+      .map(table => table -> Expansion.extendables(table))
+      .filter((_, ids) => ids.nonEmpty)
+
+    expandable.foreach { (table, ids) =>
+      val attribute = Expansion.nominalAttribute(table.spec.name)
+      ids.foreach { id =>
+        declare(
+          Expansion.capacityKey(table.spec.name),
+          id,
+          Expansion.NoSnapshot,
+          table.float(s"${attribute}_min", id),
+          table.float(s"${attribute}_max", id),
+          Expansion.periodizedCost(table, id),
+        ): Unit
+      }
+    }
+
+    /** Whether this entity's operational bounds come from a variable. */
+    def extendable(table: ComponentTable, id: String): Boolean = Expansion.isExtendable(table, id)
+
     snapshots.foreach { t =>
       // The objective weighting scales this snapshot's cost. It is not
       // decoration: a representative-period study expresses itself entirely
       // through these, and ignoring them silently rescales the objective.
       val weight = network.weighting("objective", t)
 
+      // An extendable entity's limits move out of its column and into two rows
+      // per snapshot, against the capacity variable. So the column itself is
+      // declared unbounded here and constrained below -- PyPSA's formulation,
+      // and leaving a stale `p_nom` bound on it would cap the expansion at the
+      // capacity the network came with.
       generators.foreach { g =>
         g.ids.foreach { id =>
-          val pNom = g.float("p_nom", id)
-          val lo   = pNom * g.valueAt("p_min_pu", id, t)
-          val hi   = pNom * g.valueAt("p_max_pu", id, t)
           val cost = g.valueAt("marginal_cost", id, t) * weight
-          declare(g.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+          if extendable(g, id) then
+            declare(g.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
+          else
+            val pNom = g.float("p_nom", id)
+            val lo   = pNom * g.valueAt("p_min_pu", id, t)
+            val hi   = pNom * g.valueAt("p_max_pu", id, t)
+            declare(g.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
         }
       }
 
@@ -136,18 +170,24 @@ object Lopf:
           // Derated by `s_max_pu`, which every fixture leaves at 1.0 but an n-1
           // study does not: at the ordinary value of 0.7 a bound of plain `s_nom`
           // lets flows run 43% above the real rating.
-          val limit = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
-          declare(branch.spec.name, id, t, -limit, limit, 0.0): Unit
+          if extendable(branch, id) then
+            declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, 0.0): Unit
+          else
+            val limit = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
+            declare(branch.spec.name, id, t, -limit, limit, 0.0): Unit
         }
       }
 
       controllable.foreach { branch =>
         branch.ids.foreach { id =>
-          val pNom = branch.float("p_nom", id)
-          val lo   = pNom * branch.valueAt("p_min_pu", id, t)
-          val hi   = pNom * branch.valueAt("p_max_pu", id, t)
           val cost = branch.valueAt("marginal_cost", id, t) * weight
-          declare(branch.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+          if extendable(branch, id) then
+            declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
+          else
+            val pNom = branch.float("p_nom", id)
+            val lo   = pNom * branch.valueAt("p_min_pu", id, t)
+            val hi   = pNom * branch.valueAt("p_max_pu", id, t)
+            declare(branch.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
         }
       }
 
@@ -160,7 +200,11 @@ object Lopf:
       // than merely different.
       storage.foreach { s =>
         s.ids.foreach { id =>
-          val pNom = s.float("p_nom", id)
+          // All three lower bounds are zero whether or not the unit is
+          // extendable, so only the upper bounds move into rows -- which keeps
+          // the columns bounded below and the problem better conditioned than
+          // making them free would.
+          val pNom = if extendable(s, id) then Double.PositiveInfinity else s.float("p_nom", id)
           declare(Storage.Dispatch, id, t, 0.0, pNom * s.valueAt("p_max_pu", id, t),
                   s.valueAt("marginal_cost", id, t) * weight): Unit
           // `p_min_pu` is negative for a storage unit -- it is how far the unit
@@ -180,6 +224,13 @@ object Lopf:
     val builder = LpProblem.builder(bounds.length)
     bounds.zipWithIndex.foreach { case ((lo, hi), i) => builder.bounds(i, lo, hi) }
     costs.zipWithIndex.foreach { (c, i) => builder.objectiveCoefficient(i, c) }
+
+    // PyPSA charges capital cost on the whole optimal capacity and then
+    // subtracts the capital cost of what already existed, so its reported
+    // objective is the cost of the *change* -- negative on `ac-dc-meshed`, where
+    // the optimum builds less than the network came with. Reporting the total
+    // instead would be out by 21.9 million and look entirely plausible.
+    if expandable.nonEmpty then builder.objectiveOffset(-Expansion.objectiveConstant(network))
 
     // Bus balance: everything injected at a bus must equal everything withdrawn.
     val balanceRows = mutable.LinkedHashMap.empty[(String, Int), Int]
@@ -228,6 +279,34 @@ object Lopf:
         builder.equalityConstraint(terms.toSeq, demand)
         balanceRows((bus, t)) = rowIndex
         rowIndex += 1
+      }
+    }
+
+    // Capacity coupling, two rows per extendable entity per snapshot. This is
+    // where an expansion model differs from a dispatch one: the operational
+    // limits are no longer constants in the column bounds but multiples of a
+    // variable.
+    //
+    //   min_pu · capacity  <=  dispatch  <=  max_pu · capacity
+    //
+    // Emitted after the bus balances on purpose. They are inequalities where the
+    // balances are equalities, and `Sclopf` copies the base model row by row on
+    // the strength of the balance rows coming first.
+    expandable.foreach { (table, ids) =>
+      val component = table.spec.name
+      val capacity  = Expansion.capacityKey(component)
+      ids.foreach { id =>
+        val cap = columns((capacity, id, Expansion.NoSnapshot))
+        snapshots.foreach { t =>
+          Expansion.operationalBounds(table, id, t).foreach { (variable, minPu, maxPu) =>
+            val column = columns((variable, id, t))
+            // `lessThan`/`greaterThan` rather than a range row: the base model's
+            // rows are copied one-for-one by `Sclopf`, which a range row -- one
+            // original row becoming two -- would break.
+            if maxPu.isFinite then builder.lessThan(Seq(column -> 1.0, cap -> -maxPu), 0.0)
+            if minPu.isFinite then builder.greaterThan(Seq(column -> 1.0, cap -> -minPu), 0.0)
+          }
+        }
       }
     }
 
@@ -280,6 +359,14 @@ object Lopf:
           // elapsed hours -- the same scaling the dispatch terms get.
           val rhs = eh * s.valueAt("inflow", id, t) + (if previous.isEmpty then initial else 0.0)
           builder.equalityConstraint(terms.toSeq, rhs)
+
+          // A set point pins the state of charge at this snapshot. It is sparse
+          // by construction -- `storage-hvdc` sets two values across 6 units and
+          // 12 snapshots -- and the absent entries are NaN rather than zero,
+          // which is what distinguishes "not set" from "set to empty".
+          val target = s.valueAt("state_of_charge_set", id, t)
+          if target.isFinite then
+            builder.equalityConstraint(Seq(columns((Storage.SoC, id, t)) -> 1.0), target)
         }
       }
     }
@@ -398,27 +485,12 @@ object Lopf:
     val solution = Pdhg.solve(model.problem, params)
     LopfResult(network, model, solution)
 
-  private def rejectExtendable(network: Network): Unit =
-    val extendable = Seq(
-      ("Generator", "p_nom_extendable"),
-      ("Line", "s_nom_extendable"),
-      ("Link", "p_nom_extendable"),
-      ("StorageUnit", "p_nom_extendable"),
-      ("Store", "e_nom_extendable"),
-    ).flatMap { (component, attribute) =>
-      network.table(component).toSeq.flatMap { table =>
-        if table.spec.attribute(attribute).isEmpty then Seq.empty
-        else table.ids.filter(id => table.bool(attribute, id)).map(id => s"$component '$id'")
-      }
-    }
-
-    if extendable.nonEmpty then
-      throw new UnsupportedNetwork(
-        s"${extendable.size} component(s) are extendable, e.g. ${extendable.take(3).mkString(", ")}. " +
-          "This is a capacity expansion problem; only dispatch is implemented, and solving it as " +
-          "dispatch would answer a different question."
-      )
-
+  /** Reject a component class the builder does not model.
+    *
+    * `Store` is the only one left. Capacity expansion used to be rejected here
+    * too and is now built — see [[Expansion]], which refuses what remains of it.
+    */
+  private def rejectUnmodelledComponents(network: Network): Unit =
     // `Store` is a separate component with its own energy balance -- one signed
     // power variable against a StorageUnit's four, and `e_nom` rather than
     // `p_nom · max_hours` for its capacity. No golden here has one, so it is
@@ -513,6 +585,29 @@ final case class LopfResult(
   def charging(entity: String, snapshot: Int): Double   = storage(Storage.Store, entity, snapshot)
   def discharging(entity: String, snapshot: Int): Double = storage(Storage.Dispatch, entity, snapshot)
   def spill(entity: String, snapshot: Int): Double      = storage(Storage.Spill, entity, snapshot)
+
+  /** The chosen capacity of an entity — PyPSA's `<attr>_opt`.
+    *
+    * The given `p_nom`/`s_nom` for anything not extendable, so a caller can read
+    * it uniformly without first asking which components were expanded. That is
+    * the same convention PyPSA writes into `p_nom_opt`.
+    */
+  def capacity(component: String, entity: String): Double =
+    val table = network.require(component)
+    if !Expansion.isExtendable(table, entity) then
+      table.float(Expansion.nominalAttribute(component), entity)
+    else
+      solution.primal(
+        model.map.column(Expansion.capacityKey(component), entity, Expansion.NoSnapshot)
+      )
+
+  /** Total system cost: the objective plus the capital cost already sunk.
+    *
+    * PyPSA's objective is the cost of the *change* — it charges capital cost on
+    * the whole optimal capacity and subtracts what the network came with — so on
+    * `ac-dc-meshed` it reads −3,474,256 against a system cost of 18,441,021.
+    */
+  def totalSystemCost: Double = objective + Expansion.objectiveConstant(network)
 
   private def storage(variable: String, entity: String, snapshot: Int): Double =
     solution.primal(model.map.column(variable, entity, snapshot))

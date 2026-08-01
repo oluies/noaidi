@@ -219,27 +219,106 @@ class LopfSuite extends munit.FunSuite:
     assertEquals(cycles.size, 2)
   }
 
-  test("a capacity expansion network is rejected rather than mis-solved") {
+  test("an annuitised overnight cost is refused rather than read as a per-unit one") {
     assume(available, "goldens missing")
-    // The stock ac-dc-meshed is extendable. Solving it as dispatch would answer a
-    // different question and silently produce a plausible number.
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(network("ac-dc-meshed"), params))
-    assert(failure.getMessage.contains("extendable"), failure.getMessage)
+    // PyPSA annuitises `overnight_cost` over `lifetime` at `discount_rate` and
+    // scales by the modelled horizon. Reading it as `capital_cost` is wrong by
+    // the annuity factor -- about tenfold on a 25-year asset -- and, since its
+    // default is NaN rather than zero, it cannot be handled by falling back.
+    val n = mutate(
+      "ac-dc-meshed",
+      "generators.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",overnight_cost") :: lines.tail.map(_ + ",1000.0") mkString "\n"
+      },
+    )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("overnight_cost"), failure.getMessage)
   }
 
-  test("storage-hvdc is still rejected, and for capacity expansion rather than storage") {
+  test("a modular capacity is refused rather than solved continuously") {
     assume(available, "goldens missing")
-    // Worth pinning the *reason*. Storage was what blocked this fixture until
-    // now, so the obvious reading of a continued rejection is that storage is
-    // still missing. It is not: 10 of its 12 generators, 5 of 6 lines and 5 of 6
-    // storage units are extendable, so it poses a capacity expansion problem and
-    // would be rejected with storage fully implemented -- which it now is.
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(network("storage-hvdc"), params))
-    assert(failure.getMessage.contains("extendable"), failure.getMessage)
-    assert(
-      !failure.getMessage.contains("inter-snapshot"),
-      s"rejected for storage, which is implemented: ${failure.getMessage}",
+    // `p_nom_mod` makes capacity an integer number of blocks, which is a
+    // mixed-integer problem. Solved continuously it returns 3.7 blocks reporting
+    // `Optimal`.
+    val n = mutate(
+      "ac-dc-meshed",
+      "generators.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",p_nom_mod") :: lines.tail.map(_ + ",100.0") mkString "\n"
+      },
     )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("p_nom_mod"), failure.getMessage)
+  }
+
+  // The two stock expansion examples, which between them are why this exists:
+  // `ac-dc-meshed` is the brief's starting network and `storage-hvdc` couples
+  // expansion to storage. Both were rejected until now.
+  Seq("ac-dc-meshed", "storage-hvdc").foreach { name =>
+    test(s"capacity expansion matches PyPSA's objective and chosen capacities on $name") {
+      assume(available, "goldens missing")
+      val expected = results(name)("optimize")
+      assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+      val n      = network(name)
+      val result = Lopf.solve(n, params)
+      assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+      // All three numbers, because they differ by 21.9 million on `ac-dc-meshed`
+      // and reporting the wrong one would still look plausible. PyPSA's
+      // `objective` is the cost of the *change*: capital cost on the whole
+      // optimal capacity, minus the capital cost of what the network came with.
+      val target = expected("objective").num
+      assertEqualsDouble(result.objective, target, 1e-6 * math.abs(target), s"objective, PyPSA's $target")
+
+      val constant = expected("objective_constant").num
+      assertEqualsDouble(
+        result.totalSystemCost - result.objective,
+        constant,
+        1e-6 * math.abs(constant),
+        s"objective_constant, PyPSA's $constant",
+      )
+      assertEqualsDouble(
+        result.totalSystemCost,
+        expected("total_system_cost").num,
+        1e-6 * math.abs(expected("total_system_cost").num),
+        "total system cost",
+      )
+
+      // And the capacities themselves, which are the answer an expansion problem
+      // is asked for. Matching the objective without them would leave a wrong
+      // build-out that happens to cost the right amount undetected.
+      val capacities = expected("nominal_opt").obj
+      var compared   = 0
+      capacities.foreach { (component, chosen) =>
+        n.table(component).foreach { table =>
+          chosen.obj.foreach { (id, value) =>
+            assertEqualsDouble(
+              result.capacity(component, id),
+              value.num,
+              1e-4 * math.max(1.0, math.abs(value.num)),
+              s"$component '$id' capacity",
+            )
+            compared += 1
+          }
+        }
+      }
+      assert(compared > 10, s"only $compared capacities compared on $name")
+
+      // Not vacuous: something really was expanded away from what the file said.
+      val moved = capacities.exists { (component, chosen) =>
+        n.table(component).exists { table =>
+          chosen.obj.exists { (id, value) =>
+            table.has(id) &&
+            math.abs(value.num - table.float(Expansion.nominalAttribute(component), id)) > 1.0
+          }
+        }
+      }
+      assert(moved, s"$name's optimum equals its given capacity everywhere, so nothing was expanded")
+    }
   }
 
   test("a Store is refused rather than solved as a StorageUnit") {
@@ -362,23 +441,60 @@ class LopfSuite extends munit.FunSuite:
     assertEqualsDouble(result.objective, target, 2e-4 * math.abs(target), s"against PyPSA's $target")
   }
 
-  test("a storage set point is refused rather than ignored") {
+  test("a state-of-charge set point is honoured, and it changes the answer") {
     assume(available, "goldens missing")
-    // Dropping a fixing constraint leaves the trajectory free, which is a
-    // strictly cheaper problem returning `Optimal` -- the worst shape of wrong
-    // answer. `storage-hvdc` carries one of these, which is why the refusal is
-    // explicit.
+    // Built rather than refused, because `storage-hvdc` carries two of them and
+    // dropping a fixing constraint leaves the trajectory free -- a strictly
+    // cheaper problem returning `Optimal`, which is the worst shape of wrong
+    // answer. They bind there: deleting them moves that fixture's objective from
+    // 14,670,509 to 14,661,496.
+    //
+    // Asserted here as well, on a fixture where the effect is large enough to
+    // read, and pinned across every snapshot rather than one.
+    val pinned = 90.0
     val n = mutate(
       "storage-cycle",
       "storage_units.csv",
       text => {
         val lines = text.linesIterator.toList
         (lines.head + ",state_of_charge_set") ::
-          lines.tail.map(_ + ",50.0") mkString "\n"
+          lines.tail.map(row => row + (if row.startsWith("battery,") then s",$pinned" else ",")) mkString "\n"
+      },
+    )
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    n.snapshots.indices.foreach { t =>
+      assertEqualsDouble(result.stateOfCharge("battery", t), pinned, 1e-4, s"battery at snapshot $t")
+    }
+    // The other units are untouched -- a blank cell means "not set", not zero.
+    val free = n.snapshots.indices.map(result.stateOfCharge("cyclic", _)).max
+    assert(free > 1.0, s"the unset unit was pinned too (max soc $free)")
+
+    // And the constraint is not free: pinning costs more than the unconstrained
+    // optimum, which is what says it was actually imposed.
+    val unconstrained = Lopf.solve(network("storage-cycle"), params).objective
+    assert(
+      result.objective > unconstrained + 1.0,
+      s"pinning the state of charge changed nothing (${result.objective} against $unconstrained)",
+    )
+  }
+
+  test("a storage power set point is still refused") {
+    assume(available, "goldens missing")
+    // `p_set` fixes the *net* `p_dispatch - p_store` while `p_dispatch_set` and
+    // `p_store_set` fix them individually -- three different constraints, none
+    // used by any golden here.
+    val n = mutate(
+      "storage-cycle",
+      "storage_units.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",p_set") :: lines.tail.map(_ + ",10.0") mkString "\n"
       },
     )
     val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    assert(failure.getMessage.contains("state_of_charge_set"), failure.getMessage)
+    assert(failure.getMessage.contains("p_set"), failure.getMessage)
   }
 
   test("the dual solution is optimal, though not the same one PyPSA reports") {

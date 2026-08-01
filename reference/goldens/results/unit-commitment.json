@@ -379,6 +379,13 @@
     []
    ]
   },
+  "nominal_opt": {
+   "Generator": {
+    "base": 150.0,
+    "mid": 100.0,
+    "peak": 80.0
+   }
+  },
   "objective": 17000.0,
   "objective_constant": 0.0,
   "status": "ok",

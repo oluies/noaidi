@@ -339,6 +339,22 @@
     []
    ]
   },
+  "nominal_opt": {
+   "Generator": {
+    "peak": 400.0,
+    "slack": 900.0
+   },
+   "Line": {
+    "hv12": 1700.0,
+    "hv23": 3400.0,
+    "hv31": 1700.0,
+    "mv12": 300.0
+   },
+   "Transformer": {
+    "tr1": 160.0,
+    "tr2": 160.0
+   }
+  },
   "objective": 19800.0,
   "objective_constant": 0.0,
   "status": "ok",

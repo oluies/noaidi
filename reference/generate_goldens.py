@@ -477,6 +477,18 @@ SCLOPF_OUTAGES = {
 # spanning the cycle space gives the same feasible set, and both answers cost
 # the same. It does mean the dispatch frames here cannot gate an
 # implementation. The objective and the marginal prices can.
+# PyPSA's `nominal_attrs`: the capacity attribute of each component whose size
+# can be chosen rather than given.
+NOMINAL_ATTRIBUTES = {
+    "Generator": "p_nom",
+    "Line": "s_nom",
+    "Transformer": "s_nom",
+    "Link": "p_nom",
+    "StorageUnit": "p_nom",
+    "Store": "e_nom",
+}
+
+
 DEGENERATE_DISPATCH = {
     "scigrid-de": (
         "one vertex of a degenerate optimal face, not a unique answer: PyPSA's own "
@@ -907,6 +919,20 @@ def capture_network(name: str, build) -> dict:
             "storage_p_store": frame_to_json(m.storage_units_t.p_store),
             "storage_spill": frame_to_json(m.storage_units_t.spill),
             "storage_p": frame_to_json(m.storage_units_t.p),
+            # Chosen capacities, which are the *answer* to an expansion problem
+            # rather than a by-product. Recorded per component as
+            # `<attr>_opt`, and equal to the given `<attr>` wherever nothing is
+            # extendable -- so the block is present for every fixture and an
+            # implementation that quietly stopped expanding would show up here
+            # rather than only in the objective.
+            "nominal_opt": {
+                component: {
+                    str(name): jsonable(value)
+                    for name, value in m.c[component].static[f"{attr}_opt"].items()
+                }
+                for component, attr in NOMINAL_ATTRIBUTES.items()
+                if len(m.c[component].static) > 0
+            },
         }
         if name in DEGENERATE_DISPATCH:
             results["optimize"]["dispatch_note"] = DEGENERATE_DISPATCH[name]

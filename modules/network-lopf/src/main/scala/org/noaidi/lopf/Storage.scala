@@ -54,11 +54,12 @@ object Storage:
   def reject(table: ComponentTable): Unit =
     def refuse(message: String): Nothing = throw new Lopf.UnsupportedNetwork(message)
 
-    // A set point pins the state of charge at a snapshot. `storage-hvdc` carries
-    // one; it is blocked on capacity expansion anyway, so there is no golden to
-    // validate the fixing constraint against and it is refused rather than
-    // written blind.
-    Seq("state_of_charge_set", "p_set", "p_dispatch_set", "p_store_set").foreach { attribute =>
+    // `state_of_charge_set` is built -- see `Lopf.build`. The three power set
+    // points are not: PyPSA fixes `p_set` on the *net* `p_dispatch − p_store`
+    // rather than on either variable, and `p_dispatch_set`/`p_store_set` fix
+    // them individually, so the three are three different constraints. No golden
+    // uses any of them.
+    Seq("p_set", "p_dispatch_set", "p_store_set").foreach { attribute =>
       val set = table.ids.filter { id =>
         val hasSeries = table.series.get(attribute).exists(_.covers(id))
         val hasStatic = table.static.contains(attribute) && table.float(attribute, id).isFinite

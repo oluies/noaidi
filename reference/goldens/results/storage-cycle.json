@@ -265,6 +265,17 @@
     []
    ]
   },
+  "nominal_opt": {
+   "Generator": {
+    "cheap": 120.0,
+    "peak": 400.0
+   },
+   "StorageUnit": {
+    "battery": 60.0,
+    "cyclic": 40.0,
+    "hydro": 50.0
+   }
+  },
   "objective": 31592.698185676945,
   "objective_constant": 0.0,
   "status": "ok",

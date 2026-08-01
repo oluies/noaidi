@@ -256,6 +256,18 @@
     []
    ]
   },
+  "nominal_opt": {
+   "Generator": {
+    "g": 600.0
+   },
+   "Line": {
+    "AB": 500.0,
+    "BC": 500.0,
+    "BD": 500.0,
+    "CA": 500.0,
+    "DC": 500.0
+   }
+  },
   "objective": 1300.0,
   "objective_constant": 0.0,
   "status": "ok",

@@ -266,6 +266,18 @@
     []
    ]
   },
+  "nominal_opt": {
+   "Generator": {
+    "cheap": 400.0,
+    "dear": 300.0,
+    "mid": 300.0
+   },
+   "Line": {
+    "AB": 150.0,
+    "AC": 150.0,
+    "BC": 150.0
+   }
+  },
   "objective": 6900.0,
   "objective_constant": 0.0,
   "status": "ok",

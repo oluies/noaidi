@@ -216,6 +216,17 @@
     []
    ]
   },
+  "nominal_opt": {
+   "Generator": {
+    "g_pv": 200.0,
+    "g_slack": 500.0
+   },
+   "Line": {
+    "l1": 500.0,
+    "l2": 500.0,
+    "l3": 500.0
+   }
+  },
   "objective": 7650.0,
   "objective_constant": 0.0,
   "status": "ok",

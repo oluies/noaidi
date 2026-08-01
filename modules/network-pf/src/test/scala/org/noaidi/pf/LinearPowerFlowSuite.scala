@@ -7,10 +7,13 @@ import org.noaidi.network.{CsvReader, Network, Role, Schema, Topology}
   *
   * These goldens were captured well before this module existed, so nothing here
   * was fitted to them — which is the whole value of having generated them first.
-  * All three networks are checked, and `storage-hvdc` matters in particular: it is
-  * the one fixture LOPF cannot touch, because its storage units couple snapshots.
-  * LPF takes dispatch as given, so storage is no obstacle and the network becomes
-  * usable evidence rather than a rejection test.
+  * Every network with an LPF golden is checked. `storage-hvdc` matters in
+  * particular: it is the one fixture LOPF cannot touch, because its storage
+  * units couple snapshots. LPF takes dispatch as given, so storage is no
+  * obstacle and the network becomes usable evidence rather than a rejection
+  * test. `scigrid-de` matters for a different reason — at 585 buses it is two
+  * orders of magnitude past everything else here, and every impedance in it
+  * comes from a standard type rather than from a file.
   *
   * Angles, line flows and the slack generator's dispatch are all compared. The
   * last of those is the one that catches a slack-selection error: choosing the
@@ -30,22 +33,54 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   // generator marginal costs and a CO2 cap, neither of which is an input to a
   // power flow, so its LPF golden is identical and would add a duplicate run
   // rather than coverage.
-  // `scigrid-de` is deliberately absent, and it is the network this module most
-  // wants: 585 buses, 852 lines and 96 transformers against the nine-bus
-  // fixtures everything else runs on. It cannot be read yet. All 852 of its
-  // lines carry `x = 0` and a *line type*, so the impedance comes from
-  // `LineType` + `length` + `num_parallel`, and PyPSA omits the standard type
-  // library from its export because its own reader repopulates it. Line-type
-  // expansion is the next piece; the transformer conversion this commit adds is
-  // validated on `transformer-levels` instead, which isolates it.
+  // `scigrid-de` is the network this module most wants, and it now runs: 585
+  // buses, 852 lines and 96 transformers against the nine-bus fixtures
+  // everything else uses. It was unreadable until line types existed -- all 852
+  // of its lines carry `x = 0` and a type name, and PyPSA omits the type library
+  // from its export because its own reader repopulates it from the installed
+  // package. Every angle and every flow on it therefore depends on the
+  // expansion; nothing else in the network supplies an impedance at all.
   private val networks =
-    List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc", "transformer-levels")
+    List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc", "transformer-levels",
+      "standard-types", "scigrid-de")
+
+  // Memoised, both of them. `scigrid-de`'s golden is 25 MB of JSON and its
+  // network is 585 buses over 24 snapshots; re-reading and re-solving per test
+  // turned a fast suite into a slow one for no extra coverage.
+  private val networkCache = scala.collection.mutable.Map.empty[String, Network]
+  private val goldenCache  = scala.collection.mutable.Map.empty[String, ujson.Value]
+  private val solved       = scala.collection.mutable.Map.empty[String, LpfResult]
 
   private def network(name: String): Network =
-    CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
+    networkCache.getOrElseUpdate(
+      name,
+      CsvReader.read(goldens.resolve("networks").resolve(name), schema, name),
+    )
 
   private def lpf(name: String): ujson.Value =
-    ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))("lpf")
+    goldenCache.getOrElseUpdate(
+      name,
+      ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))("lpf"),
+    )
+
+  private def solution(name: String): LpfResult =
+    solved.getOrElseUpdate(name, LinearPowerFlow.solve(network(name)))
+
+  /** Column name to position, per golden frame.
+    *
+    * Keyed on the frame's identity rather than by name: on `scigrid-de` a linear
+    * scan of 585 columns for each of 14,040 cells is minutes of string
+    * comparison per test. The goldens are memoised above, so the same instance
+    * comes back each time.
+    */
+  private val columnIndices = java.util.IdentityHashMap[ujson.Value, Map[String, Int]]()
+
+  private def columnIndex(frame: ujson.Value): Map[String, Int] =
+    Option(columnIndices.get(frame)).getOrElse {
+      val built = frame("columns").arr.iterator.map(_.str).zipWithIndex.toMap
+      columnIndices.put(frame, built)
+      built
+    }
 
   private def manifest: ujson.Value =
     ujson.read(Files.readString(goldens.resolve("manifest.json")))
@@ -66,7 +101,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       case other        => other.toString
     ).replace('T', ' ')
     assertEquals(stamp, snapshot.replace('T', ' '), s"golden row $row is not the expected snapshot")
-    val index = frame("columns").arr.indexWhere(_.str == column)
+    val index = columnIndex(frame).getOrElse(column, -1)
     assert(index >= 0, s"golden frame has no column '$column'")
     frame("values")(row)(index) match
       case ujson.Num(v)                             => v
@@ -80,7 +115,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       assert(!expected.obj.contains("error"), s"golden lpf failed: ${expected.obj.get("error")}")
 
       val n      = network(name)
-      val result = LinearPowerFlow.solve(n)
+      val result = solution(name)
       val frame  = expected("bus_v_ang")
 
       // Absolute, in radians: these are O(1e-3), so a relative tolerance on a
@@ -103,7 +138,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       assert(!expected.obj.contains("error"), s"golden lpf failed: ${expected.obj.get("error")}")
 
       val n      = network(name)
-      val result = LinearPowerFlow.solve(n)
+      val result = solution(name)
       val frame  = expected("line_p0")
 
       n.snapshots.indices.foreach { t =>
@@ -150,7 +185,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       assert(!expected.obj.contains("error"), s"golden lpf failed: ${expected.obj.get("error")}")
 
       val n      = network(name)
-      val result = LinearPowerFlow.solve(n)
+      val result = solution(name)
       val frame  = expected("generator_p")
 
       n.snapshots.indices.foreach { t =>
@@ -172,7 +207,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
       // check that would catch a susceptance used in one place and not another,
       // which a comparison against PyPSA could only report as a diffuse mismatch.
       val n      = network(name)
-      val result = LinearPowerFlow.solve(n)
+      val result = solution(name)
       // Every passive branch, not only lines. A transformer carries flow the same
       // way, so summing lines alone made the balance look violated the moment a
       // network had one -- the test's own blind spot, not the model's.

@@ -22,10 +22,14 @@ class NetCdfReaderSuite extends munit.FunSuite:
     Files.exists(goldens.resolve("schema.json")) && Files.isDirectory(goldens.resolve("binary"))
   private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
 
-  private val networks = List(
-    "ac-dc-meshed", "ac-dc-dispatch", "ac-dc-co2", "ac-pf-pv", "unit-commitment",
-    "sclopf-triangle", "storage-hvdc",
-  )
+  /** Every golden network, from the manifest rather than from a list here.
+    *
+    * Stale by four fixtures when this replaced it, including `scigrid-de` — 71
+    * datasets and 1.7 MB against the 28 of a three-bus network, and the only one
+    * exercising the reader at any scale.
+    */
+  private lazy val networks: List[String] =
+    ujson.read(Files.readString(goldens.resolve("manifest.json")))("networks").obj.keys.toList.sorted
 
   private def fromCsv(name: String): Network =
     CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)

@@ -107,7 +107,18 @@ object CsvReader:
         (labels, ListMap.from(weightings))
 
   private def readStatic(path: Path, spec: ComponentSpec): ComponentTable =
-    val rows = parse(path)
+    staticTable(parse(path), spec)
+
+  /** One component table from CSV text rather than from a file.
+    *
+    * The standard type library ships as a classpath resource rather than as part
+    * of any network directory, and it is the same format read by the same code —
+    * a second parser for it would be a second set of conventions to keep in step.
+    */
+  private[network] def table(text: String, spec: ComponentSpec): ComponentTable =
+    staticTable(text.linesIterator.filter(_.nonEmpty).map(splitLine).toIndexedSeq, spec)
+
+  private def staticTable(rows: IndexedSeq[IndexedSeq[String]], spec: ComponentSpec): ComponentTable =
     if rows.isEmpty then return ComponentTable.empty(spec)
 
     val header = rows.head

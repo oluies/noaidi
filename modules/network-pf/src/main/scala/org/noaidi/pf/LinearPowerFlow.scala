@@ -71,7 +71,11 @@ object LinearPowerFlow:
   /** The network uses a feature this formulation does not model. */
   final class UnsupportedNetwork(message: String) extends RuntimeException(message)
 
-  def solve(network: Network): LpfResult =
+  def solve(input: Network): LpfResult =
+    // Standard types first, as PyPSA does in `calculate_dependent_values`. A
+    // typed line carries `x = 0` in the file, so skipping this does not give a
+    // subtly wrong answer -- the susceptance guard refuses the network outright.
+    val network = StandardTypes.expand(input)
     rejectUnhandled(network)
 
     val subs   = Topology.subNetworks(network)

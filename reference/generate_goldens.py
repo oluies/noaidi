@@ -250,6 +250,74 @@ def transformer_levels():
     return n
 
 
+def standard_types_network():
+    """Impedance that exists nowhere in the exported files, only in a type name.
+
+    `scigrid-de` is the network this is for, and it is not usable as the gate on
+    its own. All 852 of its lines carry `x = 0` and a `type`, so the impedance
+    comes from `LineType` + `length` + `num_parallel` -- and PyPSA omits the
+    standard type library from every export, because its own reader repopulates
+    it from the installed package. A reader given those files alone has no way to
+    know what an 'Al/St 240/40 4-bundle 380.0' is.
+
+    But scigrid-de's 96 transformers carry an explicit `x` and no type at all, so
+    it validates the line half and nothing else. This fixture covers both, small
+    enough to read:
+
+      - A 380 kV triangle whose three lines take three *different* standard
+        types, with different lengths and `num_parallel`. The loop flow splits by
+        impedance, so a wrong `x_per_length * length / num_parallel` shows up as a
+        wrong flow rather than being absorbed by topology.
+      - A 110 kV line joined to the triangle by two transformers of a standard
+        type, so a second cycle crosses both and the transformer conversion --
+        `r = vscr/100`, `x = sqrt((vsc/100)^2 - r^2)`, both divided by
+        `num_parallel`, with `s_nom` taken from the type -- is load-bearing too.
+
+    `num_parallel = 2` on one line and one transformer, deliberately: it divides
+    the series impedance and *multiplies* the shunt, and getting that backwards
+    is invisible at `num_parallel = 1`, which is the default everywhere else.
+
+    The chosen types have `phase_shift = 0`. The 110/20 kV transformer types in
+    PyPSA's library are Dyn5 with a 150 degree shift, which this port does not
+    model at all -- picking one would have tested type expansion and a missing
+    feature at the same time, and failed for the wrong reason.
+
+    `model = "pi"` is set explicitly, against PyPSA's default of "t". Every
+    transformer type has a non-zero magnetising shunt, and under the T model
+    PyPSA converts it wye-delta before building Y; that conversion is a separate
+    unimplemented piece. Setting "pi" isolates type expansion from it, and keeps
+    the line types' `b` -- which only matters in an AC solve -- validated rather
+    than dropped along with the whole `pf` stage.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    for bus in ("hv1", "hv2", "hv3"):
+        n.add("Bus", bus, v_nom=380.0)
+    for bus in ("mv1", "mv2"):
+        n.add("Bus", bus, v_nom=110.0)
+
+    n.add("Line", "hv12", bus0="hv1", bus1="hv2",
+          type="Al/St 240/40 4-bundle 380.0", length=120.0, num_parallel=1.0, s_nom=1700.0)
+    n.add("Line", "hv23", bus0="hv2", bus1="hv3",
+          type="Al/St 490/64 4-bundle 380.0", length=80.0, num_parallel=2.0, s_nom=3400.0)
+    n.add("Line", "hv31", bus0="hv3", bus1="hv1",
+          type="679-AL1/86-ST1A 380.0", length=200.0, num_parallel=1.0, s_nom=1700.0)
+    n.add("Line", "mv12", bus0="mv1", bus1="mv2",
+          type="490-AL1/64-ST1A 110.0", length=45.0, num_parallel=1.0, s_nom=300.0)
+
+    n.add("Transformer", "tr1", bus0="hv1", bus1="mv1",
+          type="160 MVA 380/110 kV", num_parallel=2.0, model="pi")
+    n.add("Transformer", "tr2", bus0="hv2", bus1="mv2",
+          type="160 MVA 380/110 kV", num_parallel=1.0, model="pi")
+
+    n.add("Generator", "slack", bus="hv1", control="Slack", p_nom=900.0, marginal_cost=15.0)
+    n.add("Generator", "peak", bus="hv3", p_nom=400.0, marginal_cost=75.0)
+    n.add("Load", "dhv", bus="hv3", p_set=[300.0, 220.0, 380.0])
+    n.add("Load", "dmv1", bus="mv1", p_set=[80.0, 60.0, 95.0])
+    n.add("Load", "dmv2", bus="mv2", p_set=[55.0, 90.0, 40.0])
+    return n
+
+
 def lodf_mesh():
     """Two loops sharing an edge, so the outage factors are not all plus or minus one.
 
@@ -323,11 +391,45 @@ SCLOPF_OUTAGES = {
 }
 
 
+# Fixtures whose optimal *dispatch* is not reproducible, with the evidence.
+#
+# Found by accident and then measured: adding this file's `standard-types`
+# fixture rewrote 59,000 lines of the committed `scigrid-de` golden, having
+# touched nothing that network uses. Six runs of `scigrid-de` in fresh processes
+# land on exactly two answers. The objective is the same to 2e-8 relative
+# (6684817.323607759 against ...738) and individual generators differ by up to
+# 750 MW.
+#
+# The cause is upstream of the solver. `find_cycles` returns 364 cycles either
+# way, but the basis alternates between 2372 and 2469 nonzeros -- and 2469-2372
+# = 97 is exactly the per-snapshot difference in the LP HiGHS is handed
+# (261298 against 263626 nonzeros over 24 snapshots). So PyPSA builds a
+# different, equally valid Kirchhoff basis from one process to the next, and the
+# degenerate optimum it reaches moves with it. Fixing PYTHONHASHSEED does not
+# pin it.
+#
+# This is a property of the network, not of PyPSA's correctness: any KVL basis
+# spanning the cycle space gives the same feasible set, and both answers cost
+# the same. It does mean the dispatch frames here cannot gate an
+# implementation. The objective and the marginal prices can.
+DEGENERATE_DISPATCH = {
+    "scigrid-de": (
+        "one vertex of a degenerate optimal face, not a unique answer: PyPSA's own "
+        "Kirchhoff cycle basis differs between runs (2372 or 2469 nonzeros over the "
+        "same 364 cycles), and generators move by up to 750 MW between the two "
+        "resulting optima while the objective agrees to 2e-8 relative. Gate on "
+        "`objective` and `bus_marginal_price`; `generator_p`, `line_p0` and "
+        "`transformer_p0` under `optimize` are one feasible optimum among many"
+    ),
+}
+
+
 NETWORKS = {
     "ac-dc-meshed": pypsa.examples.ac_dc_meshed,
     "sclopf-triangle": sclopf_triangle,
     "lodf-mesh": lodf_mesh,
     "transformer-levels": transformer_levels,
+    "standard-types": standard_types_network,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
@@ -729,12 +831,49 @@ def capture_network(name: str, build) -> dict:
                 str(k): jsonable(v) for k, v in m.global_constraints.get("mu", {}).items()
             },
         }
+        if name in DEGENERATE_DISPATCH:
+            results["optimize"]["dispatch_note"] = DEGENERATE_DISPATCH[name]
     except Exception as exc:  # noqa: BLE001
         results["optimize"] = {"error": f"{type(exc).__name__}: {exc}"}
 
     (OUT / "results").mkdir(parents=True, exist_ok=True)
     (OUT / "results" / f"{name}.json").write_text(json.dumps(results, indent=1, sort_keys=True))
     return summary
+
+
+def write_standard_types(out: Path) -> dict:
+    """The standard type library, which no network export contains.
+
+    `export_to_csv_folder` drops exactly the rows a fresh `Network()` was born
+    with (`export_standard_types=False` is the default), on the correct grounds
+    that they are library data rather than network data -- PyPSA's own reader
+    repopulates them from the installed package. That leaves a reader outside
+    Python with a `type` column naming rows it has never seen.
+
+    So the library is committed here, and the port ships its own copy as a
+    resource. Two copies is deliberate: the resource is what the library uses at
+    runtime, with no goldens directory in sight, and this one is what a test
+    holds it to. A PyPSA version bump that changes an impedance then fails that
+    comparison instead of silently changing every answer on a typed network.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    n = pypsa.Network()
+    written = {}
+    for list_name, frame in (
+        ("line_types", n.line_types),
+        ("transformer_types", n.transformer_types),
+    ):
+        path = out / f"{list_name}.csv"
+        # `index_label="name"` because the index *is* the type name and PyPSA's
+        # own data files head that column "name" -- writing a blank header would
+        # give the CSV reader an unnamed key column.
+        frame.to_csv(path, index_label="name")
+        written[list_name] = {
+            "count": int(len(frame)),
+            "columns": ["name", *(str(c) for c in frame.columns)],
+        }
+        print(f"  wrote {len(frame)} {list_name}")
+    return written
 
 
 def write_malformed(out: Path) -> None:
@@ -813,6 +952,7 @@ def main() -> int:
                 unexpected_successes.append(f"{name}/{stage} succeeded, but is listed in KNOWN_UNSUPPORTED")
 
     write_malformed(OUT / "binary" / "malformed")
+    manifest["standard_types"] = write_standard_types(OUT / "standard_types")
 
     reference = capture_reference_schema()
     (OUT / "schema.json").write_text(json.dumps(reference, indent=1, sort_keys=True))

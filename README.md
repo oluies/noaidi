@@ -32,12 +32,12 @@ optimisation.
 | `prima-mps` | MPS reader, for reaching the standard LP corpora. |
 | `prima-cyfra` | GPU spike. Not in the root build — see below. |
 | `prima-netlib` | Netlib LP corpus. Not in the root build; fetches on first run. |
-| `network-model` | L0: the PyPSA network data model and topology — schema-driven, round-tripping PyPSA's CSV directory format. |
+| `network-model` | L0: the PyPSA network data model and topology — schema-driven, round-tripping PyPSA's CSV directory format. Ships PyPSA's standard line and transformer type library, which no network export contains. |
 | `network-lopf` | L2: linear optimal power flow, N-1 security-constrained LOPF, and unit commitment via Prima's branch-and-bound. |
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-419 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+477 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.
@@ -201,7 +201,7 @@ everything from the foundation layer up is ahead:
 4. **Prima GPU**: the remaining seven kernel operations behind `Kernels`, then a timing against the CPU reference, then validation against cuPDLP-C. Worth resolving the dense-instance warm-start regression first — it is a concrete, reproducible anomaly with two named suspects in NOTES.md, and it decides how much a GPU can actually buy.
 5. ~~**L0 foundation**: typed columnar store, CSV round-trip, sub-network topology.~~ ✅ (dense linear algebra deferred to L2, where Newton-Raphson needs it)
 6. **L1 I/O and solver plumbing**: CSV round-trips PyPSA byte-for-byte and netCDF reads into the same model; PyPSA's own `.h5` is pandas' PyTables layout with pickled column metadata and is not read — see NOTES. A solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima remains.
-7. **L2 physics**: LPF matches PyPSA's voltage angles to 1e-9 and its line flows and slack dispatch to 1e-6 on all three reference networks. LOPF matches PyPSA's objective, dispatch and line flows on the dispatch fixture, and its objective under a binding CO2 cap; nodal prices agree wherever the dual is unique and are a different point of the same optimal dual face elsewhere — settled, see NOTES. Newton-Raphson AC power flow matches PyPSA's voltage magnitudes and angles to 1e-9 on both fixtures that have one. Its DC counterpart is not implemented because the pinned PyPSA does not implement it either — see NOTES. Unit commitment reproduces PyPSA's schedule, dispatch and objective on a purpose-built fixture, solved by Prima's own branch-and-bound, and SCLOPF reproduces PyPSA's N-1 secure dispatch via outage distribution factors.
+7. **L2 physics**: LPF matches PyPSA's voltage angles to 1e-9 and its line flows and slack dispatch to 1e-6 on every reference network, `scigrid-de` included — 585 buses, 852 lines and 96 transformers, where every impedance comes from a standard type name rather than from a file. LOPF matches PyPSA's objective, dispatch and line flows on the dispatch fixture, and its objective under a binding CO2 cap; nodal prices agree wherever the dual is unique and are a different point of the same optimal dual face elsewhere — settled, see NOTES. Newton-Raphson AC power flow matches PyPSA's voltage magnitudes and angles to 1e-9 on both fixtures that have one. Its DC counterpart is not implemented because the pinned PyPSA does not implement it either — see NOTES. Unit commitment reproduces PyPSA's schedule, dispatch and objective on a purpose-built fixture, solved by Prima's own branch-and-bound, and SCLOPF reproduces PyPSA's N-1 secure dispatch via outage distribution factors.
 8. **L3 features**: clustering, statistics, sector coupling, plotting.
 9. **L4 acceleration**: remaining kernels onto Cyfra/MLX/CUDA, plus Spatial/Chisel for FPGA.
 10. **L5 runtime**: ZIO Streams over snapshots and contingencies, Pekko cluster distribution.

@@ -326,10 +326,11 @@ Not implemented, and rejected rather than mis-solved in every case:
   `lifetime` at `discount_rate`, and `p_nom_mod` makes capacity an integer number
   of blocks. Its default is NaN rather than zero, so it cannot be handled by
   falling back to `capital_cost`.
-- **`Store`.** Not `StorageUnit`, which is implemented — see *Storage* below. A
-  Store is a different component rather than the same one renamed: one signed
-  power variable against a StorageUnit's four, and `e_nom` for its capacity
-  rather than `p_nom · max_hours`. No golden here has one.
+- **Security-constrained expansion.** `Sclopf` refuses an extendable network. Its
+  security rows cap post-contingency flow at the rating in the file, which is not
+  the capacity being chosen; where the optimum shrinks a line below its given
+  rating — what happens on `ac-dc-meshed` — the contingency limit is looser than
+  the network being built can carry.
 - **Off-nominal tap ratios and the transformer T model, in the AC path only.**
   Transformers themselves are modelled — see *Transformers* below — but an
   off-nominal tap makes `Y` asymmetric rather than scaled, and `model = "t"` with
@@ -900,6 +901,41 @@ The three *power* set points (`p_set`, `p_dispatch_set`, `p_store_set`) are stil
 refused. They are three different constraints — PyPSA fixes `p_set` on the net
 `p_dispatch − p_store` rather than on either variable — and no golden uses any of
 them.
+
+## `Store`: energy with no power rating
+
+A Store is not a StorageUnit under another name, and three differences carry the
+whole component:
+
+- **One signed power variable, not two.** No charging or discharging efficiency,
+  so there is nothing for two variables to carry differently. `p > 0` discharges
+  into the bus.
+- **No power rating at all.** PyPSA generates no operational bound for `Store-p`.
+  How fast a store moves energy follows only from its energy band and the elapsed
+  hours. Bounding `p` by `e_nom` is the obvious reading, is strictly tighter, and
+  gives a more expensive answer.
+- **The energy band is `[e_min_pu, e_max_pu] · e_nom`**, not `[0, e_nom]`.
+
+```
+e(t) = (1 − standing_loss)^eh · e(t−1)  −  eh · p(t)
+```
+
+`p` is *subtracted*. Reversing it gives a store that charges when it should
+discharge and still balances every bus at every snapshot — the objective moves
+from 118,020 to 103,071 and nothing else looks wrong.
+
+`store-bank` is the fixture, and it took several reshapes, each failing in a way
+worth naming: the extendable store went unbuilt; the cyclic store ended its
+horizon empty, which makes its wrap indistinguishable from a non-cyclic store
+starting at zero; the upper band was never touched.
+
+The last failure is the interesting one. **A lossless store that begins and ends
+the horizon at the same level has `Σ p = 0`, so its `marginal_cost` contributes
+nothing to the objective whatever the schedule.** Two of the three stores were
+therefore free to move energy around at zero cost: Prima and HiGHS agreed on the
+objective to 5e-11 and disagreed on both trajectories. Standing losses and a
+`marginal_cost_storage` make holding energy costly, which picks a single optimum
+out — and the two solvers then agree cell for cell.
 
 ## Storage, and the first realistic LOPF
 

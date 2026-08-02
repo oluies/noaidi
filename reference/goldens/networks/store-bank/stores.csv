@@ -1,0 +1,4 @@
+name,bus,e_nom,e_nom_extendable,e_nom_max,e_min_pu,e_max_pu,e_initial,e_cyclic,marginal_cost,marginal_cost_storage,capital_cost,standing_loss
+tank,b,200.0,False,inf,0.1,0.5,90.0,False,1.0,0.0,0.0,0.02
+swing,b,150.0,False,inf,0.0,1.0,0.0,True,4.0,0.3,0.0,0.05
+grow,b,0.0,True,60.0,0.0,1.0,0.0,False,2.0,0.0,12.0,0.01

@@ -13,12 +13,16 @@ import scala.collection.mutable
   *
   * ==Scope==
   *
-  * '''Dispatch only.''' Capacity is taken as given: `p_nom` and `s_nom` are read,
-  * not chosen. A network with `p_nom_extendable` set poses a capacity expansion
-  * problem with investment variables and capital costs, which is a strictly
-  * larger model and is not built here — [[build]] rejects such a network rather
-  * than silently solving a different problem. The reference `ac-dc-meshed` is
-  * such a network, which is why the goldens carry an `ac-dc-dispatch` variant.
+  * '''Dispatch and capacity.''' `p_nom_extendable` makes capacity a decision
+  * rather than a given — see [[Expansion]], which also documents why PyPSA's
+  * reported objective is the cost of the *change* and reads negative on
+  * `ac-dc-meshed`. What remains refused there is everything that makes capital
+  * cost something other than a per-unit constant: an annuitised
+  * `overnight_cost`, modular capacity (`p_nom_mod`), and multi-investment-period
+  * build years.
+  *
+  * '''Storage''' carries state across snapshots — see [[Storage]]. `Store` is a
+  * separate component and is refused.
   *
   * '''Kirchhoff voltage law is enforced''' over a cycle basis of the passive
   * branches, which is PyPSA's own formulation rather than a bus-angle DC-OPF —
@@ -103,8 +107,10 @@ object Lopf:
     val generators = attached.filter(_.spec.name == "Generator")
     val loadTables = attached.filter(_.spec.name == "Load")
     val storage    = attached.find(_.spec.name == "StorageUnit")
+    val stores     = attached.find(_.spec.name == "Store")
 
     storage.foreach(Storage.reject)
+    stores.foreach(Stores.reject)
 
     // Elapsed hours per snapshot, from the `stores` weighting rather than the
     // `objective` one. They are separate columns of snapshots.csv and PyPSA
@@ -204,19 +210,48 @@ object Lopf:
           // extendable, so only the upper bounds move into rows -- which keeps
           // the columns bounded below and the problem better conditioned than
           // making them free would.
-          val pNom = if extendable(s, id) then Double.PositiveInfinity else s.float("p_nom", id)
-          declare(Storage.Dispatch, id, t, 0.0, pNom * s.valueAt("p_max_pu", id, t),
+          //
+          // The upper bound is set to infinity directly rather than by
+          // multiplying an infinite `p_nom` by the per-unit factor. `Infinity *
+          // 0.0` is NaN, so a discharge-only unit (`p_min_pu = 0`, legal in
+          // PyPSA) or a snapshot where a time-varying `p_max_pu` is zero
+          // produced the bound `[0.0, NaN]` and an opaque crash inside the
+          // builder. The real limit is carried by the capacity rows regardless.
+          val extendableUnit = extendable(s, id)
+          val pNom           = s.float("p_nom", id)
+          def upper(perUnit: => Double): Double =
+            if extendableUnit then Double.PositiveInfinity else pNom * perUnit
+
+          declare(Storage.Dispatch, id, t, 0.0, upper(s.valueAt("p_max_pu", id, t)),
                   s.valueAt("marginal_cost", id, t) * weight): Unit
           // `p_min_pu` is negative for a storage unit -- it is how far the unit
           // may run *backwards* -- so the charging bound is its negation.
-          declare(Storage.Store, id, t, 0.0, pNom * -s.valueAt("p_min_pu", id, t), 0.0): Unit
-          declare(Storage.SoC, id, t, 0.0, pNom * s.float("max_hours", id),
+          declare(Storage.Store, id, t, 0.0, upper(-s.valueAt("p_min_pu", id, t)), 0.0): Unit
+          declare(Storage.SoC, id, t, 0.0, upper(s.float("max_hours", id)),
                   s.valueAt("marginal_cost_storage", id, t) * weight): Unit
           // Bounded by the inflow itself, so a snapshot with none gets [0, 0] --
           // which is what PyPSA's masking amounts to, without a second shape of
           // variable map to carry it.
           declare(Storage.Spill, id, t, 0.0, math.max(0.0, s.valueAt("inflow", id, t)),
                   s.valueAt("spill_cost", id, t) * weight): Unit
+        }
+      }
+
+      // Two variables per store: its energy level and one signed power. `p` is
+      // deliberately unbounded -- PyPSA generates no operational constraint for
+      // it, so a store's rate is limited only by its energy band and the elapsed
+      // hours. Bounding it by `e_nom` is the obvious reading and is strictly
+      // tighter.
+      stores.foreach { store =>
+        store.ids.foreach { id =>
+          val eNom = if extendable(store, id) then Double.PositiveInfinity else store.float("e_nom", id)
+          val lo   = if extendable(store, id) then 0.0 else eNom * store.valueAt("e_min_pu", id, t)
+          val hi   = if extendable(store, id) then Double.PositiveInfinity
+                     else eNom * store.valueAt("e_max_pu", id, t)
+          declare(Stores.Energy, id, t, math.min(lo, hi), math.max(lo, hi),
+                  store.valueAt("marginal_cost_storage", id, t) * weight): Unit
+          declare(Stores.Power, id, t, Double.NegativeInfinity, Double.PositiveInfinity,
+                  store.valueAt("marginal_cost", id, t) * weight): Unit
         }
       }
     }
@@ -256,6 +291,13 @@ object Lopf:
           }
         }
 
+        // A store's `p` is already signed: positive discharges into the bus.
+        stores.foreach { store =>
+          store.ids.filter(id => store.string("bus", id) == bus).foreach { id =>
+            terms += ((columns((Stores.Power, id, t)), 1.0))
+          }
+        }
+
         (passive ++ controllable).foreach { branch =>
           val ports = Topology.branchPorts(branch)
           branch.ids.foreach { id =>
@@ -279,34 +321,6 @@ object Lopf:
         builder.equalityConstraint(terms.toSeq, demand)
         balanceRows((bus, t)) = rowIndex
         rowIndex += 1
-      }
-    }
-
-    // Capacity coupling, two rows per extendable entity per snapshot. This is
-    // where an expansion model differs from a dispatch one: the operational
-    // limits are no longer constants in the column bounds but multiples of a
-    // variable.
-    //
-    //   min_pu · capacity  <=  dispatch  <=  max_pu · capacity
-    //
-    // Emitted after the bus balances on purpose. They are inequalities where the
-    // balances are equalities, and `Sclopf` copies the base model row by row on
-    // the strength of the balance rows coming first.
-    expandable.foreach { (table, ids) =>
-      val component = table.spec.name
-      val capacity  = Expansion.capacityKey(component)
-      ids.foreach { id =>
-        val cap = columns((capacity, id, Expansion.NoSnapshot))
-        snapshots.foreach { t =>
-          Expansion.operationalBounds(table, id, t).foreach { (variable, minPu, maxPu) =>
-            val column = columns((variable, id, t))
-            // `lessThan`/`greaterThan` rather than a range row: the base model's
-            // rows are copied one-for-one by `Sclopf`, which a range row -- one
-            // original row becoming two -- would break.
-            if maxPu.isFinite then builder.lessThan(Seq(column -> 1.0, cap -> -maxPu), 0.0)
-            if minPu.isFinite then builder.greaterThan(Seq(column -> 1.0, cap -> -minPu), 0.0)
-          }
-        }
       }
     }
 
@@ -413,6 +427,69 @@ object Lopf:
       }
     }
 
+    // A store's energy balance. Simpler than a storage unit's -- no efficiency
+    // either way, no inflow, no spill -- but the sign is the thing to get right:
+    //
+    //   e(t) = (1 - standing_loss)^eh · e(t-1)  -  eh · p(t)
+    //
+    // `p` is *subtracted*, because a positive `p` is energy leaving the store for
+    // the bus. Reversing it gives a store that charges when it should discharge
+    // and still balances every bus at every snapshot.
+    stores.foreach { store =>
+      store.ids.foreach { id =>
+        val cyclic  = Stores.isCyclic(store, id)
+        val initial = store.float("e_initial", id)
+
+        snapshots.foreach { t =>
+          val eh       = elapsedHours(t)
+          val effStand = math.pow(1.0 - store.valueAt("standing_loss", id, t), eh)
+          val terms    = mutable.ArrayBuffer.empty[(Int, Double)]
+
+          terms += ((columns((Stores.Energy, id, t)), 1.0))
+          terms += ((columns((Stores.Power, id, t)), eh))
+
+          val previous = if t > 0 then Some(t - 1) else if cyclic then Some(snapshots.last) else None
+          previous.foreach(p => terms += ((columns((Stores.Energy, id, p)), -effStand)))
+
+          builder.equalityConstraint(terms.toSeq, if previous.isEmpty then initial else 0.0)
+        }
+      }
+    }
+
+    // Capacity coupling, two rows per extendable entity per snapshot. This is
+    // where an expansion model differs from a dispatch one: the operational
+    // limits are no longer constants in the column bounds but multiples of a
+    // variable.
+    //
+    //   min_pu · capacity  <=  dispatch  <=  max_pu · capacity
+    //
+    // Emitted *after every equality block* -- bus balance, storage energy
+    // balance, state-of-charge set points and Kirchhoff -- and not merely after
+    // the balances. `LpBuilder.build` hoists all equalities to the front, so an
+    // inequality emitted in between shifts every later equality's standard-form
+    // index and breaks the row-by-row copy `Sclopf` performs. That copy requires
+    // each original row to map to the standard-form row of the *same* index;
+    // balances-first is necessary for it and not sufficient. Putting these rows
+    // in the middle made `Sclopf.build` fail on any extendable network with a
+    // cycle -- which is every extendable network worth running it on.
+    expandable.foreach { (table, ids) =>
+      val component = table.spec.name
+      val capacity  = Expansion.capacityKey(component)
+      ids.foreach { id =>
+        val cap = columns((capacity, id, Expansion.NoSnapshot))
+        snapshots.foreach { t =>
+          Expansion.operationalBounds(table, id, t).foreach { (variable, minPu, maxPu) =>
+            val column = columns((variable, id, t))
+            // `lessThan`/`greaterThan` rather than a range row: the base model's
+            // rows are copied one-for-one by `Sclopf`, which a range row -- one
+            // original row becoming two -- would break.
+            if maxPu.isFinite then builder.lessThan(Seq(column -> 1.0, cap -> -maxPu), 0.0)
+            if minPu.isFinite then builder.greaterThan(Seq(column -> 1.0, cap -> -minPu), 0.0)
+          }
+        }
+      }
+    }
+
     // Global constraints -- an emissions cap, typically. Ignoring one is not
     // conservative: it drops a restriction, so the answer comes out cheaper than
     // the real network's, and the "objective is a lower bound on PyPSA's" test
@@ -487,21 +564,11 @@ object Lopf:
 
   /** Reject a component class the builder does not model.
     *
-    * `Store` is the only one left. Capacity expansion used to be rejected here
-    * too and is now built — see [[Expansion]], which refuses what remains of it.
+    * Nothing left: `Store` and capacity expansion were both rejected here and
+    * are now built — see [[Stores]] and [[Expansion]], each of which refuses
+    * what remains of its own area. Kept as the place the next one goes.
     */
-  private def rejectUnmodelledComponents(network: Network): Unit =
-    // `Store` is a separate component with its own energy balance -- one signed
-    // power variable against a StorageUnit's four, and `e_nom` rather than
-    // `p_nom · max_hours` for its capacity. No golden here has one, so it is
-    // refused rather than written from the formula alone.
-    network.table("Store").foreach { table =>
-      if table.size > 0 then
-        throw new UnsupportedNetwork(
-          s"network has ${table.size} Store(s); only StorageUnit is implemented, and a Store's " +
-            "energy balance is a different constraint rather than the same one renamed"
-        )
-    }
+  private def rejectUnmodelledComponents(network: Network): Unit = ()
 
   /** Reject component classes the builder does not model.
     *
@@ -513,7 +580,12 @@ object Lopf:
   private def rejectUnhandled(network: Network): Unit =
     val handled = Set("Generator", "Load", "Line", "Transformer", "Link", "Bus",
                       "Carrier", "GlobalConstraint", "SubNetwork", "LineType",
-                      "TransformerType", "Shape", "StorageUnit")
+                      // `Store` is listed as handled here so that the specific
+                      // refusal in `rejectUnmodelledComponents` -- which says
+                      // *why* a Store is different from a StorageUnit -- is the
+                      // one a caller sees. Without it this generic check fires
+                      // first and that message becomes unreachable.
+                      "TransformerType", "Shape", "StorageUnit", "Store")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then
       throw new UnsupportedNetwork(
@@ -571,7 +643,15 @@ final case class LopfResult(
   def dispatch(component: String, entity: String, snapshot: Int): Double =
     if component == "StorageUnit" then
       storage(Storage.Dispatch, entity, snapshot) - storage(Storage.Store, entity, snapshot)
+    else if component == "Store" then storage(Stores.Power, entity, snapshot)
     else solution.primal(model.map.column(component, entity, snapshot))
+
+  /** A store's energy level at the '''end''' of a snapshot.
+    *
+    * PyPSA's `stores_t.e`, and the convention the balance is written in: what
+    * remains after that snapshot's charging and discharging.
+    */
+  def energy(entity: String, snapshot: Int): Double = storage(Stores.Energy, entity, snapshot)
 
   /** A storage unit's state of charge at the '''end''' of a snapshot.
     *

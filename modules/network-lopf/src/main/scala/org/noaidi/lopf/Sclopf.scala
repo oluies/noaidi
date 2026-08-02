@@ -72,6 +72,32 @@ object Sclopf:
     // would give the dispatch model the right impedances and the contingency
     // rows the wrong ones.
     val network = StandardTypes.expand(input)
+
+    // Security-constrained *expansion* is not built here, and this refusal is
+    // load-bearing rather than tidy. The rows below cap post-contingency flow at
+    // `s_nom · s_max_pu` read from the file, while an extendable branch's
+    // pre-contingency flow is bounded by a capacity variable instead. Where the
+    // optimum shrinks a line below its given rating -- which is exactly what
+    // happens on `ac-dc-meshed` -- the contingency limit is looser than the
+    // network being built can carry, and the answer comes out cheaper than
+    // reality reporting `Optimal`.
+    //
+    // `Lopf.build` used to reject every extendable network, so this guard did
+    // not have to exist; implementing expansion removed it silently. Writing the
+    // security row against the capacity column instead is the real fix, and it
+    // needs a golden that does not exist yet.
+    Expansion.nominalAttribute.keys.toIndexedSeq.sorted.foreach { component =>
+      network.table(component).foreach { table =>
+        Expansion.extendables(table).headOption.foreach { id =>
+          throw new UnsupportedNetwork(
+            s"$component '$id' is extendable; the security rows here cap post-contingency flow at " +
+              "the rating in the file, which is not the capacity being chosen, so a secure " +
+              "dispatch would be priced against a network that is not the one built"
+          )
+        }
+      }
+    }
+
     val base = Lopf.build(network)
 
     // The empty case is exactly the dispatch model, and returning before any

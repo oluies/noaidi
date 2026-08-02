@@ -456,6 +456,18 @@ SCLOPF_OUTAGES = {
 }
 
 
+# PyPSA's `nominal_attrs`: the capacity attribute of each component whose size
+# can be chosen rather than given.
+NOMINAL_ATTRIBUTES = {
+    "Generator": "p_nom",
+    "Line": "s_nom",
+    "Transformer": "s_nom",
+    "Link": "p_nom",
+    "StorageUnit": "p_nom",
+    "Store": "e_nom",
+}
+
+
 # Fixtures whose optimal *dispatch* is not reproducible, with the evidence.
 #
 # Found by accident and then measured: adding this file's `standard-types`
@@ -477,18 +489,6 @@ SCLOPF_OUTAGES = {
 # spanning the cycle space gives the same feasible set, and both answers cost
 # the same. It does mean the dispatch frames here cannot gate an
 # implementation. The objective and the marginal prices can.
-# PyPSA's `nominal_attrs`: the capacity attribute of each component whose size
-# can be chosen rather than given.
-NOMINAL_ATTRIBUTES = {
-    "Generator": "p_nom",
-    "Line": "s_nom",
-    "Transformer": "s_nom",
-    "Link": "p_nom",
-    "StorageUnit": "p_nom",
-    "Store": "e_nom",
-}
-
-
 DEGENERATE_DISPATCH = {
     "scigrid-de": (
         "one vertex of a degenerate optimal face, not a unique answer: PyPSA's own "

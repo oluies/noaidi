@@ -3,7 +3,7 @@ package org.noaidi.lopf
 import java.nio.file.{Files, Path, Paths}
 import scala.jdk.CollectionConverters.*
 import org.noaidi.network.{CsvReader, Network, Schema, Topology}
-import org.noaidi.prima.{PdhgParams, SolveStatus}
+import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
 
 /** Dispatch against PyPSA's own optimisation results.
   *
@@ -333,7 +333,78 @@ class LopfSuite extends munit.FunSuite:
       "name,bus,e_nom,e_initial\ns,b,100.0,20.0\n",
     )
     val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    assert(failure.getMessage.contains("Store"), failure.getMessage)
+    // On the distinguishing phrase, not just the component name. Asserting
+    // `contains("Store")` alone passed against the generic "unmodelled
+    // component(s)" message too, which made the specific check dead code without
+    // the test noticing.
+    assert(failure.getMessage.contains("energy balance"), failure.getMessage)
+  }
+
+  test("a capacity floor above its ceiling is refused rather than solved empty") {
+    assume(available, "goldens missing")
+    // `p_nom_min > p_nom_max` makes the capacity variable's own interval empty.
+    // The builder would refuse it too, but with a message about a variable index
+    // rather than about a generator.
+    val n = mutate(
+      "ac-dc-meshed",
+      "generators.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",p_nom_min,p_nom_max") :: lines.tail.map(_ + ",500.0,100.0") mkString "\n"
+      },
+    )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("p_nom_min"), failure.getMessage)
+  }
+
+  test("a NaN capacity floor is refused, which is what the negativity guard is for") {
+    assume(available, "goldens missing")
+    // The guard is written `!(minimum >= 0.0)` rather than `minimum < 0.0`
+    // precisely so a NaN fires it -- every comparison against NaN is false, so
+    // the natural spelling would let it through and produce a capacity variable
+    // with a NaN bound. Worth pinning because the two spellings look equivalent.
+    val n = mutate(
+      "ac-dc-meshed",
+      "generators.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",p_nom_min") :: lines.tail.map(_ + ",nan") mkString "\n"
+      },
+    )
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("p_nom_min"), failure.getMessage)
+  }
+
+  test("a security-constrained solve refuses an extendable network") {
+    assume(available, "goldens missing")
+    // The guard `Lopf.build`'s blanket extendable rejection used to provide for
+    // free. The security rows cap post-contingency flow at the rating in the
+    // file while an extendable branch's pre-contingency flow is bounded by a
+    // capacity variable, so where the optimum shrinks a line below its given
+    // rating -- which is what happens on `ac-dc-meshed` -- the contingency limit
+    // is looser than the network being built can carry.
+    val failure = intercept[Sclopf.UnsupportedNetwork] {
+      Sclopf.build(network("ac-dc-meshed"), Some(IndexedSeq(Sclopf.Outage("Line", "0"))))
+    }
+    assert(failure.getMessage.contains("extendable"), failure.getMessage)
+  }
+
+  test("an extendable network with cycles builds rows Sclopf's copy could index") {
+    assume(available, "goldens missing")
+    // The row-ordering invariant, asserted directly rather than through the
+    // solver. `LpBuilder.build` hoists every equality to the front, so an
+    // inequality emitted between two equality blocks shifts the later ones and
+    // breaks the one-for-one row copy `Sclopf` performs. Emitting the capacity
+    // rows in the middle did exactly that on every extendable network with a
+    // cycle.
+    val model = Lopf.build(network("ac-dc-meshed"))
+    (0 until model.translation.numOriginalRows).foreach { r =>
+      val mapped = model.translation.expansionOf(r) match
+        case RowExpansion.Direct(row)  => row
+        case RowExpansion.Negated(row) => row
+        case other                     => fail(s"row $r expanded to $other")
+      assertEquals(mapped, r, s"original row $r moved to standard-form row $mapped")
+    }
   }
 
   test("storage dispatch, state of charge and spill match PyPSA's") {

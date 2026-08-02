@@ -46,9 +46,8 @@ object Expansion:
 
   /** The capacity attribute of each component that can be expanded.
     *
-    * PyPSA's `nominal_attrs`. `Store` is absent because the whole component is
-    * refused a layer up; a Store's energy balance is not implemented, so its
-    * capacity variable would have nothing to bound.
+    * PyPSA's `nominal_attrs`. A Store's is `e_nom`, an *energy* rather than a
+    * power — it has no power rating at all.
     */
   val nominalAttribute: Map[String, String] = Map(
     "Generator"   -> "p_nom",
@@ -56,6 +55,7 @@ object Expansion:
     "Transformer" -> "s_nom",
     "Link"        -> "p_nom",
     "StorageUnit" -> "p_nom",
+    "Store"       -> "e_nom",
   )
 
   /** The variable-map key for a component's capacity column. */
@@ -90,6 +90,19 @@ object Expansion:
           (Storage.Dispatch, Double.NegativeInfinity, table.valueAt("p_max_pu", id, snapshot)),
           (Storage.Store, Double.NegativeInfinity, -table.valueAt("p_min_pu", id, snapshot)),
           (Storage.SoC, Double.NegativeInfinity, table.float("max_hours", id)),
+        )
+      case "Store" =>
+        // The energy level, and both ends of it. A Store's `p` is deliberately
+        // absent: PyPSA generates no operational bound for it at all, so how
+        // fast a store moves energy follows only from this band and the elapsed
+        // hours. Bounding `p` by `e_nom` would be strictly tighter and would
+        // look entirely reasonable.
+        IndexedSeq(
+          (
+            Stores.Energy,
+            table.valueAt("e_min_pu", id, snapshot),
+            table.valueAt("e_max_pu", id, snapshot),
+          )
         )
       case other =>
         IndexedSeq(

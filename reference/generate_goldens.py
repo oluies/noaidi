@@ -315,6 +315,73 @@ def storage_cycle():
     return n
 
 
+def store_bank():
+    """Stores, which are not StorageUnits with a different name.
+
+    Three differences drive the whole component, and a fixture that does not
+    exercise them would pass against a StorageUnit implementation wearing a
+    Store's label:
+
+      - '''One signed power variable, not two.''' A Store has no charging and
+        discharging efficiencies, so there is nothing to split. `p > 0`
+        discharges into the bus and `p < 0` charges from it.
+      - '''No power rating at all.''' PyPSA generates no operational bound for
+        `Store-p`; how fast a store can move energy follows only from its energy
+        band and the elapsed hours. A model that bounded `p` by `e_nom` would be
+        strictly tighter and would look reasonable.
+      - '''The energy band is `[e_min_pu, e_max_pu] · e_nom`,''' not `[0, e_nom]`.
+        `tank` sets 0.1 and 0.5, and its energy touches both 20 and 100 -- so a
+        model reading the default band would find a cheaper answer at each end.
+
+    `tank` is non-cyclic with a non-zero `e_initial` and a standing loss;
+    `swing` cycles, and ends the horizon holding 150 MWh which it discharges at
+    the first snapshot -- something a non-cyclic store starting from zero cannot
+    do, which is what makes the wrap observable rather than merely present;
+    `grow` is extendable, ties Stores to the capacity machinery, and is built to
+    exactly its `e_nom_max` of 60, so the capacity variable's own upper bound
+    binds too.
+
+    Every store carries a standing loss and `swing` a `marginal_cost_storage`,
+    without which the optimum is degenerate. A lossless store that begins and
+    ends the horizon at the same level has `sum(p) = 0`, so its `marginal_cost`
+    contributes *nothing* whatever the schedule — Prima and HiGHS agreed on the
+    objective to 5e-11 and disagreed on both trajectories. Making it costly to
+    hold energy is what picks one out.
+
+    Getting all of that to bind at once took several attempts, each failing in a
+    way worth naming: `grow` unbuilt and `peak` barely running; `swing` ending
+    its horizon empty, which makes a cyclic store indistinguishable from a
+    non-cyclic one starting at zero; `tank`'s upper band never touched; and then
+    the degeneracy above. A flag that is set but does not bind tests nothing.
+
+    The generator price varies by snapshot on purpose. `storage-cycle` was first
+    written with a flat price and its optimum came out degenerate: Prima and
+    HiGHS agreed on cost to 6e-10 and disagreed on the whole trajectory, which is
+    useless as a golden. Snapshot weightings differ from each other for the same
+    reason as there -- `stores` scales the energy balance and `objective` scales
+    cost, and holding both at 1.0 makes confusing them invisible.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(6))
+    n.snapshot_weightings.loc[:, "stores"] = 2.0
+    n.snapshot_weightings.loc[:, "objective"] = 3.0
+    n.snapshot_weightings.loc[:, "generators"] = 1.0
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Generator", "cheap", bus="b", p_nom=120.0,
+          marginal_cost=[10.0, 12.0, 21.0, 18.0, 14.0, 23.0])
+    n.add("Generator", "peak", bus="b", p_nom=400.0, marginal_cost=250.0)
+    n.add("Load", "d", bus="b", p_set=[300.0, 40.0, 50.0, 290.0, 60.0, 70.0])
+
+    n.add("Store", "tank", bus="b", e_nom=200.0, e_initial=90.0,
+          e_min_pu=0.1, e_max_pu=0.5, standing_loss=0.02, marginal_cost=1.0)
+    n.add("Store", "swing", bus="b", e_nom=150.0, e_cyclic=True, marginal_cost=4.0,
+          standing_loss=0.05, marginal_cost_storage=0.30)
+    n.add("Store", "grow", bus="b", e_nom=0.0, e_nom_extendable=True,
+          e_nom_max=60.0, capital_cost=12.0, marginal_cost=2.0, standing_loss=0.01)
+    return n
+
+
 def standard_types_network():
     """Impedance that exists nowhere in the exported files, only in a type name.
 
@@ -508,6 +575,7 @@ NETWORKS = {
     "transformer-levels": transformer_levels,
     "standard-types": standard_types_network,
     "storage-cycle": storage_cycle,
+    "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
@@ -919,6 +987,10 @@ def capture_network(name: str, build) -> dict:
             "storage_p_store": frame_to_json(m.storage_units_t.p_store),
             "storage_spill": frame_to_json(m.storage_units_t.spill),
             "storage_p": frame_to_json(m.storage_units_t.p),
+            # A Store has one signed power variable and an energy level,
+            # against a StorageUnit's four. `p > 0` discharges.
+            "store_e": frame_to_json(m.stores_t.e),
+            "store_p": frame_to_json(m.stores_t.p),
             # Chosen capacities, which are the *answer* to an expansion problem
             # rather than a by-product. Recorded per component as
             # `<attr>_opt`, and equal to the given `<attr>` wherever nothing is

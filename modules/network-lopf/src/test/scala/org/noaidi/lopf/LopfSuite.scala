@@ -321,23 +321,97 @@ class LopfSuite extends munit.FunSuite:
     }
   }
 
-  test("a Store is refused rather than solved as a StorageUnit") {
+  test("stores match PyPSA's energy, power and chosen capacity") {
     assume(available, "goldens missing")
-    // The two are not the same component renamed. A Store has one signed power
-    // variable where a StorageUnit has four, and its capacity is `e_nom` rather
-    // than `p_nom * max_hours`. No golden here has one, so building it from the
-    // formula alone would be untested code that returns plausible numbers.
-    val n = withExtraFile(
-      "storage-cycle",
-      "stores.csv",
-      "name,bus,e_nom,e_initial\ns,b,100.0,20.0\n",
+    // A Store is not a StorageUnit renamed: one signed power variable rather
+    // than four, no efficiencies, and -- the part most likely to be got wrong --
+    // no power rating at all. Both frames are compared, because a sign error on
+    // `p` gives a store that charges when it should discharge while still
+    // balancing every bus at every snapshot.
+    val expected = results("store-bank")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("store-bank")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * math.abs(target), s"against PyPSA's $target")
+
+    val stores = n.require("Store")
+    Seq[(String, (String, Int) => Double)](
+      "store_e" -> result.energy,
+      "store_p" -> ((id, t) => result.dispatch("Store", id, t)),
+    ).foreach { (frame, read) =>
+      n.snapshots.indices.foreach { t =>
+        stores.ids.foreach { id =>
+          assertEqualsDouble(read(id, t), frameValue(expected(frame), t, id), 1e-4, s"$frame, $id at $t")
+        }
+      }
+    }
+
+    // The extendable store's capacity, which is what ties Stores to the
+    // expansion machinery -- `e_nom` is an energy where every other component's
+    // nominal attribute is a power.
+    stores.ids.foreach { id =>
+      assertEqualsDouble(
+        result.capacity("Store", id),
+        expected("nominal_opt")("Store")(id).num,
+        1e-4,
+        s"Store '$id' capacity",
+      )
+    }
+  }
+
+  test("the store fixture's features are load-bearing, not merely present") {
+    assume(available, "goldens missing")
+    // Guarding the guard, as for `storage-cycle`. Each of these took a reshaped
+    // fixture to achieve, and each would let an implementation that ignored the
+    // feature pass the comparison above.
+    val expected = results("store-bank")("optimize")
+    val e        = expected("store_e")
+    val last     = network("store-bank").snapshots.length - 1
+
+    // Cyclic: `swing` ends the horizon holding energy and discharges it at the
+    // first snapshot, which a non-cyclic store starting from zero cannot do.
+    assert(frameValue(e, last, "swing") > 1.0, "the cyclic store ends empty, so its wrap carries nothing")
+    assert(
+      frameValue(expected("store_p"), 0, "swing") > 1.0,
+      "the cyclic store does not discharge at the first snapshot, so the wrap is unobservable",
     )
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    // On the distinguishing phrase, not just the component name. Asserting
-    // `contains("Store")` alone passed against the generic "unmodelled
-    // component(s)" message too, which made the specific check dead code without
-    // the test noticing.
-    assert(failure.getMessage.contains("energy balance"), failure.getMessage)
+
+    // Both ends of `tank`'s band, which is `[e_min_pu, e_max_pu] · e_nom` and
+    // not `[0, e_nom]` -- 20 and 100 against a nominal 200.
+    val levels = (0 to last).map(frameValue(e, _, "tank"))
+    assertEqualsDouble(levels.min, 20.0, 1e-3, "the lower band never binds")
+    assertEqualsDouble(levels.max, 100.0, 1e-3, "the upper band never binds")
+
+    // And the extendable store is built to exactly its ceiling, so the capacity
+    // variable's own upper bound binds too.
+    assertEqualsDouble(expected("nominal_opt")("Store")("grow").num, 60.0, 1e-3, "e_nom_max")
+  }
+
+  test("a store has no power rating, unlike a storage unit") {
+    assume(available, "goldens missing")
+    // PyPSA generates no operational bound for `Store-p`, so a store's rate
+    // follows only from its energy band and the elapsed hours. Bounding `p` by
+    // `e_nom` is the obvious reading and is strictly tighter -- and it would be
+    // invisible unless some store actually moves more than its nominal energy in
+    // one snapshot. `tank` does: 35 MW over 2 hours against an `e_nom` of 200 is
+    // not enough, so this asserts the bound is absent rather than slack.
+    val model = Lopf.build(network("store-bank"))
+    val n     = network("store-bank")
+    n.require("Store").ids.foreach { id =>
+      n.snapshots.indices.foreach { t =>
+        val column = model.map.column(Stores.Power, id, t)
+        assert(
+          model.problem.variableLower(column).isNegInfinity &&
+            model.problem.variableUpper(column).isPosInfinity,
+          s"Store '$id' power at snapshot $t is bounded " +
+            s"[${model.problem.variableLower(column)}, ${model.problem.variableUpper(column)}]",
+        )
+      }
+    }
   }
 
   test("a capacity floor above its ceiling is refused rather than solved empty") {

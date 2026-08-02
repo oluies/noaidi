@@ -346,6 +346,32 @@
     []
    ]
   },
+  "store_e": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "store_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
   "total_system_cost": 6900.0,
   "transformer_p0": {
    "columns": [],

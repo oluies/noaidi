@@ -47,17 +47,24 @@ object Stores:
   def reject(table: ComponentTable): Unit =
     def refuse(message: String): Nothing = throw new Lopf.UnsupportedNetwork(message)
 
-    // `e_set` pins the energy level at a snapshot; dropping it leaves the
-    // trajectory free, which is a cheaper problem returning `Optimal`.
-    val pinned = table.ids.filter { id =>
-      table.series.get("e_set").exists(_.covers(id)) ||
-      (table.static.contains("e_set") && table.float("e_set", id).isFinite)
+    // Both set points, not just the energy one. PyPSA pins `Store-p` as well --
+    // `optimize.py` calls `define_fixed_operation_constraints(n, sns, "Store",
+    // "p")` explicitly, outside the generic loop, because `Store,p` is
+    // `handle_separately` in its variables table. Refusing `e_set` and admitting
+    // `p_set` would drop exactly the constraint the `e_set` refusal exists to
+    // avoid dropping: the trajectory comes out free, which is a cheaper problem
+    // returning `Optimal`.
+    Seq("e_set" -> "its energy", "p_set" -> "its power").foreach { (attribute, what) =>
+      val pinned = table.ids.filter { id =>
+        table.series.get(attribute).exists(_.covers(id)) ||
+        (table.static.contains(attribute) && table.float(attribute, id).isFinite)
+      }
+      if pinned.nonEmpty then
+        refuse(
+          s"Store '${pinned.head}' sets $attribute, which pins $what at a snapshot; that " +
+            "constraint is not built here, and dropping it would leave the trajectory free"
+        )
     }
-    if pinned.nonEmpty then
-      refuse(
-        s"Store '${pinned.head}' sets e_set, which pins its energy at a snapshot; that constraint " +
-          "is not built here, and dropping it would leave the trajectory free"
-      )
 
     Seq("e_cyclic_per_period", "e_initial_per_period").foreach { attribute =>
       val set = table.ids.filter(id => table.static.contains(attribute) && table.bool(attribute, id))
@@ -79,8 +86,4 @@ object Stores:
           "linear"
       )
 
-    table.ids.foreach { id =>
-      val standing = table.float("standing_loss", id)
-      if standing < 0.0 || standing >= 1.0 then
-        refuse(s"Store '$id' has standing_loss = $standing, which is not a fraction below 1")
-    }
+    Losses.rejectStandingLoss(table, "Store", refuse)

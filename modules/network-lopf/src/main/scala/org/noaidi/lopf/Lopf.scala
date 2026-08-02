@@ -21,8 +21,11 @@ import scala.collection.mutable
   * `overnight_cost`, modular capacity (`p_nom_mod`), and multi-investment-period
   * build years.
   *
-  * '''Storage''' carries state across snapshots — see [[Storage]]. `Store` is a
-  * separate component and is refused.
+  * '''Storage and stores''' carry state across snapshots — see [[Storage]] and
+  * [[Stores]]. A `Store` is not a storage unit renamed: one signed power
+  * variable rather than four, no efficiencies, and no power rating at all. Each
+  * refuses its own remaining gaps — set points, per-period cycling and
+  * quadratic costs.
   *
   * '''Kirchhoff voltage law is enforced''' over a cycle basis of the passive
   * branches, which is PyPSA's own formulation rather than a bus-angle DC-OPF —
@@ -69,7 +72,6 @@ object Lopf:
     // branches still have no impedance.
     val network = StandardTypes.expand(input)
     rejectUnhandled(network)
-    rejectUnmodelledComponents(network)
     rejectDanglingBuses(network)
     Expansion.reject(network)
 
@@ -244,8 +246,16 @@ object Lopf:
       // tighter.
       stores.foreach { store =>
         store.ids.foreach { id =>
-          val eNom = if extendable(store, id) then Double.PositiveInfinity else store.float("e_nom", id)
-          val lo   = if extendable(store, id) then 0.0 else eNom * store.valueAt("e_min_pu", id, t)
+          // Free at *both* ends when extendable, not just above. `e_min_pu` is
+          // "the minimal value of `e` relative to `e_nom`" and is not restricted
+          // to non-negative values, so clamping the column at zero is strictly
+          // tighter than the LP being reproduced -- PyPSA leaves `Store-e` free
+          // and carries both ends in rows. A StorageUnit's zero lower bound is
+          // sound only because its three variables are non-negative by
+          // construction, which a store's energy is not.
+          val eNom = store.float("e_nom", id)
+          val lo   = if extendable(store, id) then Double.NegativeInfinity
+                     else eNom * store.valueAt("e_min_pu", id, t)
           val hi   = if extendable(store, id) then Double.PositiveInfinity
                      else eNom * store.valueAt("e_max_pu", id, t)
           declare(Stores.Energy, id, t, math.min(lo, hi), math.max(lo, hi),
@@ -562,14 +572,6 @@ object Lopf:
     val solution = Pdhg.solve(model.problem, params)
     LopfResult(network, model, solution)
 
-  /** Reject a component class the builder does not model.
-    *
-    * Nothing left: `Store` and capacity expansion were both rejected here and
-    * are now built — see [[Stores]] and [[Expansion]], each of which refuses
-    * what remains of its own area. Kept as the place the next one goes.
-    */
-  private def rejectUnmodelledComponents(network: Network): Unit = ()
-
   /** Reject component classes the builder does not model.
     *
     * Silently dropping a component is the worst available outcome: the LP stays
@@ -580,11 +582,6 @@ object Lopf:
   private def rejectUnhandled(network: Network): Unit =
     val handled = Set("Generator", "Load", "Line", "Transformer", "Link", "Bus",
                       "Carrier", "GlobalConstraint", "SubNetwork", "LineType",
-                      // `Store` is listed as handled here so that the specific
-                      // refusal in `rejectUnmodelledComponents` -- which says
-                      // *why* a Store is different from a StorageUnit -- is the
-                      // one a caller sees. Without it this generic check fires
-                      // first and that message becomes unreachable.
                       "TransformerType", "Shape", "StorageUnit", "Store")
     val unhandled = network.tables.values.filter(t => t.size > 0 && !handled.contains(t.spec.name))
     if unhandled.nonEmpty then

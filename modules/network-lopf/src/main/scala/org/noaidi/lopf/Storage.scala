@@ -110,7 +110,5 @@ object Storage:
           s"StorageUnit '$id' has max_hours = $maxHours, so its state of charge is capped at zero " +
             "and it can store nothing"
         )
-      val standing = table.float("standing_loss", id)
-      if standing < 0.0 || standing >= 1.0 then
-        refuse(s"StorageUnit '$id' has standing_loss = $standing, which is not a fraction below 1")
     }
+    Losses.rejectStandingLoss(table, "StorageUnit", refuse)

@@ -12,6 +12,16 @@ import org.noaidi.pf.Lodf
   * actually has. The two differ by a lot: on the reference triangle the plain
   * optimum costs 6900 and the secure one 14100.
   *
+  * ==Scope==
+  *
+  * '''Extendable transmission is refused.''' The security rows below cap
+  * post-contingency flow at `s_nom · s_max_pu` read from the file, which under
+  * capacity expansion is no longer the rating the network is being built to — so
+  * a secure dispatch would be priced against a different network. Extendable
+  * '''generation''' is fine, and allowed: no security row reads a generator's
+  * capacity, every branch rating stays static, and the base model's capacity
+  * rows are inequalities the row copy below handles.
+  *
   * ==Formulation==
   *
   * No post-contingency variables. Removing a branch redistributes its flow onto
@@ -72,33 +82,7 @@ object Sclopf:
     // would give the dispatch model the right impedances and the contingency
     // rows the wrong ones.
     val network = StandardTypes.expand(input)
-
-    // Security-constrained *expansion* is not built here, and this refusal is
-    // load-bearing rather than tidy. The rows below cap post-contingency flow at
-    // `s_nom · s_max_pu` read from the file, while an extendable branch's
-    // pre-contingency flow is bounded by a capacity variable instead. Where the
-    // optimum shrinks a line below its given rating -- which is exactly what
-    // happens on `ac-dc-meshed` -- the contingency limit is looser than the
-    // network being built can carry, and the answer comes out cheaper than
-    // reality reporting `Optimal`.
-    //
-    // `Lopf.build` used to reject every extendable network, so this guard did
-    // not have to exist; implementing expansion removed it silently. Writing the
-    // security row against the capacity column instead is the real fix, and it
-    // needs a golden that does not exist yet.
-    Expansion.nominalAttribute.keys.toIndexedSeq.sorted.foreach { component =>
-      network.table(component).foreach { table =>
-        Expansion.extendables(table).headOption.foreach { id =>
-          throw new UnsupportedNetwork(
-            s"$component '$id' is extendable; the security rows here cap post-contingency flow at " +
-              "the rating in the file, which is not the capacity being chosen, so a secure " +
-              "dispatch would be priced against a network that is not the one built"
-          )
-        }
-      }
-    }
-
-    val base = Lopf.build(network)
+    val base    = Lopf.build(network)
 
     // The empty case is exactly the dispatch model, and returning before any
     // factors are computed matters: building them can refuse a network for a
@@ -118,6 +102,34 @@ object Sclopf:
 
     val requested = outages.getOrElse(monitored.map((_, _, b) => Outage(b._1, b._2)))
     if requested.isEmpty then return base
+
+    // Security-constrained *expansion* of the transmission is not built here.
+    // The rows below cap post-contingency flow at `s_nom · s_max_pu` read from
+    // the file, while an extendable branch's pre-contingency flow is bounded by
+    // a capacity variable instead. Where the optimum shrinks a line below its
+    // given rating -- which is what happens on `ac-dc-meshed` -- the contingency
+    // limit is looser than the network being built can carry, and the answer
+    // comes out cheaper than reality reporting `Optimal`.
+    //
+    // Only passive branches, and only here. An extendable *generator* or link or
+    // store is fine: nothing in these rows reads its capacity, every branch
+    // rating stays the static one, and the base model's capacity rows are
+    // inequalities emitted after all equalities, which the row copy below
+    // handles. Refusing those too would have blocked secure dispatch under
+    // generation expansion for no reason -- and after the early returns above,
+    // which produce a model with no security rows for a stale rating to be
+    // wrong about.
+    Seq("Line", "Transformer").foreach { component =>
+      network.table(component).foreach { table =>
+        Expansion.extendables(table).headOption.foreach { id =>
+          throw new UnsupportedNetwork(
+            s"$component '$id' is extendable; the security rows here cap post-contingency flow at " +
+              "the branch rating in the file, which is not the capacity being chosen, so a secure " +
+              "dispatch would be priced against a network that is not the one built"
+          )
+        }
+      }
+    }
 
     requested.foreach { o =>
       if !monitored.exists((_, _, b) => b == (o.component, o.id)) then

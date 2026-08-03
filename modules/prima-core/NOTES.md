@@ -326,11 +326,15 @@ Not implemented, and rejected rather than mis-solved in every case:
   `lifetime` at `discount_rate`, and `p_nom_mod` makes capacity an integer number
   of blocks. Its default is NaN rather than zero, so it cannot be handled by
   falling back to `capital_cost`.
-- **Security-constrained expansion.** `Sclopf` refuses an extendable network. Its
-  security rows cap post-contingency flow at the rating in the file, which is not
-  the capacity being chosen; where the optimum shrinks a line below its given
-  rating — what happens on `ac-dc-meshed` — the contingency limit is looser than
-  the network being built can carry.
+- **Security-constrained expansion of the transmission.** `Sclopf` refuses an
+  extendable *branch*; extendable generation is allowed. See the SCLOPF section
+  below for why the distinction matters and how it was got wrong first.
+- **Set points on a storage unit's power, and on either of a store's variables.**
+  `p_set` on a `StorageUnit` pins the net `p_dispatch − p_store` and
+  `p_dispatch_set`/`p_store_set` pin them individually — three different
+  constraints. A `Store`'s `e_set` and `p_set` are both refused, the latter
+  because PyPSA pins it too, out of the generic loop, and admitting it silently
+  would drop exactly the constraint the other refusal exists for.
 - **Off-nominal tap ratios and the transformer T model, in the AC path only.**
   Transformers themselves are modelled — see *Transformers* below — but an
   off-nominal tap makes `Y` asymmetric rather than scaled, and `model = "t"` with
@@ -616,6 +620,22 @@ arriving only as `generators-stand_by_cost.csv` would have slipped past.
 
 `Sclopf` reproduces PyPSA's `optimize_security_constrained` on the
 `sclopf-triangle` fixture — objective, generator dispatch and line flows.
+
+**Extendable transmission is refused; extendable generation is not.** The
+security rows cap post-contingency flow at `s_nom · s_max_pu` read from the file,
+which under capacity expansion is no longer the rating being built to. Where the
+optimum shrinks a line below its given rating — what happens on `ac-dc-meshed` —
+the contingency limit is looser than the network can carry and the answer comes
+out cheaper than reality, reporting `Optimal`.
+
+Only passive branches, and that distinction was got wrong once. The first version
+of the guard refused every extendable component, which blocks secure dispatch
+under *generation* expansion — a headline use of SCLOPF — with no correctness
+argument behind it: no security row reads a generator's capacity, every branch
+rating stays static, and the base model's capacity rows are inequalities the
+row-by-row copy already handles. The refusal also now sits after the early
+returns, since a build that emits no security rows has no stale rating to be
+wrong about.
 
 **No post-contingency variables.** Removing a branch redistributes its flow onto
 the rest by factors that depend only on the impedances, so the post-outage flow

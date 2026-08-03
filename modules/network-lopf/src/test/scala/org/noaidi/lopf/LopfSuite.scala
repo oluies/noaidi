@@ -449,38 +449,6 @@ class LopfSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("p_nom_min"), failure.getMessage)
   }
 
-  test("a security-constrained solve refuses an extendable network") {
-    assume(available, "goldens missing")
-    // The guard `Lopf.build`'s blanket extendable rejection used to provide for
-    // free. The security rows cap post-contingency flow at the rating in the
-    // file while an extendable branch's pre-contingency flow is bounded by a
-    // capacity variable, so where the optimum shrinks a line below its given
-    // rating -- which is what happens on `ac-dc-meshed` -- the contingency limit
-    // is looser than the network being built can carry.
-    val failure = intercept[Sclopf.UnsupportedNetwork] {
-      Sclopf.build(network("ac-dc-meshed"), Some(IndexedSeq(Sclopf.Outage("Line", "0"))))
-    }
-    assert(failure.getMessage.contains("extendable"), failure.getMessage)
-  }
-
-  test("an extendable network with cycles builds rows Sclopf's copy could index") {
-    assume(available, "goldens missing")
-    // The row-ordering invariant, asserted directly rather than through the
-    // solver. `LpBuilder.build` hoists every equality to the front, so an
-    // inequality emitted between two equality blocks shifts the later ones and
-    // breaks the one-for-one row copy `Sclopf` performs. Emitting the capacity
-    // rows in the middle did exactly that on every extendable network with a
-    // cycle.
-    val model = Lopf.build(network("ac-dc-meshed"))
-    (0 until model.translation.numOriginalRows).foreach { r =>
-      val mapped = model.translation.expansionOf(r) match
-        case RowExpansion.Direct(row)  => row
-        case RowExpansion.Negated(row) => row
-        case other                     => fail(s"row $r expanded to $other")
-      assertEquals(mapped, r, s"original row $r moved to standard-form row $mapped")
-    }
-  }
-
   test("storage dispatch, state of charge and spill match PyPSA's") {
     assume(available, "goldens missing")
     // The whole storage model against PyPSA, cell by cell. All five frames are
@@ -904,4 +872,109 @@ class LopfSuite extends munit.FunSuite:
       result.objective >= Lopf.solve(n, params).objective - 1e-6,
       "a secure dispatch cannot cost less than an unconstrained one",
     )
+  }
+
+  test("a discharge-only extendable storage unit does not produce a NaN bound") {
+    assume(available, "goldens missing")
+    // `Infinity * 0.0` is NaN. An extendable unit used to get its bounds by
+    // multiplying an infinite `p_nom` by its per-unit factors, so `p_min_pu = 0`
+    // -- a legal discharge-only configuration -- gave the charging column the
+    // bound [0.0, NaN] and an opaque crash inside the builder.
+    //
+    // No golden reaches it: `storage-hvdc` is the only extendable-storage
+    // fixture and carries neither a `p_min_pu` column nor a `p_max_pu` series,
+    // so both defaults are non-zero and the two implementations agree
+    // everywhere. Without this the fix could be reverted with the suite green.
+    val n = mutate(
+      "storage-hvdc",
+      "storage_units.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",p_min_pu") :: lines.tail.map(_ + ",0.0") mkString "\n"
+      },
+    )
+    val model = Lopf.build(n)
+    val units = n.require("StorageUnit")
+    units.ids.foreach { id =>
+      n.snapshots.indices.foreach { t =>
+        val upper = model.problem.variableUpper(model.map.column(Storage.Store, id, t))
+        assert(!upper.isNaN, s"StorageUnit '$id' charging upper bound is NaN at snapshot $t")
+      }
+    }
+  }
+
+  // Every refusal `Stores.reject` makes, none of which `store-bank` reaches --
+  // it sets no set point, no per-period flag, no quadratic cost and a legal
+  // standing loss, so deleting the whole body would leave the suite green.
+  Seq(
+    ("e_set", "50.0", "e_set"),
+    ("p_set", "10.0", "p_set"),
+    ("e_cyclic_per_period", "True", "per_period"),
+    ("marginal_cost_quadratic", "0.5", "quadratic"),
+    ("standing_loss", "1.5", "standing_loss"),
+  ).foreach { (attribute, value, phrase) =>
+    test(s"a Store setting $attribute is refused") {
+      assume(available, "goldens missing")
+      val n = mutate(
+        "store-bank",
+        "stores.csv",
+        text => {
+          val lines = text.linesIterator.toList
+          (lines.head + s",$attribute") :: lines.tail.map(_ + s",$value") mkString "\n"
+        },
+      )
+      val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+      assert(failure.getMessage.contains(phrase), failure.getMessage)
+    }
+  }
+
+  test("a standing loss set only per snapshot is refused too") {
+    assume(available, "goldens missing")
+    // The guard read the static column while the balance reads `valueAt`, which
+    // prefers the series. `standing_loss` is `static or series` in PyPSA, so a
+    // series carrying 1.5 passed: `(1 - 1.5)^2 = +0.25`, a store that *gains*
+    // energy while idle, solved and reported `Optimal`.
+    val dir = copyOf("store-bank")
+    Files.writeString(
+      dir.resolve("stores-standing_loss.csv"),
+      "name,tank\n" + (0 until 6).map(t => s"$t,1.5").mkString("\n") + "\n",
+    )
+    val n       = CsvReader.read(dir, schema, "store-bank")
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("standing_loss"), failure.getMessage)
+    assert(failure.getMessage.contains("snapshot"), failure.getMessage)
+  }
+
+  test("an extendable store's energy column is free at both ends, not clamped at zero") {
+    assume(available, "goldens missing")
+    // `e_min_pu` is the minimal value of `e` relative to `e_nom` and is not
+    // restricted to non-negative values. PyPSA leaves `Store-e` free and carries
+    // both ends in rows, so clamping the column at zero is strictly tighter than
+    // the LP being reproduced -- a more expensive answer, reported `Optimal`.
+    //
+    // `store-bank` cannot catch this on its own: `grow` leaves `e_min_pu` at its
+    // default of 0, where a clamp at zero and a free column agree exactly.
+    val n = mutate(
+      "store-bank",
+      "stores.csv",
+      text => {
+        val lines = text.linesIterator.toList
+        (lines.head + ",e_min_pu") ::
+          lines.tail.map(row => row + (if row.startsWith("grow,") then ",-0.5" else ",0.0")) mkString "\n"
+      },
+    )
+    val model = Lopf.build(n)
+    n.snapshots.indices.foreach { t =>
+      val lower = model.problem.variableLower(model.map.column(Stores.Energy, "grow", t))
+      assert(lower.isNegInfinity, s"extendable store energy is bounded below by $lower at snapshot $t")
+    }
+    // And the floor is still imposed, by the capacity row rather than the column.
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+    n.snapshots.indices.foreach { t =>
+      assert(
+        result.energy("grow", t) >= -0.5 * result.capacity("Store", "grow") - 1e-6,
+        s"energy ${result.energy("grow", t)} is below the e_min_pu floor at snapshot $t",
+      )
+    }
   }

@@ -37,6 +37,23 @@ class SclopfSuite extends munit.FunSuite:
       case o: ujson.Obj if o.value.contains("$nan") => Double.NaN
       case other                                    => fail(s"unexpected golden value $other")
 
+  /** A copy of a golden network with one file rewritten, read back through the
+    * real parse path.
+    */
+  private def mutate(name: String, file: String, edit: String => String): Network =
+    val dir = Files.createTempDirectory("noaidi-sclopf-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve(name)
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    val target = dir.resolve(file)
+    val before = Files.readString(target)
+    val after  = edit(before)
+    assertNotEquals(after, before, s"the edit to $file changed nothing")
+    Files.writeString(target, after)
+    CsvReader.read(dir, schema, name)
+
   private def outagesFrom(name: String): IndexedSeq[Sclopf.Outage] =
     results(name)("sclopf")("branch_outages").arr.map(v => Sclopf.Outage("Line", v.str)).toIndexedSeq
 
@@ -399,5 +416,72 @@ class SclopfSuite extends munit.FunSuite:
       val worst = (for a <- ids; o <- ids if a != o
                    yield math.abs(lodf.factor(("Line", a), ("Line", o)))).max
       assertEqualsDouble(worst, 1.0, 1e-6, s"impedance ratio $ratio")
+    }
+  }
+
+  test("an extendable transmission network is refused, and only for the transmission") {
+    assume(available, "goldens missing")
+    // The guard capacity expansion silently removed. The security rows cap
+    // post-contingency flow at the branch rating in the file, which is not the
+    // capacity being chosen; where the optimum shrinks a line below its given
+    // rating -- what happens on `ac-dc-meshed` -- the limit is looser than the
+    // network being built can carry.
+    val failure = intercept[Sclopf.UnsupportedNetwork] {
+      Sclopf.build(network("ac-dc-meshed"), Some(IndexedSeq(Sclopf.Outage("Line", "0"))))
+    }
+    assert(failure.getMessage.contains("extendable"), failure.getMessage)
+    assert(failure.getMessage.contains("branch rating"), failure.getMessage)
+  }
+
+  test("extendable generation alone is allowed, because no security row reads it") {
+    assume(available, "goldens missing")
+    // The first version of the guard refused every extendable component. Only a
+    // passive branch's rating appears in these rows -- an extendable generator,
+    // link or store leaves every branch rating static and the rows exactly
+    // right -- so refusing those blocked secure dispatch under generation
+    // expansion with no correctness argument behind it.
+    val n = mutate(
+      "ac-dc-meshed",
+      "lines.csv",
+      _.replace(",True,", ",False,"),
+    )
+    assert(
+      n.require("Generator").ids.exists(id => Expansion.isExtendable(n.require("Generator"), id)),
+      "the fixture no longer has an extendable generator, so this proves nothing",
+    )
+    assert(
+      n.require("Line").ids.forall(id => !Expansion.isExtendable(n.require("Line"), id)),
+      "a line is still extendable, so the refusal would fire for the wrong reason",
+    )
+    val model = Sclopf.build(n, Some(IndexedSeq(Sclopf.Outage("Line", "0"))))
+    assert(model.problem.numConstraints > 0)
+  }
+
+  test("an empty outage list is a dispatch model even when the network is extendable") {
+    assume(available, "goldens missing")
+    // The early return produces a model with no security rows at all, so there
+    // is nothing for a stale rating to be wrong about. Evaluating the refusal
+    // before it threw on a call that would have been correct.
+    val base = Sclopf.build(network("ac-dc-meshed"), Some(IndexedSeq.empty))
+    assertEquals(base.problem.numConstraints, Lopf.build(network("ac-dc-meshed")).problem.numConstraints)
+  }
+
+  Seq("ac-dc-meshed", "storage-hvdc").foreach { name =>
+    test(s"the base model's rows stay one-for-one under expansion on $name") {
+      assume(available, "goldens missing")
+      // `LpBuilder.build` hoists every equality to the front, so an inequality
+      // emitted between two equality blocks shifts the later ones and breaks the
+      // row-by-row copy `Sclopf` performs. Both networks, not just one:
+      // `ac-dc-meshed` has cycles and no storage, `storage-hvdc` has both, and
+      // the equality blocks that were being shifted are the storage energy
+      // balance and the set-point rows as well as Kirchhoff.
+      val model = Lopf.build(network(name))
+      (0 until model.translation.numOriginalRows).foreach { r =>
+        val mapped = model.translation.expansionOf(r) match
+          case RowExpansion.Direct(row)  => row
+          case RowExpansion.Negated(row) => row
+          case other                     => fail(s"row $r expanded to $other")
+        assertEquals(mapped, r, s"original row $r moved to standard-form row $mapped")
+      }
     }
   }

@@ -89,6 +89,43 @@ object Sclopf:
     // bridge that was never named as a contingency.
     if outages.exists(_.isEmpty) then return base
 
+    // Security-constrained *expansion* of the transmission is not built here.
+    // The rows below cap post-contingency flow at `s_nom · s_max_pu` read from
+    // the file, while an extendable branch's pre-contingency flow is bounded by
+    // a capacity variable instead. Where the optimum shrinks a line below its
+    // given rating -- which is what happens on `ac-dc-meshed` -- the contingency
+    // limit is looser than the network being built can carry, and the answer
+    // comes out cheaper than reality reporting `Optimal`.
+    //
+    // Only passive branches. An extendable *generator* or link or store is fine:
+    // nothing in these rows reads its capacity, every branch rating stays the
+    // static one, and the base model's capacity rows are inequalities emitted
+    // after all equalities, which the row copy below handles. Refusing those too
+    // blocked secure dispatch under generation expansion for no reason.
+    //
+    // Above `Lodf.of`, not merely below the early returns. Computing the factors
+    // first meant an extendable network with a bridge -- `ac-dc-meshed` under its
+    // documented default of every branch as a contingency -- threw
+    // `Lodf.Unsupported` about the bridge instead of this, a different exception
+    // *type*, so a caller catching `UnsupportedNetwork` did not catch it at all.
+    // Still after the empty-outage return, which yields a model with no security
+    // rows for a stale rating to be wrong about.
+    //
+    // The component set is read off `Role` rather than named here: a third
+    // literal copy of "Line and Transformer" is one more place to miss when a
+    // passive branch class is added, which is the mistake `Role.of` exists to
+    // prevent.
+    network.tables.values.foreach { table =>
+      if Role.of(table.spec) == Role.PassiveBranch then
+        Expansion.extendables(table).headOption.foreach { id =>
+          throw new UnsupportedNetwork(
+            s"${table.spec.name} '$id' is extendable; the security rows here cap post-contingency " +
+              "flow at the branch rating in the file, which is not the capacity being chosen, so a " +
+              "secure dispatch would be priced against a network that is not the one built"
+          )
+        }
+    }
+
     val subs = Topology.subNetworks(network)
 
     // Only the requested outages are validated. A radial spur elsewhere is
@@ -102,34 +139,6 @@ object Sclopf:
 
     val requested = outages.getOrElse(monitored.map((_, _, b) => Outage(b._1, b._2)))
     if requested.isEmpty then return base
-
-    // Security-constrained *expansion* of the transmission is not built here.
-    // The rows below cap post-contingency flow at `s_nom · s_max_pu` read from
-    // the file, while an extendable branch's pre-contingency flow is bounded by
-    // a capacity variable instead. Where the optimum shrinks a line below its
-    // given rating -- which is what happens on `ac-dc-meshed` -- the contingency
-    // limit is looser than the network being built can carry, and the answer
-    // comes out cheaper than reality reporting `Optimal`.
-    //
-    // Only passive branches, and only here. An extendable *generator* or link or
-    // store is fine: nothing in these rows reads its capacity, every branch
-    // rating stays the static one, and the base model's capacity rows are
-    // inequalities emitted after all equalities, which the row copy below
-    // handles. Refusing those too would have blocked secure dispatch under
-    // generation expansion for no reason -- and after the early returns above,
-    // which produce a model with no security rows for a stale rating to be
-    // wrong about.
-    Seq("Line", "Transformer").foreach { component =>
-      network.table(component).foreach { table =>
-        Expansion.extendables(table).headOption.foreach { id =>
-          throw new UnsupportedNetwork(
-            s"$component '$id' is extendable; the security rows here cap post-contingency flow at " +
-              "the branch rating in the file, which is not the capacity being chosen, so a secure " +
-              "dispatch would be priced against a network that is not the one built"
-          )
-        }
-      }
-    }
 
     requested.foreach { o =>
       if !monitored.exists((_, _, b) => b == (o.component, o.id)) then

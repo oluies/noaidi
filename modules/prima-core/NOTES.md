@@ -628,14 +628,20 @@ optimum shrinks a line below its given rating — what happens on `ac-dc-meshed`
 the contingency limit is looser than the network can carry and the answer comes
 out cheaper than reality, reporting `Optimal`.
 
-Only passive branches, and that distinction was got wrong once. The first version
-of the guard refused every extendable component, which blocks secure dispatch
-under *generation* expansion — a headline use of SCLOPF — with no correctness
-argument behind it: no security row reads a generator's capacity, every branch
-rating stays static, and the base model's capacity rows are inequalities the
-row-by-row copy already handles. The refusal also now sits after the early
-returns, since a build that emits no security rows has no stale rating to be
-wrong about.
+Only passive branches, and that distinction was got wrong twice. The first
+version refused every extendable component, which blocks secure dispatch under
+*generation* expansion — a headline use of SCLOPF — with no correctness argument
+behind it: no security row reads a generator's capacity, every branch rating
+stays static, and the base model's capacity rows are inequalities the row-by-row
+copy already handles.
+
+The second version put the check after `Lodf.of`. Under the documented default of
+every branch as a contingency, that computes the factors first — so an extendable
+network with a bridge threw `Lodf.Unsupported` about the bridge instead of
+`Sclopf.UnsupportedNetwork` about extendability. A *different exception type*, so
+a caller catching the documented one caught nothing. The check now sits between
+the empty-outage return and `Lodf.of`, and reads its component set off `Role`
+rather than naming Line and Transformer for a third time.
 
 **No post-contingency variables.** Removing a branch redistributes its flow onto
 the rest by factors that depend only on the impedances, so the post-outage flow

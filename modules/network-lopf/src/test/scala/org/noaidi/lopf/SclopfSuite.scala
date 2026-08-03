@@ -37,16 +37,25 @@ class SclopfSuite extends munit.FunSuite:
       case o: ujson.Obj if o.value.contains("$nan") => Double.NaN
       case other                                    => fail(s"unexpected golden value $other")
 
-  /** A copy of a golden network with one file rewritten, read back through the
-    * real parse path.
+  /** A temporary directory holding a copy of a golden network.
+    *
+    * One definition: `mutate` and `triangleWithSpur` had the same eight lines
+    * inlined separately, which is how two copies of a helper drift.
     */
-  private def mutate(name: String, file: String, edit: String => String): Network =
+  private def copyOf(name: String): Path =
     val dir = Files.createTempDirectory("noaidi-sclopf-")
     temporaries += dir
     val source = goldens.resolve("networks").resolve(name)
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
     }
+    dir
+
+  /** A copy of a golden network with one file rewritten, read back through the
+    * real parse path.
+    */
+  private def mutate(name: String, file: String, edit: String => String): Network =
+    val dir    = copyOf(name)
     val target = dir.resolve(file)
     val before = Files.readString(target)
     val after  = edit(before)
@@ -308,12 +317,7 @@ class SclopfSuite extends munit.FunSuite:
     * s_nom in sub_network and gave the spur a zero rating.
     */
   private def triangleWithSpur(): Network =
-    val dir = Files.createTempDirectory("noaidi-sclopf-spur-")
-    temporaries += dir
-    val source = goldens.resolve("networks").resolve("sclopf-triangle")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
+    val dir = copyOf("sclopf-triangle")
     // Rows are built from each file's actual header rather than from an assumed
     // column order. The golden's lines.csv is `name,bus0,bus1,x,s_nom,sub_network`
     // -- not the `...,x,r,s_nom` this first assumed -- and CsvReader maps by
@@ -433,28 +437,91 @@ class SclopfSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("branch rating"), failure.getMessage)
   }
 
-  test("extendable generation alone is allowed, because no security row reads it") {
+  test("extendable generation alone is allowed, and the secure answer is sound") {
     assume(available, "goldens missing")
     // The first version of the guard refused every extendable component. Only a
     // passive branch's rating appears in these rows -- an extendable generator,
     // link or store leaves every branch rating static and the rows exactly
     // right -- so refusing those blocked secure dispatch under generation
     // expansion with no correctness argument behind it.
-    val n = mutate(
-      "ac-dc-meshed",
-      "lines.csv",
-      _.replace(",True,", ",False,"),
-    )
+    //
+    // Asserted on the *answer*, not on a constraint count. Admitting a new class
+    // of network on the strength of `numConstraints > 0` says nothing about the
+    // failure mode the refusal exists for -- "cheaper than reality, reported
+    // Optimal" is invisible to a count. Under expansion this path additionally
+    // copies the incremental-objective offset and re-emits `Expansion`'s
+    // capacity rows with their signs, none of which a count would notice.
+    val n = mutate("ac-dc-meshed", "lines.csv", _.replace(",True,", ",False,"))
+    val generators = n.require("Generator")
     assert(
-      n.require("Generator").ids.exists(id => Expansion.isExtendable(n.require("Generator"), id)),
+      generators.ids.exists(id => Expansion.isExtendable(generators, id)),
       "the fixture no longer has an extendable generator, so this proves nothing",
     )
     assert(
       n.require("Line").ids.forall(id => !Expansion.isExtendable(n.require("Line"), id)),
       "a line is still extendable, so the refusal would fire for the wrong reason",
     )
-    val model = Sclopf.build(n, Some(IndexedSeq(Sclopf.Outage("Line", "0"))))
-    assert(model.problem.numConstraints > 0)
+
+    val outages = IndexedSeq(Sclopf.Outage("Line", "0"))
+    val secure  = Sclopf.build(n, Some(outages))
+    val plain   = Lopf.build(n)
+    assert(
+      secure.problem.numConstraints > plain.problem.numConstraints,
+      "no contingency rows were added, so the factors were never built",
+    )
+
+    val result = Sclopf.solve(n, Some(outages), params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    // A secure dispatch cannot cost less than an unconstrained one. This is the
+    // property the refusal was protecting, and the one a count cannot see.
+    val unconstrained = Lopf.solve(n, params)
+    assert(
+      result.objective >= unconstrained.objective - 1e-6 * math.abs(unconstrained.objective),
+      s"secure cost ${result.objective} is below the unconstrained ${unconstrained.objective}",
+    )
+
+    // And the capacities read back through the reused variable map, within the
+    // bounds the file gives them.
+    generators.ids.filter(id => Expansion.isExtendable(generators, id)).foreach { id =>
+      val chosen = result.capacity("Generator", id)
+      assert(chosen.isFinite, s"Generator '$id' capacity is $chosen")
+      assert(
+        chosen >= generators.float("p_nom_min", id) - 1e-6 &&
+          chosen <= generators.float("p_nom_max", id) + 1e-6,
+        s"Generator '$id' capacity $chosen is outside its bounds",
+      )
+    }
+  }
+
+  test("the default outage list refuses extendable transmission by the right type") {
+    assume(available, "goldens missing")
+    // The refusal sits above `Lodf.of`, not merely below the early returns.
+    // Computing the factors first meant `ac-dc-meshed` under its documented
+    // default -- every branch a contingency -- threw `Lodf.Unsupported` about
+    // its Bremen-Frankfurt bridge instead of this, a different exception *type*,
+    // so a caller catching `Sclopf.UnsupportedNetwork` did not catch it at all.
+    val failure = intercept[Sclopf.UnsupportedNetwork](Sclopf.build(network("ac-dc-meshed")))
+    assert(failure.getMessage.contains("extendable"), failure.getMessage)
+  }
+
+  test("an extendable transformer is refused, not only an extendable line") {
+    assume(available, "goldens missing")
+    // The component set is derived from `Role`, so a Transformer is covered
+    // without being named -- but nothing reached that arm: `ac-dc-meshed` has no
+    // transformers, so only the Line branch was ever taken.
+    val n = mutate(
+      "transformer-levels",
+      "transformers.csv",
+      text => {
+        val rows = text.linesIterator.toIndexedSeq
+        ((rows.head + ",s_nom_extendable") +: rows.tail.map(_ + ",True")).mkString("\n") + "\n"
+      },
+    )
+    val failure = intercept[Sclopf.UnsupportedNetwork] {
+      Sclopf.build(n, Some(IndexedSeq(Sclopf.Outage("Line", "hv"))))
+    }
+    assert(failure.getMessage.contains("Transformer"), failure.getMessage)
   }
 
   test("an empty outage list is a dispatch model even when the network is extendable") {

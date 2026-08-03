@@ -19,7 +19,7 @@ jobs:
           distribution: temurin
           java-version: "25"
 
-      - uses: scala-steward-org/scala-steward-action@v2
+      - uses: scala-steward-org/scala-steward-action@v2.92.0
         with:
           # The default GITHUB_TOKEN cannot open pull requests that trigger
           # other workflows, so Steward's PRs would never be built. A PAT with

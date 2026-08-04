@@ -34,6 +34,32 @@ updates:
     labels:
       - "dependencies"
 
+    # Majors only, because every `uses:` in this repository is a floating major
+    # tag -- `checkout@v7`, `setup-java@v5`, `setup-sbt@v1`,
+    # `scala-steward-action@v2`. A patch or minor release is picked up by those
+    # tags at run time with no pull request needed, so proposing one is asking
+    # for a commit that changes nothing about what actually runs.
+    #
+    # It is not hypothetical noise: scala-steward-action has 102 releases in
+    # v2.x, and Dependabot opened a pull request to pin `@v2` to `@v2.92.0`.
+    # Taking it would have made that action the only patch-pinned one here and
+    # produced a pull request per release from then on -- against an
+    # `open-pull-requests-limit` of 1, which is what would have crowded out the
+    # major bumps this ecosystem exists to catch.
+    #
+    # A major bump is a different thing: `@v2` does not follow the action to v3,
+    # so that one genuinely needs a commit, and it survives this filter.
+    #
+    # Security updates are unaffected in substance. `ignore` suppresses the pull
+    # request, but a patch-level fix reaches the workflow through the floating
+    # tag on the next run regardless -- which is the property that makes floating
+    # majors worth the trade in the first place.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+
     # No `commit-message.prefix`: Dependabot prepends a prefix to its own
     # subject rather than replacing the verb, so "Update" would yield
     # "Update: bump the actions group with N updates" — a doubled verb. Its

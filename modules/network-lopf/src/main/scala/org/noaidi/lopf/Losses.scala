@@ -34,19 +34,18 @@ object Losses:
             "raised to the elapsed hours that is a gain rather than a loss"
         )
 
-    // Only for entities the series does not cover. `ComponentTable.valueAt`
-    // resolves the series first and never reads the static value for a covered
-    // entity, and the series is dense per snapshot -- so checking the static
-    // value there would refuse a network whose balance never reads it. The rule
-    // this object exists to follow is "check what the balance reads".
-    val covered = table.series.get("standing_loss")
+    // Per entity, because the resolution is per entity. `ComponentTable.valueAt`
+    // takes the series where one covers this id and the static value otherwise,
+    // so checking both for everything would refuse a network whose balance never
+    // reads the offending number. The rule this object exists to follow is
+    // "check what the balance reads".
+    val overrides = table.series.get("standing_loss")
+
     table.ids
-      .filterNot(id => covered.exists(_.covers(id)))
+      .filterNot(id => overrides.exists(_.covers(id)))
       .foreach(id => check(id, table.float("standing_loss", id), ""))
 
-    // The per-snapshot overrides, which is where the balance actually reads from
-    // whenever an entity has them.
-    table.series.get("standing_loss").foreach { series =>
+    overrides.foreach { series =>
       series.entities.foreach { id =>
         (0 until series.snapshotCount).foreach { t =>
           series.get(id, t).foreach(value => check(id, value, s" at snapshot $t"))

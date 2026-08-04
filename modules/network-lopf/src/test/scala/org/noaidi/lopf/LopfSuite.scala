@@ -44,7 +44,7 @@ import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
   * `ac_dc_co2` in the generator for why, and what had to change to make a cap
   * that bites.
   */
-class LopfSuite extends munit.FunSuite:
+class LopfSuite extends munit.FunSuite, CsvFixtures:
 
   private def goldens: Path =
     Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
@@ -89,36 +89,6 @@ class LopfSuite extends munit.FunSuite:
     assertNotEquals(after, before, s"the edit to $file changed nothing")
     Files.writeString(target, after)
     CsvReader.read(dir, schema, name)
-
-  /** Split a CSV line. `CsvReader.splitLine` is `private[network]`, and these
-    * fixtures have no quoted fields, so a plain split is the honest local tool
-    * rather than a reason to widen the reader's API.
-    */
-  private def splitCsv(line: String): IndexedSeq[String] = line.split(",", -1).toIndexedSeq
-
-  /** Set one column of a CSV, rewriting it in place when it already exists.
-    *
-    * Appending unconditionally produced a duplicated header field, and the tests
-    * that did it only passed because `CsvReader` builds its columns into a
-    * `ListMap` where a later key overwrites an earlier one. Nothing stated that
-    * dependency, and it made "add a standing_loss column" read as an addition
-    * when it was really shadowing the fixture's own 0.02.
-    *
-    * `value` is applied per row, so a test can change one entity and leave the
-    * rest as the fixture had them.
-    */
-  private def setColumn(text: String, column: String, value: String => String): String =
-    val rows   = text.linesIterator.toIndexedSeq
-    val header = splitCsv(rows.head)
-    val at     = header.indexOf(column)
-    val body = rows.tail.map { row =>
-      val id     = splitCsv(row).headOption.getOrElse("")
-      val fields = splitCsv(row)
-      if at >= 0 then fields.updated(at, value(id)).mkString(",")
-      else (fields :+ value(id)).mkString(",")
-    }
-    val newHeader = if at >= 0 then rows.head else (header :+ column).mkString(",")
-    (newHeader +: body).mkString("\n") + "\n"
 
   private def withExtraFile(name: String, file: String, content: String): Network =
     val dir = copyOf(name)
@@ -915,7 +885,7 @@ class LopfSuite extends munit.FunSuite:
     // fixture and carries neither a `p_min_pu` column nor a `p_max_pu` series,
     // so both defaults are non-zero and the two implementations agree
     // everywhere. Without this the fix could be reverted with the suite green.
-    val n = mutate("storage-hvdc", "storage_units.csv", setColumn(_, "p_min_pu", _ => "0.0"))
+    val n = mutate("storage-hvdc", "storage_units.csv", setColumn(_, "p_min_pu", "0.0"))
     val model = Lopf.build(n)
     val units = n.require("StorageUnit")
     units.ids.foreach { id =>
@@ -938,7 +908,7 @@ class LopfSuite extends munit.FunSuite:
   ).foreach { (attribute, value, phrase) =>
     test(s"a Store setting $attribute is refused") {
       assume(available, "goldens missing")
-      val n = mutate("store-bank", "stores.csv", setColumn(_, attribute, _ => value))
+      val n = mutate("store-bank", "stores.csv", setColumn(_, attribute, value))
       val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
       assert(failure.getMessage.contains(phrase), failure.getMessage)
     }
@@ -970,14 +940,15 @@ class LopfSuite extends munit.FunSuite:
     //
     // `store-bank` cannot catch this on its own: `grow` leaves `e_min_pu` at its
     // default of 0, where a clamp at zero and a free column agree exactly.
-    // Only `grow`. Appending a whole column silently reset `tank`'s floor from
-    // 0.1 to 0.0 as a side effect, which is a second change the test did not
-    // mean to make.
-    val floors = Map("grow" -> "-0.5")
+    // Only `grow`; every other store keeps whatever the fixture gave it.
+    // Appending a whole column silently reset `tank`'s floor from 0.1 to 0.0,
+    // and naming 0.1 here to put it back would have been the same dependence on
+    // the fixture's contents in a different place -- if the golden changed, the
+    // test would write the old value back over it and stay green.
     val n = mutate(
       "store-bank",
       "stores.csv",
-      setColumn(_, "e_min_pu", id => floors.getOrElse(id, if id == "tank" then "0.1" else "0.0")),
+      setColumn(_, "e_min_pu", (id, current) => if id == "grow" then "-0.5" else current),
     )
     val model = Lopf.build(n)
     n.snapshots.indices.foreach { t =>
@@ -1027,7 +998,7 @@ class LopfSuite extends munit.FunSuite:
     Files.writeString(
       target,
       setColumn(Files.readString(target), "standing_loss",
-        id => if id == "battery" then "1.5" else "0.0"),
+        (id, current) => if id == "battery" then "1.5" else current),
     )
     val n = CsvReader.read(dir, schema, "storage-cycle")
     // The series covers `battery` at every snapshot, so the 1.5 is unreachable.
@@ -1038,8 +1009,32 @@ class LopfSuite extends munit.FunSuite:
     test(s"a storage unit setting $attribute is refused") {
       assume(available, "goldens missing")
       // NOTES advertises these three refusals; none was reached by any fixture.
-      val n = mutate("storage-cycle", "storage_units.csv", setColumn(_, attribute, _ => "10.0"))
+      val n = mutate("storage-cycle", "storage_units.csv", setColumn(_, attribute, "10.0"))
       val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
       assert(failure.getMessage.contains(attribute), failure.getMessage)
     }
+  }
+
+  test("a series on one unit does not excuse a bad static value on another") {
+    assume(available, "goldens missing")
+    // The mixed case, which is what makes the check per-entity rather than
+    // per-table. `battery` gets a valid series so its static value is never
+    // read; `hydro` has no series, so its static 1.5 is exactly what the balance
+    // would raise to the elapsed hours. Replacing the `filterNot` with "if any
+    // series exists, skip every static check" would leave the two uniform tests
+    // green and let this through.
+    val dir = copyOf("storage-cycle")
+    Files.writeString(
+      dir.resolve("storage_units-standing_loss.csv"),
+      "name,battery\n" + (0 until 6).map(t => s"$t,0.02").mkString("\n") + "\n",
+    )
+    val target = dir.resolve("storage_units.csv")
+    Files.writeString(
+      target,
+      setColumn(Files.readString(target), "standing_loss",
+        (id, current) => if id == "hydro" then "1.5" else current),
+    )
+    val n       = CsvReader.read(dir, schema, "storage-cycle")
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("hydro"), failure.getMessage)
   }

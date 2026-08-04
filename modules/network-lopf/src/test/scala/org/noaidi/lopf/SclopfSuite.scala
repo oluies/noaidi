@@ -13,7 +13,7 @@ import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
   * slack. The secure optimum is 14100. An implementation that dropped the N-1
   * rows would return 6900, so nothing here can pass without them.
   */
-class SclopfSuite extends munit.FunSuite:
+class SclopfSuite extends munit.FunSuite, CsvFixtures:
 
   private def goldens: Path =
     Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
@@ -476,6 +476,11 @@ class SclopfSuite extends munit.FunSuite:
     // A secure dispatch cannot cost less than an unconstrained one. This is the
     // property the refusal was protecting, and the one a count cannot see.
     val unconstrained = Lopf.solve(n, params)
+    // Checked before its objective is used as a bound. A stalled solve returns
+    // an arbitrary iterate, which would make this assertion fail spuriously or
+    // pass vacuously -- and in both cases point at the SCLOPF path rather than
+    // at the plain solve that actually went wrong.
+    assertEquals(unconstrained.status, SolveStatus.Optimal, s"${unconstrained.solution}")
     assert(
       result.objective >= unconstrained.objective - 1e-6 * math.abs(unconstrained.objective),
       s"secure cost ${result.objective} is below the unconstrained ${unconstrained.objective}",
@@ -513,10 +518,7 @@ class SclopfSuite extends munit.FunSuite:
     val n = mutate(
       "transformer-levels",
       "transformers.csv",
-      text => {
-        val rows = text.linesIterator.toIndexedSeq
-        ((rows.head + ",s_nom_extendable") +: rows.tail.map(_ + ",True")).mkString("\n") + "\n"
-      },
+      setColumn(_, "s_nom_extendable", "True"),
     )
     val failure = intercept[Sclopf.UnsupportedNetwork] {
       Sclopf.build(n, Some(IndexedSeq(Sclopf.Outage("Line", "hv"))))

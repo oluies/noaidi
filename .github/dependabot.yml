@@ -34,31 +34,50 @@ updates:
     labels:
       - "dependencies"
 
-    # Majors only, because every `uses:` in this repository is a floating major
-    # tag -- `checkout@v7`, `setup-java@v5`, `setup-sbt@v1`,
-    # `scala-steward-action@v2`. A patch or minor release is picked up by those
-    # tags at run time with no pull request needed, so proposing one is asking
-    # for a commit that changes nothing about what actually runs.
-    #
-    # It is not hypothetical noise: scala-steward-action has 102 releases in
-    # v2.x, and Dependabot opened a pull request to pin `@v2` to `@v2.92.0`.
-    # Taking it would have made that action the only patch-pinned one here and
-    # produced a pull request per release from then on -- against an
-    # `open-pull-requests-limit` of 1, which is what would have crowded out the
-    # major bumps this ecosystem exists to catch.
+    # Majors only, for the actions listed below. Each of them is referenced by a
+    # floating major tag, so a patch or minor release reaches the workflow at run
+    # time with no pull request needed -- proposing one asks for a commit that
+    # changes nothing about what actually runs. Dependabot opened one such pull
+    # request to pin `scala-steward-action@v2` to an exact patch; that action has
+    # had dozens of releases in its current major, and against an
+    # `open-pull-requests-limit` of 1 the stream would crowd out the major bumps
+    # this ecosystem exists to catch.
     #
     # A major bump is a different thing: `@v2` does not follow the action to v3,
-    # so that one genuinely needs a commit, and it survives this filter.
+    # so it genuinely needs a commit, and it survives this filter.
     #
-    # Security updates are unaffected in substance. `ignore` suppresses the pull
-    # request, but a patch-level fix reaches the workflow through the floating
-    # tag on the next run regardless -- which is the property that makes floating
-    # majors worth the trade in the first place.
+    # ==Named rather than `*`, on purpose==
+    #
+    # The argument above holds only for an action pinned to a floating major. An
+    # action pinned to a SHA or an exact version -- the usual supply-chain
+    # hardening advice -- gets no fix at run time, so silently freezing it would
+    # be the opposite of what is wanted. Listing the four by name makes that the
+    # default: anything added later falls outside the filter and keeps getting
+    # pull requests until someone decides otherwise.
+    #
+    # '''Adding an action here requires that it be pinned to a floating major.'''
+    #
+    # ==What this costs on security advisories==
+    #
+    # More than the first version of this comment claimed. `ignore` has no
+    # `applies-to`, so it suppresses security updates as well as version updates.
+    # Action advisories are usually fixed in a patch or minor release, so for
+    # these four the *pull request* will not appear.
+    #
+    # The fix itself still arrives -- that is what a floating major tag does --
+    # but the notification does not, and those are different things. Accepted
+    # deliberately: with the fix landing automatically, the alert would be
+    # telling us about work already done. See the `groups` note below, which
+    # covers what remains of `actions-security` under this rule.
     ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-patch"
-          - "version-update:semver-minor"
+      - dependency-name: "actions/checkout"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "actions/setup-java"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "sbt/setup-sbt"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "scala-steward-org/scala-steward-action"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
 
     # No `commit-message.prefix`: Dependabot prepends a prefix to its own
     # subject rather than replacing the verb, so "Update" would yield
@@ -72,6 +91,14 @@ updates:
       # Two entries because a group applies to version updates only unless told
       # otherwise, and security advisories are exactly the case where several
       # actions do move at once.
+      #
+      # `actions-security` is kept, but the `ignore` block above narrows what can
+      # reach it. For the four actions listed there it now fires only on an
+      # advisory whose fix lands in a new *major*, since patch and minor are
+      # suppressed for security updates as well as version ones. It still covers
+      # any action added later at any level, which is the case the named list was
+      # written to leave open -- a SHA-pinned action gets no run-time fix, so its
+      # advisory has to arrive as a pull request or not at all.
       actions:
         applies-to: version-updates
         patterns:

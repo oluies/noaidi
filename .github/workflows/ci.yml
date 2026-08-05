@@ -14,59 +14,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The invariant `.github/dependabot.yml` rests on, checked rather than
-  # asserted in a comment. That file suppresses patch and minor updates for four
-  # named actions, which is only sound while each of them is pinned to a floating
-  # major tag -- a SHA or exact pin gets no fix at run time, so ignoring its
-  # updates would freeze it silently and for ever.
+  # The invariant `.github/dependabot.yml` rests on, checked rather than asserted
+  # in a comment. That file suppresses patch and minor updates for a named set of
+  # actions, which is sound only while each is pinned to a floating major tag: a
+  # SHA or exact pin gets no fix at run time, so ignoring its updates would freeze
+  # it silently and for ever.
   #
-  # Cheap, and it fails on exactly the change that would make the config wrong:
-  # pinning one of the four, or adding a floating-major action without listing
-  # it.
-  dependabot-invariant:
+  # The logic lives in a script rather than a heredoc so it can be run against a
+  # working tree before pushing, and so it can be read.
+  action-pins:
     name: Dependabot ignore list matches the workflows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Every ignored action is floating-major pinned, and vice versa
-        run: |
-          python3 - <<'PY'
-          import re, pathlib, sys, yaml
+      # PyYAML is not part of the runner image's contract, and PEP 668 on 24.04
+      # makes a system `pip install` fail without `--break-system-packages`. A
+      # pinned interpreter with an explicit install is one less thing to be
+      # surprised by.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
 
-          config = yaml.safe_load(pathlib.Path(".github/dependabot.yml").read_text())
-          entry = next(u for u in config["updates"] if u["package-ecosystem"] == "github-actions")
-          ignored = {e["dependency-name"] for e in entry.get("ignore", [])}
+      - run: pip install pyyaml
 
-          used = {}
-          for path in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
-              for action, version in re.findall(r"uses:\s*([^@\s]+)@(\S+)", path.read_text()):
-                  used.setdefault(action, set()).add(version)
-
-          floating = {a for a, vs in used.items() if all(re.fullmatch(r"v\d+", v) for v in vs)}
-          pinned = set(used) - floating
-
-          problems = []
-          for action in sorted(ignored & pinned):
-              problems.append(
-                  f"{action} is ignored for patch/minor but pinned to {sorted(used[action])} -- "
-                  "an exact or SHA pin gets no fix at run time, so this freezes it silently"
-              )
-          for action in sorted(floating - ignored):
-              problems.append(
-                  f"{action} is pinned to a floating major but not in the ignore list, so "
-                  "Dependabot will propose patch bumps that change nothing at run time"
-              )
-          for action in sorted(ignored - set(used)):
-              problems.append(f"{action} is ignored but no workflow uses it")
-
-          if problems:
-              print("dependabot.yml disagrees with the workflows:", file=sys.stderr)
-              for p in problems:
-                  print(f"  - {p}", file=sys.stderr)
-              sys.exit(1)
-          print(f"{len(ignored)} ignored actions, all floating-major pinned and all in use")
-          PY
+      - run: python3 .github/scripts/check_action_pins.py
 
   test:
     name: Test (JDK ${{ matrix.java }})

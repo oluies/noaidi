@@ -51,11 +51,16 @@ updates:
     # The argument above holds only for an action pinned to a floating major. An
     # action pinned to a SHA or an exact version -- the usual supply-chain
     # hardening advice -- gets no fix at run time, so silently freezing it would
-    # be the opposite of what is wanted. Listing the four by name makes that the
-    # default: anything added later falls outside the filter and keeps getting
-    # pull requests until someone decides otherwise.
+    # be the opposite of what is wanted. Listing them by name makes that the
+    # default: an action added later falls outside the filter and keeps getting
+    # pull requests until someone puts it here.
     #
-    # '''Adding an action here requires that it be pinned to a floating major.'''
+    # '''Every action listed here must be pinned to a floating major tag.'''
+    # `.github/scripts/check_action_pins.py` enforces that in CI and fails the
+    # build if it stops being true. Leaving a *new* floating-major action out is
+    # a warning rather than an error: nothing breaks, Dependabot simply proposes
+    # patch bumps that change nothing at run time. The two directions are not
+    # equally bad, so they are not treated the same.
     #
     # ==What this costs on security advisories==
     #
@@ -78,6 +83,8 @@ updates:
         update-types: ["version-update:semver-patch", "version-update:semver-minor"]
       - dependency-name: "scala-steward-org/scala-steward-action"
         update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "actions/setup-python"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
 
     # No `commit-message.prefix`: Dependabot prepends a prefix to its own
     # subject rather than replacing the verb, so "Update" would yield
@@ -93,12 +100,12 @@ updates:
       # actions do move at once.
       #
       # `actions-security` is kept, but the `ignore` block above narrows what can
-      # reach it. For the four actions listed there it now fires only on an
-      # advisory whose fix lands in a new *major*, since patch and minor are
-      # suppressed for security updates as well as version ones. It still covers
-      # any action added later at any level, which is the case the named list was
-      # written to leave open -- a SHA-pinned action gets no run-time fix, so its
-      # advisory has to arrive as a pull request or not at all.
+      # reach it. For the actions listed there it now fires only on an advisory
+      # whose fix lands in a new *major*, since patch and minor are suppressed
+      # for security updates as well as version ones. It stays open at every
+      # level for any action *not* listed -- which is the case the named list was
+      # written to leave room for, since a SHA-pinned action gets no run-time fix
+      # and its advisory has to arrive as a pull request or not at all.
       actions:
         applies-to: version-updates
         patterns:

@@ -66,8 +66,8 @@ updates:
     #
     # More than the first version of this comment claimed. `ignore` has no
     # `applies-to`, so it suppresses security updates as well as version updates.
-    # Action advisories are usually fixed in a patch or minor release, so for
-    # these four the *pull request* will not appear.
+    # Action advisories are usually fixed in a patch or minor release, so for the
+    # actions listed there the *pull request* will not appear.
     #
     # The fix itself still arrives -- that is what a floating major tag does --
     # but the notification does not, and those are different things. Accepted

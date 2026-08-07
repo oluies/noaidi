@@ -115,3 +115,23 @@ object Branches:
     else
       val value = table.float("tap_ratio", id)
       if value.isFinite && value > 0.0 then value else 1.0
+
+  /** A branch attribute that may be absent from the file, read as its default.
+    *
+    * Absent means three things here and all resolve to zero: the schema does not
+    * declare it, the file omitted the column, or the value is not finite.
+    * `ComponentTable.float` throws on the first of those and returns NaN on the
+    * last, and a NaN reaching a susceptance or a phase shift turns every angle in
+    * the sub-network into NaN without a word.
+    *
+    * Shared rather than copied. `Admittance` had this and `LinearPowerFlow` read
+    * `phase_shift` through `float` directly, so the AC path degraded gracefully
+    * on a schema without the attribute while the linear path died with a raw
+    * `NoSuchElementException` -- two readings of the same absence, which is how
+    * the `standing_loss` guards drifted apart in `network-lopf`.
+    */
+  def optional(table: ComponentTable, attribute: String, id: String): Double =
+    if table.spec.attribute(attribute).isEmpty && !table.static.contains(attribute) then 0.0
+    else
+      val value = table.float(attribute, id)
+      if value.isFinite then value else 0.0

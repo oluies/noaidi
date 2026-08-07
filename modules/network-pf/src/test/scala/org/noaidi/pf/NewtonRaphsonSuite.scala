@@ -217,3 +217,24 @@ class NewtonRaphsonSuite extends munit.FunSuite:
           paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
         }
     }
+
+  test("a phase-shifting transformer is refused by the AC path, not answered") {
+    assume(available, "goldens missing")
+    // PyPSA converges on `phase-shift` and the golden records its voltages, so
+    // this is a genuine gap rather than an impossibility -- `exp(jphi)` on one
+    // off-diagonal and its conjugate on the other, which makes Y asymmetric.
+    //
+    // Refused rather than approximated, and the refusal is the point: the linear
+    // flow silently returned the unshifted answer for months because nothing read
+    // the attribute. A gap with a diagnostic is a different thing from a gap
+    // without one.
+    val n = CsvReader.read(goldens.resolve("networks").resolve("phase-shift"), schema, "phase-shift")
+    val failure = intercept[Admittance.Unsupported](NewtonRaphson.solve(n))
+    assert(failure.getMessage.contains("phase_shift"), failure.getMessage)
+
+    // And PyPSA does have an answer here, so the golden is evidence of the gap.
+    val pf = ujson.read(
+      Files.readString(goldens.resolve("results").resolve("phase-shift.json"))
+    )("pf")
+    assert(!pf.obj.contains("error"), "PyPSA no longer solves this, so the gap is moot")
+  }

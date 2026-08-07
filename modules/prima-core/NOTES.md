@@ -338,9 +338,11 @@ Not implemented, and rejected rather than mis-solved in every case:
 - **Off-nominal tap ratios and the transformer T model, in the AC path only.**
   Transformers themselves are modelled — see *Transformers* below — but an
   off-nominal tap makes `Y` asymmetric rather than scaled, and `model = "t"` with
-  a non-zero shunt needs a wye–delta conversion before `Y` is built. Phase shift
-  is not modelled at all. The linear models handle `tap_ratio` as PyPSA does, as
-  a plain multiplier.
+  a non-zero shunt needs a wye–delta conversion before `Y` is built. The linear
+  models handle `tap_ratio` as PyPSA does, as a plain multiplier.
+- **Phase shift, in the AC path only.** The linear flow models it — see *Phase
+  shift* below. `Y` needs `exp(jφ)` on one off-diagonal and its conjugate on the
+  other, which is refused rather than approximated.
 - **Global constraints other than `primary_energy` with sense `<=`.** PyPSA
   dispatches on `type` to entirely different builders, so assuming one would
   build an energy cap as an emissions cap wearing the same right-hand side.
@@ -816,6 +818,44 @@ The shared `Branches` object is now public. Its stated purpose was one definitio
 of susceptance across the power-flow modules, and the transformer conversion was
 the case that would have been added to one and not the other — `network-lopf`'s
 cycle constraints read it rather than carrying a third copy.
+
+## Phase shift, and a bug with nowhere to live
+
+A phase-shifting transformer moves power without an angle difference across it.
+PyPSA's linear flow carries it as a constant:
+
+```
+p_branch_shift = −b · φ            (φ in radians, transformers only)
+B θ = p − K · p_branch_shift        flow = b (θ₀ − θ₁) + p_branch_shift
+```
+
+This port ignored it. Not approximated — **ignored**, in the strict sense that no
+line of code anywhere read `phase_shift`. On `transformer-levels` with 30° on one
+transformer, t1 carries **−840.53 MW** against the **+150.66** it carries
+unshifted: reversed, and 5.6 times the power. The port returned the unshifted
+number.
+
+The interesting part is how it escaped a codebase that refuses off-nominal taps,
+the T model, `Store`, `overnight_cost` and a dozen other things by name. **A
+refusal needs a code site, and an attribute nothing reads has none.** Every other
+gap here was found at the moment some code had to decide what to do with a value;
+this one had no such moment. Searching for attributes the schema declares and the
+port never mentions would have found it, and nothing else in the process would.
+
+### PyPSA's own two models disagree
+
+Worth knowing before concluding either is broken. `n.lpf()` applies the shift.
+`n.optimize()` does not: its Kirchhoff row is `Σ x_l s_l = 0` with no shift term,
+so the optimised flows are **identical** at 0° and 30°.
+
+So the LOPF here was never wrong — it matches PyPSA including this omission — and
+`phase-shift` pins both halves: that the linear flow honours the shift, and that
+the optimisation does not.
+
+The AC path refuses it. `Y` needs `exp(jφ)` on one off-diagonal and its conjugate
+on the other, which is asymmetry rather than scaling, and PyPSA does converge on
+this fixture — so the golden records an answer the port declines to compute,
+which is the honest shape for a gap.
 
 ## Standard types, and the 585-bus network they unblock
 

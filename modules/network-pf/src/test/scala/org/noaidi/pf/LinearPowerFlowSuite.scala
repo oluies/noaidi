@@ -42,7 +42,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   // expansion; nothing else in the network supplies an impedance at all.
   private val networks =
     List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc", "transformer-levels",
-      "standard-types", "scigrid-de")
+      "standard-types", "scigrid-de", "phase-shift")
 
   // Memoised, both of them. `scigrid-de`'s golden is 25 MB of JSON and its
   // network is 585 buses over 24 snapshots; re-reading and re-solving per test
@@ -441,3 +441,54 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   }
 
   private def result(n: Network): LpfResult = LinearPowerFlow.solve(n)
+
+  test("a phase-shifting transformer moves power, and the shift is load-bearing") {
+    assume(available, "goldens missing")
+    // `phase-shift` is `transformer-levels` with 30 degrees on t1, and nothing
+    // else changed -- so the two goldens differ by exactly this term. That makes
+    // the comparison sharp rather than merely present: t1 carries +150.66 MW
+    // unshifted and -840.53 MW shifted, reversed and 5.6 times the power.
+    //
+    // This module returned the unshifted answer for both, silently, because
+    // nothing read the attribute at all. There was no code site to put a refusal
+    // at, which is how it escaped a port that refuses off-nominal taps, the T
+    // model and Store by name.
+    val shifted   = lpf("phase-shift")("transformer_p0")
+    val unshifted = lpf("transformer-levels")("transformer_p0")
+
+    val shiftedFlow   = frameValue(shifted, 0, "t1", network("phase-shift").snapshots(0))
+    val unshiftedFlow = frameValue(unshifted, 0, "t1", network("transformer-levels").snapshots(0))
+    assert(
+      math.abs(shiftedFlow - unshiftedFlow) > 100.0,
+      s"the two fixtures agree on t1 ($shiftedFlow), so the shift changes nothing",
+    )
+    assert(shiftedFlow * unshiftedFlow < 0.0, "the shift no longer reverses the flow")
+
+    assertEqualsDouble(result(network("phase-shift")).flow("Transformer", "t1", 0), shiftedFlow, 1e-6)
+  }
+
+  test("PyPSA's optimisation ignores the phase shift its power flow applies") {
+    assume(available, "goldens missing")
+    // Not a defect in this port, and worth pinning because it looks like one.
+    // `n.lpf()` builds `p_branch_shift = -b * phi` and carries it through, while
+    // the Kirchhoff row in `n.optimize()` is `sum(x_l s_l) == 0` with no shift
+    // term -- so PyPSA's own two L2 models disagree about the same network. The
+    // optimised flows are identical to the unshifted fixture's; the linear ones
+    // are not.
+    val optimised = ujson.read(
+      Files.readString(goldens.resolve("results").resolve("phase-shift.json"))
+    )("optimize")("transformer_p0")
+    val unshifted = ujson.read(
+      Files.readString(goldens.resolve("results").resolve("transformer-levels.json"))
+    )("optimize")("transformer_p0")
+
+    val stamps = network("phase-shift").snapshots
+    stamps.indices.foreach { t =>
+      assertEqualsDouble(
+        frameValue(optimised, t, "t1", stamps(t)),
+        frameValue(unshifted, t, "t1", stamps(t)),
+        1e-6,
+        s"PyPSA's LOPF now differs under a phase shift at snapshot $t",
+      )
+    }
+  }

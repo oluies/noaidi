@@ -90,6 +90,20 @@ object Admittance:
                       s"Transformer '$id' has tap_ratio = $tap; an off-nominal tap changes the AC " +
                         "admittance by more than a scalar and is not modelled"
                     )
+                  // Phase shift, refused here for the same reason and found the
+                  // same way. PyPSA multiplies the off-diagonals by `exp(jφ)` and
+                  // its conjugate, so `Y` is no longer symmetric -- not a scaling.
+                  // The linear flow *does* model it (see `LinearPowerFlow`); this
+                  // path silently returned the unshifted answer because nothing
+                  // read the attribute, which is exactly the failure a refusal
+                  // exists to prevent.
+                  val shift = optional(table, "phase_shift", id)
+                  if shift != 0.0 then
+                    throw new Unsupported(
+                      s"Transformer '$id' has phase_shift = $shift degrees; that makes Y asymmetric " +
+                        "(`exp(jφ)` on one off-diagonal and its conjugate on the other) and is not " +
+                        "modelled here, though the linear flow does model it"
+                    )
                   val shunt = optional(table, "b", id) + optional(table, "g", id)
                   val isT   = table.static.contains("model") && table.string("model", id) == "t"
                   if isT && shunt != 0.0 then

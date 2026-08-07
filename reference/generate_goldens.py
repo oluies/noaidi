@@ -315,6 +315,36 @@ def storage_cycle():
     return n
 
 
+def phase_shift():
+    """A phase-shifting transformer, which the linear flow and the LOPF disagree about.
+
+    `transformer-levels` with 30 degrees on one of its two transformers, and the
+    cycle that fixture was built around is what makes the shift observable: it
+    enters the flow as a constant injection, so a radial network would absorb it
+    into the slack and show nothing.
+
+    ==The two L2 models genuinely differ, in PyPSA==
+
+    Worth stating because it looks like a bug in whichever one is read second.
+    `n.lpf()` applies the shift -- `calculate_B_H` builds
+    `p_branch_shift = -b * phase_shift` in radians and solves
+    `B theta = p - K p_branch_shift` -- so t1 goes from +150.66 MW to
+    **-840.53 MW**, reversing direction and carrying 5.6 times the power.
+
+    `n.optimize()` does not. Its Kirchhoff row is `sum(x_l s_l) == 0` with no
+    shift term at all, so the optimised flows are **identical** at 0 and 30
+    degrees. That is PyPSA's own inconsistency, not an approximation this port
+    chose, and reproducing it means the LOPF golden here must match the
+    unshifted one exactly.
+
+    So this fixture pins two different things at once: that the linear flow
+    honours the shift, and that the optimisation does not.
+    """
+    n = transformer_levels()
+    n.transformers.loc["t1", "phase_shift"] = 30.0
+    return n
+
+
 def store_bank():
     """Stores, which are not StorageUnits with a different name.
 
@@ -575,6 +605,7 @@ NETWORKS = {
     "transformer-levels": transformer_levels,
     "standard-types": standard_types_network,
     "storage-cycle": storage_cycle,
+    "phase-shift": phase_shift,
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,

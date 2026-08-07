@@ -116,6 +116,36 @@ object LinearPowerFlow:
 
       val susceptances = branches.map(edge => (edge.component, edge.id) -> susceptance(network, sub, edge)).toMap
 
+      // A phase-shifting transformer moves power without an angle difference, so
+      // it enters as a constant rather than through `B`. PyPSA's `calculate_B_H`
+      // builds `p_branch_shift = −b · φ` with φ in radians, subtracts its bus
+      // projection from the injections, and adds it back to the flow:
+      //
+      //   B θ = p − K · p_branch_shift        flow = b (θ₀ − θ₁) + p_branch_shift
+      //
+      // Dropping it is not a small error. On `phase-shift` -- `transformer-levels`
+      // with 30° on one transformer -- t1 carries −840.53 MW against the +150.66
+      // it carries unshifted: reversed, and 5.6 times the power. This module
+      // returned the unshifted answer, silently, because nothing read the
+      // attribute at all.
+      //
+      // Only transformers have one; a line's is structurally zero.
+      val shifts = branches.map { edge =>
+        val radians =
+          if edge.component != "Transformer" then 0.0
+          else math.toRadians(network.require(edge.component).float("phase_shift", edge.id))
+        (edge.component, edge.id) -> -susceptances((edge.component, edge.id)) * radians
+      }.toMap
+
+      // The incidence projection: a branch's shift leaves `bus0` and arrives at
+      // `bus1`, matching the flow convention `b (θ₀ − θ₁)` used below.
+      val busShift = collection.mutable.Map.empty[String, Double].withDefaultValue(0.0)
+      branches.foreach { edge =>
+        val s = shifts((edge.component, edge.id))
+        busShift(edge.bus0) = busShift(edge.bus0) + s
+        busShift(edge.bus1) = busShift(edge.bus1) - s
+      }
+
       val b = new Array[Double](n * n)
       branches.foreach { edge =>
         val y = susceptances((edge.component, edge.id))
@@ -150,14 +180,15 @@ object LinearPowerFlow:
         // table and entity.
         val injected = injectionsOf(network, sub, t)
 
-        val theta = factorisation.solve(IArray.from(free.map(injected)))
+        val theta = factorisation.solve(IArray.from(free.map(bus => injected(bus) - busShift(bus))))
 
         angles((choice.bus, t)) = 0.0
         free.zipWithIndex.foreach { (bus, i) => angles((bus, t)) = theta(i) }
 
         branches.foreach { edge =>
           flows((edge.component, edge.id, t)) =
-            susceptances((edge.component, edge.id)) * (angles((edge.bus0, t)) - angles((edge.bus1, t)))
+            susceptances((edge.component, edge.id)) * (angles((edge.bus0, t)) - angles((edge.bus1, t))) +
+              shifts((edge.component, edge.id))
         }
 
         // The slack bus takes whatever closes the balance. Summing the *free*

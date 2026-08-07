@@ -133,7 +133,7 @@ object LinearPowerFlow:
       val shifts = branches.map { edge =>
         val radians =
           if edge.component != "Transformer" then 0.0
-          else math.toRadians(network.require(edge.component).float("phase_shift", edge.id))
+          else math.toRadians(Branches.optional(network.require(edge.component), "phase_shift", edge.id))
         (edge.component, edge.id) -> -susceptances((edge.component, edge.id)) * radians
       }.toMap
 

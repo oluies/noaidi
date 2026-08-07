@@ -1038,3 +1038,52 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
     assert(failure.getMessage.contains("hydro"), failure.getMessage)
   }
+
+  test("a phase shift changes the linear flow but not the optimised dispatch") {
+    assume(available, "goldens missing")
+    // The half of the claim that was missing. `LinearPowerFlowSuite` asserted
+    // "PyPSA's LOPF ignores the shift" by comparing two goldens to each other,
+    // which invokes no port code at all -- so if someone added a shift term to
+    // `Cycles`, every test would still pass while this module silently diverged
+    // from the golden it is supposed to match.
+    //
+    // PyPSA's Kirchhoff row is `sum(x_l s_l) == 0` with no shift term, so the
+    // optimised flows on `phase-shift` are identical to `transformer-levels`,
+    // which differs from it only by 30 degrees on t1. The linear flow is not: t1
+    // carries -840.53 MW there against +150.66 here.
+    val expected = results("phase-shift")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("phase-shift")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val flows = expected("transformer_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Transformer").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Transformer", id, t), frameValue(flows, t, id), 1e-3,
+          s"snapshot $t, transformer $id")
+      }
+    }
+
+    // The fixture really does carry a shift, so this is not passing because the
+    // two networks are the same.
+    assert(
+      n.require("Transformer").float("phase_shift", "t1") != 0.0,
+      "the fixture no longer has a phase shift, so it cannot distinguish anything",
+    )
+    // And the unshifted sibling optimises to the same flows, which is the
+    // property being pinned.
+    val plain = Lopf.solve(network("transformer-levels"), params)
+    n.snapshots.indices.foreach { t =>
+      assertEqualsDouble(
+        result.dispatch("Transformer", "t1", t),
+        plain.dispatch("Transformer", "t1", t),
+        1e-3,
+        s"the optimised flows differ under a shift at snapshot $t",
+      )
+    }
+  }

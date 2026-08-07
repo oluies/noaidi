@@ -97,14 +97,14 @@ object Admittance:
                   // path silently returned the unshifted answer because nothing
                   // read the attribute, which is exactly the failure a refusal
                   // exists to prevent.
-                  val shift = optional(table, "phase_shift", id)
+                  val shift = Branches.optional(table, "phase_shift", id)
                   if shift != 0.0 then
                     throw new Unsupported(
                       s"Transformer '$id' has phase_shift = $shift degrees; that makes Y asymmetric " +
                         "(`exp(jφ)` on one off-diagonal and its conjugate on the other) and is not " +
                         "modelled here, though the linear flow does model it"
                     )
-                  val shunt = optional(table, "b", id) + optional(table, "g", id)
+                  val shunt = Branches.optional(table, "b", id) + Branches.optional(table, "g", id)
                   val isT   = table.static.contains("model") && table.string("model", id) == "t"
                   if isT && shunt != 0.0 then
                     throw new Unsupported(
@@ -130,8 +130,8 @@ object Admittance:
               val yG = rPu / magnitude
               val yB = -xPu / magnitude
 
-              val shuntG = optional(table, "g", id) * base / 2.0
-              val shuntB = optional(table, "b", id) * base / 2.0
+              val shuntG = Branches.optional(table, "g", id) * base / 2.0
+              val shuntB = Branches.optional(table, "b", id) * base / 2.0
 
               g(i * n + i) += yG + shuntG
               b(i * n + i) += yB + shuntB
@@ -148,15 +148,3 @@ object Admittance:
     }
 
     Admittance(buses, IArray.unsafeFromArray(g), IArray.unsafeFromArray(b))
-
-  /** A branch attribute that may be absent from the file, read as its default.
-    *
-    * `g` is omitted from every reference export because it sits at zero, and `b`
-    * is omitted wherever no line is charging. Reading a missing column as NaN
-    * would poison the whole matrix.
-    */
-  private def optional(table: ComponentTable, attribute: String, id: String): Double =
-    if table.spec.attribute(attribute).isEmpty && !table.static.contains(attribute) then 0.0
-    else
-      val value = table.float(attribute, id)
-      if value.isFinite then value else 0.0

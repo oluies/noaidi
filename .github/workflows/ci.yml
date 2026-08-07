@@ -36,7 +36,17 @@ jobs:
         with:
           python-version: "3.13"
 
-      - run: pip install pyyaml
+      # Pinned exactly. A job whose whole subject is pinning discipline should
+      # not install its own dependency unpinned. Dependabot does not manage it:
+      # there is no `pip` ecosystem here, and adding one to track a single
+      # build-time package would pull every future Python dependency into a
+      # config that exists for GitHub Actions. Bump it by hand when it matters.
+      - run: pip install pyyaml==6.0.3
+
+      # The check, and the tests for the check. The logic is glob matching, tree
+      # walking and a set comparison, and its failure mode is passing while the
+      # invariant it names is broken -- so the tests run first.
+      - run: python3 .github/scripts/test_check_action_pins.py
 
       - run: python3 .github/scripts/check_action_pins.py
 

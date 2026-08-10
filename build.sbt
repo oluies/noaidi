@@ -163,7 +163,7 @@ lazy val primaNetlib = project
 // set of case classes. The schema is read from the pinned PyPSA install's own
 // registry (reference/goldens/schema.json), which is why upickle is here.
 val upickleVersion = "4.4.3"
-val jhdfVersion    = "0.9.4"
+val jhdfVersion    = "0.13.0"
 
 lazy val networkModel = project
   .in(file("modules/network-model"))

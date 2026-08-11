@@ -115,7 +115,7 @@ object UnitCommitment:
       input: Network,
       params: BnbParams = BnbParams(),
   ): UcResult =
-    val network = StandardTypes.expand(input)
+    val network = Active.only(StandardTypes.expand(input))
     reject(network)
 
     val snapshots = network.snapshots.indices

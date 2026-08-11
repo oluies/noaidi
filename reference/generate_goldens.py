@@ -315,6 +315,68 @@ def storage_cycle():
     return n
 
 
+def inactive_components():
+    """A network with components switched off, which PyPSA removes from the model.
+
+    `active` is a boolean on every physical component and it does not mean "runs
+    at zero" -- PyPSA drops the component from the model entirely. That reaches
+    further than dispatch: an inactive branch is excluded from
+    `determine_network_topology`, so it can split a sub-network in two and change
+    which bus is slack.
+
+    `standard-types` with two things off:
+
+    `standard-types` with `hv23` switched off -- one of the three 380 kV lines,
+    so the triangle becomes a path and the loop flow that fixture was built
+    around disappears. Every remaining flow changes: `hv31` carries -300 MW
+    where the two used to share it, and the optimum costs **68,408** against
+    19,800.
+
+    Deactivating a *generator* was the obvious choice and is the wrong one here.
+    `peak` does not run at the optimum anyway, so switching it off changes
+    nothing at all -- a fixture built on it would pass against an implementation
+    that ignored `active` entirely, which is exactly the non-result the first
+    attempt at this produced. The line was chosen because ignoring it gives a
+    different answer rather than the same one.
+    """
+    n = standard_types_network()
+    n.lines.loc["hv23", "active"] = False
+    return n
+
+
+def inactive_removed():
+    """`inactive`'s network with the line genuinely deleted rather than switched off.
+
+    The physically correct target for `inactive`, and the reason it has to exist
+    as its own fixture: PyPSA's own two answers for "this line is not there"
+    disagree, so one of them cannot be a golden.
+
+    Deactivating `hv23` gives an objective of 68,407.58 with `peak` running at
+    272 MW while cheap capacity sits idle. Deleting it gives 19,800 with `slack`
+    serving all 435 MW -- which is the obvious merit order, and the answer this
+    port produces.
+
+    The cause is inside PyPSA. `cycle_matrix` still finds the loop
+    hv12-hv23-hv31 when `hv23` is inactive, so `define_kirchhoff_voltage_
+    constraints` emits a row for it -- but it selects the flow variables over
+    active branches only, so `hv23`'s term drops out and the row collapses to
+    `x12 f12 + x31 f31 = 0`. That is a voltage law for a loop that is not closed,
+    and it pins `hv31` to a multiple of `hv12`: 27.6 MW on a branch rated 1700.
+    Removing the line drops the cycle count from 2 to 1 and the phantom row with
+    it.
+
+    PyPSA is inconsistent with itself here rather than merely idiosyncratic: its
+    *linear flow* excludes inactive branches from topology properly -- a two-bus
+    network joined by one inactive line has two sub-networks -- so `n.lpf()` and
+    `n.optimize()` model the same network differently. This port follows the
+    linear flow, and the `inactive` fixture's `optimize` block is therefore
+    evidence rather than a target.
+    """
+    n = standard_types_network()
+    n.remove("Line", "hv23")
+    return n
+
+
 def phase_shift():
     """A phase-shifting transformer, which the linear flow and the LOPF disagree about.
 
@@ -586,6 +648,21 @@ NOMINAL_ATTRIBUTES = {
 # spanning the cycle space gives the same feasible set, and both answers cost
 # the same. It does mean the dispatch frames here cannot gate an
 # implementation. The objective and the marginal prices can.
+# Fixtures whose `optimize` block records what PyPSA does rather than what a
+# correct model should, with the evidence and the substitute.
+NOT_A_TARGET = {
+    "inactive": (
+        "PyPSA's `cycle_matrix` keeps the inactive branch's loop while the Kirchhoff "
+        "builder drops its flow term, so the row collapses to a voltage law for a loop "
+        "that is not closed and pins hv31 to 27.6 MW on a 1700 MW branch. Deleting the "
+        "line instead gives 19800 against this 68407.58. Its own linear flow excludes "
+        "inactive branches from topology properly, so `lpf` and `optimize` here model "
+        "different networks. Compare an implementation against `inactive-removed`; the "
+        "`lpf` block on this fixture *is* a target."
+    ),
+}
+
+
 DEGENERATE_DISPATCH = {
     "scigrid-de": (
         "one vertex of a degenerate optimal face, not a unique answer: PyPSA's own "
@@ -606,6 +683,8 @@ NETWORKS = {
     "standard-types": standard_types_network,
     "storage-cycle": storage_cycle,
     "phase-shift": phase_shift,
+    "inactive": inactive_components,
+    "inactive-removed": inactive_removed,
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
@@ -1039,6 +1118,8 @@ def capture_network(name: str, build) -> dict:
         }
         if name in DEGENERATE_DISPATCH:
             results["optimize"]["dispatch_note"] = DEGENERATE_DISPATCH[name]
+        if name in NOT_A_TARGET:
+            results["optimize"]["not_a_target"] = NOT_A_TARGET[name]
     except Exception as exc:  # noqa: BLE001
         results["optimize"] = {"error": f"{type(exc).__name__}: {exc}"}
 

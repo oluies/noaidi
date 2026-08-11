@@ -1,0 +1,6 @@
+name,v_nom,control,generator,sub_network
+hv1,380.0,Slack,slack,0
+hv2,380.0,PQ,,0
+hv3,380.0,PQ,,0
+mv1,110.0,PQ,,0
+mv2,110.0,PQ,,0

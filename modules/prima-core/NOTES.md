@@ -819,6 +819,52 @@ of susceptance across the power-flow modules, and the transformer conversion was
 the case that would have been added to one and not the other — `network-lopf`'s
 cycle constraints read it rather than carrying a third copy.
 
+## `active`, and PyPSA disagreeing with itself
+
+`active` is a boolean on every physical component. It does not mean "runs at
+zero" — PyPSA removes the component from the model, and that reaches further than
+dispatch: an inactive branch is excluded from topology, so a two-bus network
+joined by one inactive line has **two** sub-networks rather than one.
+
+This port read the attribute nowhere. It was found the same way as phase shift,
+by the same check: enumerate what the schema declares, subtract what the source
+ever names, read the remainder. That check now has two confirmed bugs to its
+name and remains the only technique that finds this shape — an attribute nothing
+reads has no call site to refuse at and nothing to sabotage in a test.
+
+`Active.only` filters the network once, at each physics entry point, rather than
+at the several dozen sites that enumerate `table.ids`. One transformation cannot
+be half-applied; a filter per call site can, and the missed one is silent.
+Results still report an inactive component at 0.0, matching PyPSA's frames,
+while a genuinely unknown name still throws.
+
+### The `optimize` golden for `inactive` is not a target
+
+PyPSA's two L2 models disagree about the same network, and the LOPF one is
+wrong. `cycle_matrix` keeps the loop through an inactive branch; the Kirchhoff
+builder then selects flow variables over *active* branches only, so the inactive
+branch's term drops out and the row collapses to a voltage law for a loop that is
+not closed. On `inactive` that pins `hv31` to 27.6 MW on a branch rated 1700 and
+costs **68,407.58**, running the expensive generator at 272 MW while cheap
+capacity sits idle.
+
+Delete the same line instead of deactivating it and PyPSA gives **19,800** with
+the cheap unit serving all 435 MW — one cycle instead of two, and exactly what
+this port produces. Its own `n.lpf()` excludes inactive branches from topology
+properly, which is why the `lpf` block on that fixture *is* a target while the
+`optimize` block is evidence.
+
+So `inactive-removed` exists as the comparison, and the golden carries a
+`not_a_target` note beside the numbers. This is the second golden in the
+repository that records what PyPSA does rather than what should be reproduced —
+`scigrid-de`'s degenerate dispatch is the other.
+
+The objective is not the discriminator here: both networks cost 19,800, because
+the cheap generator serves everything either way and no rating binds. The flows
+are — `hv31` carries the whole 300 MW instead of sharing it, and `hv12` drops
+from 197.2 to 46.7. A test asserting only the objective would have passed against
+an implementation that ignored `active` entirely.
+
 ## Phase shift, and a bug with nowhere to live
 
 A phase-shifting transformer moves power without an angle difference across it.

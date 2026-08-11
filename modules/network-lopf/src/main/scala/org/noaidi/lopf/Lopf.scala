@@ -70,7 +70,7 @@ object Lopf:
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
-    val network = StandardTypes.expand(input)
+    val network = Active.only(StandardTypes.expand(input))
     rejectUnhandled(network)
     rejectDanglingBuses(network)
     Expansion.reject(network)
@@ -567,10 +567,11 @@ object Lopf:
     * constraints used rather than the `x = 0` a typed line carries in its file.
     */
   def solve(input: Network, params: PdhgParams = PdhgParams.default): LopfResult =
-    val network  = StandardTypes.expand(input)
+    val expanded = StandardTypes.expand(input)
+    val network  = Active.only(expanded)
     val model    = build(network)
     val solution = Pdhg.solve(model.problem, params)
-    LopfResult(network, model, solution)
+    LopfResult(network, model, solution, Active.inactive(expanded))
 
   /** Reject component classes the builder does not model.
     *
@@ -624,7 +625,18 @@ final case class LopfResult(
     network: Network,
     model: Lopf.Model,
     solution: LpSolution,
+    /** Entities the network switched off, which have no variable in the model.
+      *
+      * PyPSA keeps an inactive component's column in its result frames carrying
+      * 0.0, so the accessors below do the same rather than throwing. The
+      * distinction the accessors exist to preserve is kept: a genuinely unknown
+      * name still throws, because that means the caller and the model disagree
+      * about what the network contains.
+      */
+    inactive: Map[String, IndexedSeq[String]] = Map.empty,
 ):
+  private def isInactive(component: String, entity: String): Boolean =
+    inactive.get(component).exists(_.contains(entity))
   def status: SolveStatus = solution.status
 
   /** Total cost, which for a dispatch problem is the objective. */
@@ -638,7 +650,8 @@ final case class LopfResult(
     * idle.
     */
   def dispatch(component: String, entity: String, snapshot: Int): Double =
-    if component == "StorageUnit" then
+    if isInactive(component, entity) then 0.0
+    else if component == "StorageUnit" then
       storage(Storage.Dispatch, entity, snapshot) - storage(Storage.Store, entity, snapshot)
     else if component == "Store" then storage(Stores.Power, entity, snapshot)
     else solution.primal(model.map.column(component, entity, snapshot))

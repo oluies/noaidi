@@ -342,3 +342,83 @@ object Topology:
       .flatMap((a, b) => IndexedSeq(a, b))
       .toSet
     network.table("Bus").map(_.ids.filterNot(connected.contains)).getOrElse(IndexedSeq.empty)
+
+/** Components a network has switched off.
+  *
+  * `active` is a boolean on every physical component, and PyPSA drops an
+  * inactive one from the model entirely — not to zero output, but out. That
+  * changes more than dispatch: an inactive branch is excluded from
+  * `determine_network_topology`, so a two-bus network joined by one inactive
+  * line has '''two''' sub-networks rather than one, with the slack and the
+  * balance that follow from it.
+  *
+  * This port read the attribute nowhere at all, so an inactive generator was
+  * dispatched like any other. On `standard-types`, deactivating the cheap
+  * generator makes PyPSA report `infeasible` — there is genuinely not enough
+  * generation without it — where this returned `Optimal` at 19,800.
+  *
+  * It was found by enumerating the attributes the schema declares and
+  * subtracting the ones the source ever names, which is the only technique that
+  * finds this shape: there is no code site to put a refusal at, and nothing to
+  * sabotage in a test, because the value was never read.
+  *
+  * `build_year` and `lifetime` narrow `active` further, but only when investment
+  * periods are in play — `get_active_assets` ignores them otherwise — and those
+  * are refused elsewhere.
+  */
+object Active:
+
+  /** The network with every inactive entity removed from every table.
+    *
+    * Applied once, at each physics entry point, rather than filtered at each of
+    * the several dozen places that enumerate `table.ids`. One transformation
+    * cannot be half-applied; a filter at every call site can, and the one that
+    * gets missed is silent.
+    *
+    * Returns the network unchanged — the same instance — when nothing is
+    * inactive, which is every fixture but one.
+    */
+  def only(network: Network): Network =
+    val filtered = network.tables.values.toIndexedSeq.flatMap { table =>
+      val inactive = inactiveIn(table)
+      if inactive.isEmpty then None else Some(without(table, inactive))
+    }
+    if filtered.isEmpty then network
+    else filtered.foldLeft(network)((n, table) => n.withTable(table))
+
+  /** Ids this table has switched off, in table order. */
+  def inactiveIn(table: ComponentTable): IndexedSeq[String] =
+    if !table.static.contains("active") then IndexedSeq.empty
+    else table.ids.filterNot(table.bool("active", _))
+
+  /** Every inactive id in the network, by component. */
+  def inactive(network: Network): Map[String, IndexedSeq[String]] =
+    network.tables.values.toIndexedSeq
+      .map(table => table.spec.name -> inactiveIn(table))
+      .filter((_, ids) => ids.nonEmpty)
+      .toMap
+
+  private def without(table: ComponentTable, drop: IndexedSeq[String]): ComponentTable =
+    val dropped = drop.toSet
+    val keep    = table.ids.zipWithIndex.filterNot((id, _) => dropped.contains(id))
+    val rows    = keep.map(_._2)
+
+    val static = table.static.map { (name, column) =>
+      name -> (column match
+        case Column.Floats(v)  => Column.Floats(IArray.from(rows.map(v(_))))
+        case Column.Ints(v)    => Column.Ints(IArray.from(rows.map(v(_))))
+        case Column.Strings(v) => Column.Strings(IArray.from(rows.map(v(_))))
+        case Column.Bools(v)   => Column.Bools(IArray.from(rows.map(v(_)))))
+    }
+
+    // A time series covers only the entities that vary, so it is filtered on its
+    // own entity list rather than on the table's.
+    val series = table.series.map { (name, ts) =>
+      val positions = ts.entities.zipWithIndex.filterNot((id, _) => dropped.contains(id))
+      name -> TimeSeries(
+        positions.map(_._1),
+        IArray.from(ts.values.map(row => IArray.from(positions.map((_, i) => row(i))))),
+      )
+    }
+
+    table.copy(ids = keep.map(_._1), static = static, series = series)

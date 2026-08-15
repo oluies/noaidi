@@ -75,7 +75,8 @@ object LinearPowerFlow:
     // Standard types first, as PyPSA does in `calculate_dependent_values`. A
     // typed line carries `x = 0` in the file, so skipping this does not give a
     // subtly wrong answer -- the susceptance guard refuses the network outright.
-    val network = StandardTypes.expand(input)
+    val expanded = StandardTypes.expand(input)
+    val network  = Active.only(expanded)
     rejectUnhandled(network)
 
     val subs   = Topology.subNetworks(network)
@@ -85,6 +86,20 @@ object LinearPowerFlow:
     val flows     = mutable.Map.empty[(String, String, Int), Double]
     val busPowers = mutable.Map.empty[(String, Int), Double]
     val dispatch  = mutable.Map.empty[(String, String, Int), Double]
+
+    // An inactive component is out of the model, but PyPSA still reports it --
+    // its column survives in `lines_t.p0` and `generators_t.p` carrying 0.0. So
+    // the result carries a zero for it rather than throwing, which keeps the
+    // accessor honest about the difference between "switched off" and "not a
+    // thing in this network".
+    Active.inactive(expanded).foreach { (component, ids) =>
+      ids.foreach { id =>
+        network.snapshots.indices.foreach { t =>
+          flows((component, id, t)) = 0.0
+          dispatch((component, id, t)) = 0.0
+        }
+      }
+    }
 
     // Non-slack dispatch is just p_set, so it does not depend on the flow at all.
     //

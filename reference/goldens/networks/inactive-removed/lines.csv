@@ -1,0 +1,4 @@
+name,bus0,bus1,type,s_nom,length,sub_network
+hv12,hv1,hv2,Al/St 240/40 4-bundle 380.0,1700.0,120.0,0
+hv31,hv3,hv1,679-AL1/86-ST1A 380.0,1700.0,200.0,0
+mv12,mv1,mv2,490-AL1/64-ST1A 110.0,300.0,45.0,0

@@ -1087,3 +1087,65 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       )
     }
   }
+
+  test("an inactive component is excluded from the model, not dispatched at zero") {
+    assume(available, "goldens missing")
+    // `active` was read nowhere in this port, so an inactive component was built
+    // into the model like any other. PyPSA removes it -- found by enumerating the
+    // attributes the schema declares and subtracting those the source ever names,
+    // which is the only technique that finds this shape: an attribute nothing
+    // reads has no call site to refuse at and nothing to sabotage in a test.
+    //
+    // Compared against `inactive-removed`, which is the same network with the
+    // line genuinely deleted, and *not* against `inactive`'s own `optimize`
+    // block. The two disagree inside PyPSA: `cycle_matrix` keeps the inactive
+    // branch's loop while the Kirchhoff builder drops its flow term, so the row
+    // collapses to a voltage law for a loop that is not closed and pins hv31 to
+    // 27.6 MW on a branch rated 1700. That costs 68,407.58 against the 19,800 a
+    // deleted line gives. PyPSA's own linear flow excludes inactive branches from
+    // topology properly, so its two L2 models disagree about the same network;
+    // this port follows the linear flow. The golden says so in a `not_a_target`
+    // note beside the numbers.
+    val correct = results("inactive-removed")("optimize")
+    val pypsas  = results("inactive")("optimize")
+    assert(pypsas.obj.contains("not_a_target"), "the golden no longer warns that it is not a target")
+
+    val n      = network("inactive")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = correct("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against the deleted-line answer $target")
+
+    // The two PyPSA answers really do differ, so this is not passing because the
+    // distinction is moot.
+    assert(
+      math.abs(pypsas("objective").num - target) > 1.0,
+      "PyPSA's two answers now agree, so the inconsistency this pins is gone",
+    )
+
+    // Flows, not just the objective. Both networks cost 19,800 -- the cheap
+    // generator serves everything either way and no rating binds -- so the
+    // objective cannot tell them apart, and asserting only that would pass
+    // against an implementation that ignored `active` entirely. What changes is
+    // where the power goes: hv31 carries the whole 300 MW to hv3 instead of
+    // sharing it with hv23, 197.2 -> 46.7 on hv12.
+    val flows = correct("line_p0")
+    val whole = Lopf.solve(network("standard-types"), params)
+    // Only the lines the deleted-line golden has -- it does not carry an `hv23`
+    // column at all, because there is no such line in that network. The inactive
+    // one is checked separately below.
+    val compared = flows("columns").arr.map(_.str).toSet
+    assert(compared.nonEmpty && !compared.contains("hv23"), s"unexpected golden columns: $compared")
+    n.snapshots.indices.foreach { t =>
+      n.require("Line").ids.filter(compared.contains).foreach { id =>
+        assertEqualsDouble(result.dispatch("Line", id, t), frameValue(flows, t, id), 1e-3,
+          s"snapshot $t, line $id")
+      }
+    }
+    assert(
+      math.abs(result.dispatch("Line", "hv31", 0) - whole.dispatch("Line", "hv31", 0)) > 100.0,
+      "the flag changes no flow, so this test cannot discriminate",
+    )
+    assertEqualsDouble(result.dispatch("Line", "hv23", 0), 0.0, 1e-9, "the inactive line carries power")
+  }

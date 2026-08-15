@@ -68,10 +68,11 @@ object Sclopf:
       outages: Option[IndexedSeq[Outage]] = None,
       params: PdhgParams = PdhgParams.default,
   ): LopfResult =
-    val network = StandardTypes.expand(input)
+    val expanded = StandardTypes.expand(input)
+    val network  = Active.only(expanded)
     val model = build(network, outages)
     val solution = Pdhg.solve(model.problem, params)
-    LopfResult(network, model, solution)
+    LopfResult(network, model, solution, Active.inactive(expanded))
 
   /** Build the LP: the dispatch model plus one rating pair per (branch, outage,
     * snapshot).
@@ -81,7 +82,7 @@ object Sclopf:
     // outage factors are computed from susceptance, so an unexpanded network
     // would give the dispatch model the right impedances and the contingency
     // rows the wrong ones.
-    val network = StandardTypes.expand(input)
+    val network = Active.only(StandardTypes.expand(input))
     val base    = Lopf.build(network)
 
     // The empty case is exactly the dispatch model, and returning before any

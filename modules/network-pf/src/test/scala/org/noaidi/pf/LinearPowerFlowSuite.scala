@@ -42,7 +42,7 @@ class LinearPowerFlowSuite extends munit.FunSuite:
   // expansion; nothing else in the network supplies an impedance at all.
   private val networks =
     List("ac-dc-meshed", "ac-dc-dispatch", "storage-hvdc", "transformer-levels",
-      "standard-types", "scigrid-de", "phase-shift")
+      "standard-types", "scigrid-de", "phase-shift", "inactive")
 
   // Memoised, both of them. `scigrid-de`'s golden is 25 MB of JSON and its
   // network is 585 buses over 24 snapshots; re-reading and re-solving per test

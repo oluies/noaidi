@@ -407,6 +407,128 @@ def phase_shift():
     return n
 
 
+def ramp_limits():
+    """Ramp limits, which this port read nowhere until now.
+
+    `ramp_limit_up` and `ramp_limit_down` default to NaN, are declared on
+    Generator, Link and Process, and were named in this port only inside unit
+    commitment's refusal. So a plain LOPF over a ramp-limited network solved the
+    unconstrained problem and returned `Optimal`. No golden could see it: not one
+    of the other fixtures sets a ramp limit, `scigrid-de` included.
+
+    Every path through PyPSA's ramp builder gets an entity here, and each was
+    checked by removing it and confirming the objective moves. Against the
+    50,240 optimum:
+
+      - `base` -- plain static limits on a fixed generator, and a **`p_init`** of
+        60, so the first snapshot is bounded against a given rather than against
+        `p(-1)`. Its `p(0)` lands on exactly `60 + 0.2*300 = 120`. Without the
+        limits: 29,238. Without `p_init` alone: 42,300 -- PyPSA masks the first
+        snapshot's rows out where `p_init` is NaN, which is its *default*, so
+        reading NaN as zero is a wrong answer available for free.
+      - `flex` -- a **time-varying** `ramp_limit_up`. Both up and down limits are
+        `static or series` in PyPSA, and a series with no static counterpart is
+        invisible to a `static.contains` check. Without it: 47,735.
+      - `cold` -- `up_time_before = 0`, so it was down before the horizon. PyPSA
+        then reads `p_init` as 0 rather than NaN *and* scales the up row by a
+        prior status of zero, which pins `p(0)` to 0 exactly. Without it: 48,640.
+        This is the only attribute here that changes the answer by changing
+        whether a row exists at all.
+      - `new` -- **extendable** and ramp-limited, so its limits multiply the
+        capacity *variable* rather than a number in the file. Built to 200 MW,
+        and its dispatch moves 115 -> 55 -> 115, hitting the +-60 band exactly at
+        both ends.
+      - `tie` -- a **Link**, because ramp limits are not a generator attribute.
+        Its flow steps 10 -> 60, exactly `0.25 * 200`. Without it: 37,798.
+
+    `peak` never runs. It is a safety valve: the ramp limits are tight enough
+    that without an unconstrained unit somewhere the network cannot follow the
+    load at all, and an infeasible fixture pins nothing.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(6))
+
+    n.add("Bus", "a", v_nom=110.0)
+    n.add("Bus", "b", v_nom=110.0)
+
+    n.add("Link", "tie", bus0="a", bus1="b", p_nom=200.0, p_min_pu=-1.0,
+          marginal_cost=0.5, ramp_limit_up=0.25, ramp_limit_down=0.25)
+
+    n.add("Generator", "base", bus="a", p_nom=300.0, marginal_cost=10.0,
+          ramp_limit_up=0.2, ramp_limit_down=0.3, p_init=60.0)
+    n.add("Generator", "flex", bus="a", p_nom=150.0, marginal_cost=40.0,
+          ramp_limit_up=[0.1, 0.2, 0.9, 0.15, 0.4, 0.25], ramp_limit_down=0.5)
+    n.add("Generator", "cold", bus="b", p_nom=120.0, marginal_cost=20.0,
+          ramp_limit_up=0.5, ramp_limit_down=0.5, up_time_before=0)
+    n.add("Generator", "new", bus="b", p_nom=0.0, p_nom_extendable=True,
+          p_nom_max=400.0, capital_cost=60.0, marginal_cost=25.0,
+          ramp_limit_up=0.3, ramp_limit_down=0.3)
+    n.add("Generator", "peak", bus="b", p_nom=600.0, marginal_cost=300.0)
+
+    n.add("Load", "da", bus="a", p_set=[200.0, 90.0, 260.0, 130.0, 300.0, 110.0])
+    n.add("Load", "db", bus="b", p_set=[140.0, 220.0, 80.0, 250.0, 120.0, 200.0])
+    return n
+
+
+def energy_budget():
+    """`e_sum_max` and `e_sum_min`, which this port mentioned nowhere at all.
+
+    A budget on a generator's energy across the whole horizon:
+
+        e_sum_min  <=  sum_t weighting(t) * p(t)  <=  e_sum_max
+
+    Their defaults are `+inf` and `-inf`, so an unset budget is invisible and a
+    set one was simply dropped -- the LP stayed feasible and spent a fuel budget
+    the network does not have. It is the largest discrepancy the schema sweep
+    turned up: 30,600 here against 7,320 with both dropped.
+
+    Each half is checked on its own. Without `e_sum_max`: 11,760. Without
+    `e_sum_min`: 28,340. `cheap` is capped at exactly the 200 MWh it would
+    otherwise beat every other unit to, and `must` is floored at exactly the 120
+    MWh merit order would never give it, so both rows are tight at the optimum
+    rather than merely present.
+
+    ==The weighting column is the trap==
+
+    PyPSA sums `p` against `snapshot_weightings.generators` -- the column the
+    emissions cap uses, and *not* the `objective` column already in scope
+    wherever this row gets built. Every other fixture in this repository holds
+    all three weightings at 1.0, which is exactly where the confusion is
+    invisible. Here `generators` is 2.0 against an `objective` of 1.0, so reading
+    the wrong column gives 28,660 instead of 30,600.
+
+    ==All three prices vary, and it took both rounds to see why==
+
+    For the reason `store-bank` and `storage-cycle` vary theirs. At a flat price
+    a budget fixes *how much* a generator produces and leaves *when* entirely
+    free, so the first attempt matched the objective exactly and disagreed with
+    PyPSA on every cell of the dispatch -- useless as a golden.
+
+    Varying `cheap` and `mid` was not enough, and the reason is worth keeping.
+    With `must` flat, its floor could slide between snapshots at exactly
+    compensating cost: shifting 26.4 MW of `cheap` from the third snapshot to the
+    first, letting `must` cover the gap there and give the same amount back at the
+    fourth, came to 30,500.00 either way. Two genuinely tied vertices, and the
+    port found the other one. Pricing *when* `must` runs closes it -- nudging any
+    of the twelve costs by 1e-4 now moves the dispatch by exactly zero.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    n.snapshot_weightings.loc[:, "generators"] = 2.0
+    n.snapshot_weightings.loc[:, "objective"] = 1.0
+    n.snapshot_weightings.loc[:, "stores"] = 1.0
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Generator", "cheap", bus="b", p_nom=200.0,
+          marginal_cost=[8.0, 14.0, 10.0, 12.0], e_sum_max=200.0)
+    n.add("Generator", "mid", bus="b", p_nom=200.0,
+          marginal_cost=[50.0, 46.0, 58.0, 52.0])
+    n.add("Generator", "must", bus="b", p_nom=100.0,
+          marginal_cost=[92.0, 88.0, 95.0, 90.0], e_sum_min=120.0)
+    n.add("Load", "d", bus="b", p_set=[150.0, 180.0, 120.0, 200.0])
+    return n
+
+
 def store_bank():
     """Stores, which are not StorageUnits with a different name.
 
@@ -685,6 +807,8 @@ NETWORKS = {
     "phase-shift": phase_shift,
     "inactive": inactive_components,
     "inactive-removed": inactive_removed,
+    "ramp-limits": ramp_limits,
+    "energy-budget": energy_budget,
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,

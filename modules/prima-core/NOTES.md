@@ -564,6 +564,10 @@ locally, which would delete import and export and return either a spurious
 infeasibility or a schedule far dearer than the real network's. Dangling bus
 references, ramp limits, `stand_by_cost` and `marginal_cost_quadratic` are
 refused for the same reason: each would price the schedule below the truth.
+Ramp limits are *built* in `Lopf` and refused only here, where they would have to
+carry start-up and shut-down ramps against the binary status; the detection is
+shared, so the two cannot drift apart again — see "Ramp limits and energy
+budgets" below for the round where they had.
 
 The formulation is otherwise the standard one — a binary status per unit per
 snapshot, the disjunctive output bound `p_min_pu · p_nom · u <= p <= p_max_pu · p_nom · u`, and
@@ -902,6 +906,81 @@ The AC path refuses it. `Y` needs `exp(jφ)` on one off-diagonal and its conjuga
 on the other, which is asymmetry rather than scaling, and PyPSA does converge on
 this fixture — so the golden records an answer the port declines to compute,
 which is the honest shape for a gap.
+
+## Ramp limits and energy budgets: the same shape, twice more
+
+The sweep that found `phase_shift` — enumerate the attributes the schema declares
+as input, subtract those the sources ever name — has now produced four confirmed
+silent wrong answers. `active` and `phase_shift` were the first two. These are
+the other two, and both were verified against PyPSA before a line was written.
+
+**Ramp limits.** `ramp_limit_up` and `ramp_limit_down` bound how far a unit's
+output may move between consecutive snapshots. They were named in this port only
+inside `UnitCommitment`'s refusal, so a plain LOPF over a ramp-limited network
+solved the **unconstrained** problem and reported `Optimal`. Not one pre-existing
+fixture sets a ramp limit, `scigrid-de` included, so no golden could see it.
+
+**Energy budgets.** `e_sum_max` and `e_sum_min` cap a generator's energy over the
+whole horizon. They were mentioned **nowhere at all**. On the purpose-built
+fixture the dropped rows under-price the answer by 23,280 — 7,320 against 30,600
+— which is the largest discrepancy the sweep has turned up.
+
+The failure mode is the same one the CO2 cap section names: *a dropped
+restriction is indistinguishable from an absent one to an inequality*, so the
+answer comes out below the truth reporting `Optimal`. And the reason all four
+escaped is the same too — each defaults to something inert (`NaN`, `±inf`,
+`True`), so nothing about an unset one is visible, and none had a code site at
+which a refusal could have been written.
+
+### Three things the formulation turned on
+
+**The first snapshot is not like the others.** There is no `p(−1)`, so `t = 0` is
+bounded against `p_init` instead. Its default is NaN and PyPSA masks the row out
+entirely rather than reading it as zero — the difference between "starts wherever
+it likes" and "starts shut down", which at a limit of 0.1 is 90% of the rating.
+`p_init` is therefore not a separate gap: it has no effect on anything except
+these rows. It is reached through `up_time_before` (default 1), and a unit
+declared down gets `p_init = 0` *and* a prior status of zero, which pins `p(0)`
+to exactly 0.
+
+**Extendable units ramp against a variable.** Where the capacity is a decision,
+the limit multiplies the capacity column rather than the `p_nom` in the file.
+PyPSA writes the fixed case as a `p_nom` of zero plus a capacity term; following
+that construction keeps the two comparable term by term.
+
+**The budget uses a third weighting column.** `e_sum` sums `p` against
+`snapshot_weightings.generators` — the column the emissions cap uses, and not the
+`objective` column already in scope wherever the row gets built. Every other
+fixture holds all three at 1.0, which is precisely where reading the wrong one
+cannot be seen; `energy-budget` sets them apart so that it can, and the wrong
+column gives 28,660 against 30,600.
+
+### A wrong comment is worse than no comment
+
+`UnitCommitment`'s ramp refusal swept `static.contains` over the four attributes,
+under a comment asserting they are "genuinely `varying: false`" — written to
+explain why the neighbouring `stand_by_cost` guard needed a per-snapshot sweep
+and this one did not. Two of the four are `static or series`. So a
+`generators-ramp_limit_up.csv` with no static counterpart passed the guard
+untouched, reproducing one block below it the exact hole its neighbour existed to
+close. Both now read through `Ramps.limited`, which resolves per snapshot.
+
+### Both fixtures needed reshaping, and the second one twice
+
+A flag that is set but never tight tests nothing. `ramp-limits` gives every path
+its own entity — static limits, a series limit, `p_init`, `up_time_before = 0`, an
+extendable unit and a Link — and each was checked by removing it and confirming
+the objective moves.
+
+`energy-budget` was harder, in a way worth keeping. At a flat price a budget
+fixes *how much* a generator produces and leaves *when* entirely free, so the
+first attempt matched the objective exactly and disagreed with PyPSA on every
+cell of the dispatch. Varying two of the three prices was still not enough: with
+`must` flat, its floor could slide between snapshots at exactly compensating
+cost, and the port found the other of two genuinely tied vertices at 30,500.00
+apiece. Pricing *when* `must` runs closes it — nudging any of the twelve costs by
+1e-4 now moves the dispatch by exactly zero, which is the check to run rather
+than assume.
 
 ## Standard types, and the 585-bus network they unblock
 

@@ -1,0 +1,3 @@
+name,v_nom,control,generator,sub_network
+a,110.0,Slack,base,0
+b,110.0,Slack,cold,1

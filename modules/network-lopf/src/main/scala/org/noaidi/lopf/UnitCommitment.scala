@@ -352,8 +352,9 @@ object UnitCommitment:
         // `generators-stand_by_cost.csv` with no static counterpart would slip
         // past a `static.contains` check and be dropped -- the same
         // under-pricing this guard exists to prevent. The ramp-limit check below
-        // is static-only because those attributes are genuinely `varying: false`,
-        // so the pattern does not transfer.
+        // reads per snapshot for the same reason -- it did not, on the strength
+        // of a claim that those attributes are static, and two of the four are
+        // not.
         // Gated on the *data*, not the spec. Both attributes are declared in the
         // schema, so `spec.attribute(...).isDefined` is unconditionally true and
         // the sweep ran for every solve even when neither appears in the file --
@@ -384,22 +385,28 @@ object UnitCommitment:
       }
     }
 
+    // Ramp limits, through the same reader [[Lopf]] builds its rows from.
+    //
+    // This was a `static.contains` sweep over the four attributes, under a
+    // comment asserting they are "genuinely `varying: false`". Two of them are
+    // not: `ramp_limit_up` and `ramp_limit_down` are `static or series` in
+    // PyPSA, so a `generators-ramp_limit_up.csv` with no static counterpart
+    // passed the guard untouched and the schedule ignored it -- the exact hole
+    // the neighbouring `stand_by_cost` check was written to close, reproduced
+    // one block below it.
+    //
+    // `Ramps.limited` reads per snapshot and so sees the series. It also carries
+    // PyPSA's rule that a lone `ramp_limit_start_up` implies a full-rating up
+    // limit, which the old sweep treated as a fourth independent attribute.
     val generators = network.table("Generator")
     generators.foreach { table =>
-      Seq("ramp_limit_up", "ramp_limit_down", "ramp_limit_start_up", "ramp_limit_shut_down")
-        .foreach { attribute =>
-          if table.static.contains(attribute) then
-            table.ids.foreach { id =>
-              val value = table.float(attribute, id)
-              // The default is NaN, meaning "no limit"; a finite value is a limit
-              // this model would ignore.
-              if value.isFinite then
-                throw new UnsupportedNetwork(
-                  s"generator '$id' has $attribute = $value; ramp limits are not modelled, and " +
-                    "ignoring one yields a schedule the network cannot actually follow"
-                )
-            }
-        }
+      table.ids.foreach { id =>
+        if Ramps.limited(table, id, network.snapshots.indices) then
+          throw new UnsupportedNetwork(
+            s"generator '$id' is ramp-limited; commitment here has no ramp rows, and ignoring one " +
+              "yields a schedule the network cannot actually follow"
+          )
+      }
     }
 
     Seq("StorageUnit", "Store").foreach { component =>

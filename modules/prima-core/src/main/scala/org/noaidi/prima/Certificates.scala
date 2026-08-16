@@ -21,11 +21,14 @@ package org.noaidi.prima
   *   - A dual-cone violation is a component of `y`, so `||y||` makes it
   *     dimensionless.
   *   - An unabsorbed reduced cost is a component of `K'y`, so it carries the
-  *     units of the constraint matrix as well and needs `||K|| * ||y||`.
-  *   - For the unboundedness test, `Kd` residuals likewise need `||K|| * ||d||`
-  *     while bound-direction violations are components of `d` and need `||d||`.
+  *     units of the constraint matrix as well. Component `j` is divided by
+  *     '''that column's''' norm: `|(K'y)_j| <= ||K_.j||_2 * ||y||_2` by
+  *     Cauchy-Schwarz, so the ratio lies in `[0, 1]`.
+  *   - For the unboundedness test, `(Kd)_i` is divided by '''that row's''' norm
+  *     on the same inequality, while bound-direction violations are components
+  *     of `d` and need only `||d||`.
   *
-  * Two normalisations that look reasonable are not, and both were tried:
+  * Three normalisations that look reasonable are not, and all three were tried:
   *
   *   - Dividing by the certificate's own objective value is scale-invariant in
   *     the direction but lets a large right-hand side dilute a violation. On the
@@ -36,6 +39,21 @@ package org.noaidi.prima
   *     in the reduced-cost term, so the same hole reopens by shrinking a
   *     coefficient instead. On the feasible problem `x in [0, inf)` with the row
   *     `1e-10 x >= 1`, the direction `y = 1` reads as 1e-10 for the same reason.
+  *   - Dividing by a '''global''' matrix norm fixes the units and not the
+  *     dilution, which is subtler and survived a round of review. A single large
+  *     coefficient anywhere in `K` — on a row and a variable the direction never
+  *     touches — shrinks every reported shortfall by that factor, because
+  *     `spectralNormBound` is built from the largest row and column sums. On the
+  *     feasible problem `x0, x1 in [0, inf)` with rows `x0 >= 1` and
+  *     `1e10 x1 >= 1` (satisfied at `x0 = 1, x1 = 1e-10`), `y = (1, 0)` has an
+  *     unabsorbed reduced cost of 1 and a norm of 1, and the global norm of 1e10
+  *     turns that into 1e-10: a feasible problem reported infeasible. Per
+  *     component, the same direction reads exactly 1.
+  *
+  * The global norm was also biased even without an adversarial row.
+  * `spectralNormBound` overestimates `||K||_2` by up to `sqrt(min(m, n))`, so on
+  * a large instance every genuine violation was reported up to that factor
+  * smaller than it is — a systematic lean towards false infeasibility.
   *
   * Reporting a feasible problem as infeasible is the one failure mode a solver
   * must not have, so no rescaling of the data may bring a violating direction
@@ -50,12 +68,14 @@ object Certificates:
     * dual objective is strictly positive — the homogeneous dual has an
     * improving ray, so the primal cannot be feasible.
     *
-    * Returns how far `y` is from satisfying the first two conditions, as a
-    * fraction of `||y||`: the worse of its dual-cone violation and its
-    * unabsorbed reduced cost. A caller declares infeasibility once that falls
-    * under its tolerance. `None` means `y` is not a candidate at all, either
-    * because it is the zero vector or because its certificate value is not
-    * positive.
+    * Returns how far `y` is from satisfying the first two conditions: the
+    * Euclidean combination of its dual-cone violation and its unabsorbed reduced
+    * cost, each made dimensionless on its own before the two are combined — the
+    * cone term against `||y||`, the reduced-cost term against `||y||` and the
+    * norm of each variable's own column. A caller declares infeasibility once
+    * that falls under its tolerance. `None` means `y` is not a candidate at all,
+    * either because it is the zero vector or because its certificate value is
+    * not positive.
     */
   def primalInfeasibility(
       problem: LpProblem,
@@ -91,16 +111,35 @@ object Certificates:
       value += q(i) * y(i)
       i += 1
 
+    // Each unabsorbed reduced cost is scaled by its own column's norm before it
+    // is accumulated. Dividing the total by a single matrix norm afterwards
+    // would let a large coefficient elsewhere in `K` shrink this one -- see the
+    // class doc; that is the bug this arrangement exists to prevent, not a
+    // refinement of it.
+    val columnNorms = problem.constraintMatrix.columnNorms
+
+    def scaled(reduced: Double, j: Int): Double =
+      // A structurally empty column makes `(K'y)_j` exactly zero, so there is
+      // nothing to scale and the division is skipped rather than producing NaN.
+      val cj = columnNorms(j)
+      if cj > 0.0 then reduced / cj else 0.0
+
     var residualSq = 0.0
     i = 0
     while i < n do
       val reduced = -aty(i)
       if reduced > 0.0 then
         val l = lower(i)
-        if l.isNegInfinity then residualSq += reduced * reduced else value += l * reduced
+        if l.isNegInfinity then
+          val s = scaled(reduced, i)
+          residualSq += s * s
+        else value += l * reduced
       else if reduced < 0.0 then
         val u = upper(i)
-        if u.isPosInfinity then residualSq += reduced * reduced else value += u * reduced
+        if u.isPosInfinity then
+          val s = scaled(reduced, i)
+          residualSq += s * s
+        else value += u * reduced
       i += 1
 
     // The dual cone is violated wherever an inequality row's multiplier went
@@ -115,10 +154,9 @@ object Certificates:
     if !(value > 0.0) || !value.isFinite then None
     else
       // The two violations carry different units, so they are made
-      // dimensionless separately and combined afterwards. A zero matrix norm
-      // implies `K'y` is zero, hence no reduced-cost residual to scale.
-      val matrixNorm  = problem.constraintMatrix.spectralNormBound
-      val reducedTerm = if matrixNorm > 0.0 then math.sqrt(residualSq) / (matrixNorm * norm) else 0.0
+      // dimensionless separately and combined afterwards. `residualSq` already
+      // carries its column scaling, so both terms need only `||y||` here.
+      val reducedTerm = math.sqrt(residualSq) / norm
       val coneTerm    = math.sqrt(coneSq) / norm
       Some(math.hypot(reducedTerm, coneTerm)).filter(_.isFinite)
 
@@ -129,10 +167,13 @@ object Certificates:
     * it never leaves a finite variable bound — while strictly decreasing the
     * objective.
     *
-    * Returns the recession violation as a fraction of `||d||`, on the same
-    * reasoning as [[primalInfeasibility]]: normalising by `|c'd|` would let one
-    * large cost coefficient hide a direction that walks straight through a
-    * finite bound.
+    * Returns the Euclidean combination of the recession violation and the bound
+    * violation, each made dimensionless on its own — the bound term against
+    * `||d||`, the row term against `||d||` and the norm of each row — on the
+    * same reasoning as [[primalInfeasibility]]: normalising by `|c'd|` would let
+    * one large cost coefficient hide a direction that walks straight through a
+    * finite bound, and normalising by a global matrix norm would let one large
+    * coefficient anywhere do the same.
     */
   def dualInfeasibility(
       problem: LpProblem,
@@ -170,14 +211,25 @@ object Certificates:
           buf
 
       // Row violations are components of `Kd`, bound violations are components
-      // of `d`. Different units, so they are accumulated separately.
+      // of `d`. Different units, so they are accumulated separately -- and each
+      // row violation is scaled by its own row's norm, mirroring the column
+      // scaling in `primalInfeasibility` and for the same reason.
+      val rowNorms = problem.constraintMatrix.rowNorms
+
+      def scaledRow(v: Double, r: Int): Double =
+        val ri = rowNorms(r)
+        if ri > 0.0 then v / ri else 0.0
+
       var rowSq = 0.0
       i = 0
       while i < nEq do
-        rowSq += kd(i) * kd(i)
+        val s = scaledRow(kd(i), i)
+        rowSq += s * s
         i += 1
       while i < m do
-        if kd(i) < 0.0 then rowSq += kd(i) * kd(i)
+        if kd(i) < 0.0 then
+          val s = scaledRow(kd(i), i)
+          rowSq += s * s
         i += 1
 
       // Moving in direction `d` must not push a variable through a finite bound.
@@ -189,9 +241,10 @@ object Certificates:
         else if di < 0.0 && !lower(i).isNegInfinity then boundSq += di * di
         i += 1
 
-      val matrixNorm = problem.constraintMatrix.spectralNormBound
-      val rowTerm    = if matrixNorm > 0.0 then math.sqrt(rowSq) / (matrixNorm * norm) else 0.0
-      val boundTerm  = math.sqrt(boundSq) / norm
+      // `rowSq` already carries its per-row scaling, so both terms need only
+      // `||d||` here.
+      val rowTerm   = math.sqrt(rowSq) / norm
+      val boundTerm = math.sqrt(boundSq) / norm
       Some(math.hypot(rowTerm, boundTerm)).filter(_.isFinite)
 
   /** Test the primal and dual iterates for a certificate and report whichever

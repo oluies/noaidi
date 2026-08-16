@@ -137,11 +137,45 @@ final class SparseMatrix private (
       k += 1
     m
 
-  /** Induced 1-norm, i.e. the largest absolute column sum. */
-  def norm1: Double = transpose.normInf
+  /** Euclidean norm of each row.
+    *
+    * Per row rather than over the whole matrix, because that is what makes a
+    * residual on one row dimensionless without dragging in coefficients from
+    * rows it has nothing to do with. `|(Kd)_i| <= ||K_i.||_2 * ||d||_2` by
+    * Cauchy-Schwarz, so dividing by this and by `||d||` gives a ratio in
+    * `[0, 1]` that no other row can move. [[Certificates]] documents what went
+    * wrong when a global norm was used instead.
+    *
+    * A structurally empty row gives 0.0, and the matching `(Kd)_i` is then
+    * exactly zero, so callers skip the division rather than producing a NaN.
+    */
+  private[prima] lazy val rowNorms: Array[Double] =
+    val out = new Array[Double](rows)
+    var r   = 0
+    while r < rows do
+      var s = 0.0
+      var p = rowPtrRaw(r)
+      val e = rowPtrRaw(r + 1)
+      while p < e do
+        s += valuesRaw(p) * valuesRaw(p)
+        p += 1
+      out(r) = math.sqrt(s)
+      r += 1
+    out
+
+  /** Euclidean norm of each column, the counterpart of [[rowNorms]] for `K'y`. */
+  private[prima] lazy val columnNorms: Array[Double] = transpose.rowNorms
+
+  /** Induced 1-norm, i.e. the largest absolute column sum.
+    *
+    * Cached because the arrays are never mutated after construction and the
+    * step-size rule reads this on every restart. [[transpose]] sets the
+    * precedent.
+    */
+  lazy val norm1: Double = transpose.normInf
 
   /** Induced infinity norm, i.e. the largest absolute row sum. */
-  def normInf: Double =
+  lazy val normInf: Double =
     var m = 0.0
     var r = 0
     while r < rows do
@@ -178,7 +212,7 @@ final class SparseMatrix private (
     * adaptive rule grows away within a few iterations, whereas an underestimate
     * would start the method outside the region where it converges at all.
     */
-  def spectralNormBound: Double = math.sqrt(norm1 * normInf)
+  lazy val spectralNormBound: Double = math.sqrt(norm1 * normInf)
 
   def toDense: Array[Array[Double]] =
     val out = Array.ofDim[Double](rows, cols)

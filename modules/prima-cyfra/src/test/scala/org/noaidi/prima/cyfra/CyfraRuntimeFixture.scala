@@ -14,13 +14,25 @@ import io.computenode.cyfra.runtime.VkCyfraRuntime
   */
 object CyfraRuntimeFixture:
 
-  /** Run `f` with a runtime that is released even if `f` throws. */
+  /** Run `f`, then release the runtime if this version of Cyfra offers a way to.
+    *
+    * '''Best-effort, and on the pinned release probably a no-op.''' The `finally`
+    * below closes the runtime only if `VkCyfraRuntime` happens to implement
+    * `AutoCloseable`, and the release candidate exposes no documented shutdown —
+    * so on current Cyfra the match most likely falls through and nothing is
+    * released. Said plainly because this file is the worked example a
+    * `CyfraKernels` author will copy, and a scaladoc promising scoped ownership
+    * over a body that may do nothing is worse than no fixture: it reads as a
+    * solved problem rather than a placeholder.
+    *
+    * What it does give is the '''shape''' — one seam, in one place, to tighten
+    * when a shutdown appears. Test JVM forking is what actually bounds the leak
+    * today.
+    */
   def withRuntime[A](f: VkCyfraRuntime => A): A =
     val runtime = VkCyfraRuntime()
     try f(runtime)
     finally
-      // The RC does not expose a documented shutdown; this releases what it can
-      // and is the seam to tighten when one appears.
       runtime match
         case closeable: AutoCloseable => closeable.close()
         case _                        => ()

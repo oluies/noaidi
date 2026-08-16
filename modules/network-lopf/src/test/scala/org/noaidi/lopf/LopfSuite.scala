@@ -1259,17 +1259,48 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       "the series ramp limit is invisible to Ramps.limited")
   }
 
-  test("a committable ramp-limited unit is refused rather than solved continuously") {
+  test("a committable unit is refused rather than solved as a linear program") {
     assume(available, "goldens missing")
-    // PyPSA charges a committable unit's start-up and shut-down ramps against a
-    // binary status. Building the continuous rows anyway returns a number for a
-    // different model, which is the failure this whole change exists to stop
-    // repeating.
+    // A binary status per snapshot is a mixed-integer model; this builds a linear
+    // one. `Expansion` refused the committable *and extendable* combination and
+    // its comment said the two models are separate, but a unit that is merely
+    // committable reached the builder and was solved with the flag ignored.
     val n = mutate("ramp-limits", "generators.csv",
       setColumn(_, "committable", (id, _) => if id == "base" then "True" else "False"))
     val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
     assert(failure.getMessage.contains("committable"), failure.getMessage)
     assert(failure.getMessage.contains("base"), failure.getMessage)
+
+    // The whole fixture, not just a mutated one: this is the network the port
+    // has a PyPSA answer for, and it must be refused rather than answered.
+    val committable = intercept[Lopf.UnsupportedNetwork](Lopf.solve(network("unit-commitment"), params))
+    assert(committable.getMessage.contains("committable"), committable.getMessage)
+  }
+
+  test("the committable refusal is not gratuitous: the linear answer is wrong") {
+    assume(available, "goldens missing")
+    // Guarding the refusal. A refusal that blocks a network the port would have
+    // got right is a cost with no benefit, so this establishes the benefit: the
+    // same network with the flag cleared -- which is exactly what solving it as a
+    // linear program amounts to -- costs more than PyPSA's commitment optimum.
+    //
+    // Dearer, not cheaper, which is worth pinning because every other finding in
+    // this port erred the other way. Ignoring the status does not relax the
+    // problem, it replaces it: `p_min_pu` stops being a floor that applies only
+    // while the unit is on and becomes one it can never leave, so `mid` is held
+    // at its 30 MW minimum through the snapshots where the commitment solution
+    // has it off.
+    val target = results("unit-commitment")("optimize")("objective").num
+    val continuous = Lopf.solve(
+      mutate("unit-commitment", "generators.csv", setColumn(_, "committable", "False")),
+      params,
+    )
+    assertEquals(continuous.status, SolveStatus.Optimal, s"${continuous.solution}")
+    assert(
+      continuous.objective > target + 1.0,
+      s"solving the commitment network continuously gives ${continuous.objective}, not dearer than " +
+        s"PyPSA's $target -- so the refusal blocks a network this port would have got right",
+    )
   }
 
   test("energy budgets match PyPSA's") {

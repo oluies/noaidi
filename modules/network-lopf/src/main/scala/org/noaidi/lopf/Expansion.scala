@@ -186,17 +186,10 @@ object Expansion:
       }
     }
 
-    // A generator that is both committable and extendable needs the big-M
-    // formulation that ties a binary status to a capacity variable, which is a
-    // different model from either alone. `UnitCommitment` builds commitment
-    // without expansion and this builds expansion without commitment.
-    network.table("Generator").foreach { table =>
-      if table.static.contains("committable") then
-        table.ids.foreach { id =>
-          if table.bool("committable", id) && isExtendable(table, id) then
-            refuse(
-              s"Generator '$id' is both committable and extendable; that couples a binary status " +
-                "to a capacity variable and is neither of the two models built here"
-            )
-        }
-    }
+    // Committable is not checked here any more. This refused the committable
+    // *and* extendable combination -- which needs a big-M tying a binary status
+    // to a capacity variable -- and said in its comment that `UnitCommitment`
+    // builds commitment without expansion and this builds expansion without
+    // commitment. True, and it left the plain committable case unrefused and
+    // silently solved as a linear program. `Commitment.reject` now covers every
+    // committable entity, ahead of this, so the combination cannot reach here.

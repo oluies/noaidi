@@ -982,6 +982,51 @@ apiece. Pricing *when* `must` runs closes it — nudging any of the twelve costs
 1e-4 now moves the dispatch by exactly zero, which is the check to run rather
 than assume.
 
+## Committable in a linear program: the one that erred the other way
+
+The fifth finding, and the first that is not a schema-sweep result — `committable`
+*was* read, twice, just never where it mattered. `Expansion.reject` refused a unit
+that is committable **and** extendable, and said in its comment that
+`UnitCommitment` builds commitment without expansion while `Lopf` builds expansion
+without commitment. `UnitCommitment` reads the flag properly. Nothing decided what
+`Lopf` should do with a unit that is *merely* committable, so it built the columns
+as though the flag were absent.
+
+On the `unit-commitment` fixture that costs **18,500 against PyPSA's 17,000**,
+reported `Optimal`.
+
+### Dearer, not cheaper
+
+Every other finding here under-priced. This one over-prices, and the asymmetry is
+the point: **ignoring the status does not relax the problem, it replaces it.**
+
+- `p_min_pu` stops being a floor that applies *while the unit is on* and becomes
+  one it can never leave. `mid` is pinned at its 30 MW minimum through four
+  snapshots where the commitment solution has it off. On a network whose load
+  falls below the sum of the minima, a feasible problem becomes **infeasible**.
+- `start_up_cost`, `shut_down_cost`, `min_up_time` and `min_down_time` are dropped
+  outright, which pushes the other way.
+
+So "the LP is a relaxation of the MILP, therefore a lower bound" — the reasoning
+that would make this look safe — is simply false here. The LP is not a relaxation
+of this MILP; it is a different problem.
+
+### One refusal, not three fragments
+
+`Lopf` now refuses every committable entity through `Commitment.reject`, and the
+two narrower checks are gone: `Expansion`'s committable-and-extendable case and
+`Ramps`'s committable-and-ramp-limited one. Both were correct and both were
+unreachable once the general case is refused, and each described a different
+fragment of the same gap. The fragment nobody had written down was the one that
+returned a number.
+
+A unit flagged committable with every commitment attribute left at its default
+genuinely has the same optimum either way, and is refused too. Deciding vacuity
+means getting six attributes right at once, several of them `static or series`,
+and being wrong in the permissive direction returns a plausible number instead of
+an error. A spurious refusal is loud and has two ways out — `UnitCommitment`, or
+clearing a flag that was not doing anything. Being wrong quietly has none.
+
 ## Standard types, and the 585-bus network they unblock
 
 `scigrid-de` runs. 585 buses, 852 lines, 96 transformers, 24 snapshots: angles to

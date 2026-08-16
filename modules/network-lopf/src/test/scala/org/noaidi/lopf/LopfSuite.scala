@@ -1295,9 +1295,13 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assert(failure.getMessage.contains("DC link"), failure.getMessage)
     assert(failure.getMessage.contains("Link"), failure.getMessage)
 
-    // And the unmutated fixture still solves, so the refusal is attributable to
-    // the flag rather than to anything else `ac-dc-meshed` carries.
-    assertEquals(Lopf.solve(network("ac-dc-meshed"), params).status, SolveStatus.Optimal)
+    // And the unmutated fixture is not refused, so the throw above is
+    // attributable to the flag rather than to anything else `ac-dc-meshed`
+    // carries. `build` rather than `solve`: refusal is what is being controlled
+    // for, and it happens during the build -- a solve would add a second full
+    // PDHG expansion run at 1e-9 for coverage the parametrised expansion test
+    // above already has.
+    Lopf.build(network("ac-dc-meshed")): Unit
   }
 
   test("the committable refusal is not gratuitous: the linear answer is wrong") {

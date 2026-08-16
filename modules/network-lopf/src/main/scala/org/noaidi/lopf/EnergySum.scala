@@ -13,9 +13,9 @@ import org.noaidi.prima.LpBuilder
   * `e_sum_min` were named nowhere in this port. Their defaults are `+inf` and
   * `−inf`, so nothing about an unset one is visible, and a set one was simply
   * dropped — the LP stayed feasible and returned a schedule that spends a fuel
-  * budget it does not have. On a fixture capping a cheap generator at 200 MWh
-  * the dropped rows under-priced the answer by 116,644 against PyPSA, which is
-  * the largest single discrepancy the schema sweep has turned up.
+  * budget it does not have. On the `energy-budget` fixture the dropped rows
+  * under-price the answer by '''23,280''' — 7,320 against PyPSA's 30,600 — which
+  * is the largest single discrepancy the schema sweep has turned up.
   *
   * ==The weighting is `generators`, not `objective`==
   *
@@ -26,12 +26,22 @@ import org.noaidi.prima.LpBuilder
   * reading. That is the reason to read the column rather than reach for the one
   * already in scope.
   *
-  * ==Only Generator==
+  * ==Only Generator, and where that is enforced==
   *
   * `e_sum_max`/`e_sum_min` are declared on Generator alone — a Link has neither,
-  * and a Store's energy is bounded by `e_nom` through its own rows. [[constrain]]
-  * checks the spec rather than the component name so that a schema which grows
-  * the attribute elsewhere is picked up rather than silently skipped.
+  * and a Store's energy is bounded by `e_nom` through its own rows. PyPSA is
+  * blunter still: `define_total_supply_constraints` takes `component` with a
+  * hardcoded default of `"Generator"` and is called only that way.
+  *
+  * [[constrain]] tests the '''spec''' rather than the component name, so a
+  * schema that grows the attribute onto another dispatchable class is picked up
+  * rather than silently skipped. That guarantee reaches exactly as far as the
+  * tables [[Lopf]] drives this over — the ones whose dispatch variable is keyed
+  * by the component name, which is the same set the ramp rows use. StorageUnit
+  * and Store are deliberately outside it: their power is keyed by
+  * [[Storage.Dispatch]] and [[Stores.Power]], so the column lookup here would
+  * not find them, and a claim to cover them would be false rather than merely
+  * unexercised.
   */
 object EnergySum:
 

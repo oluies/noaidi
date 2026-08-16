@@ -1277,7 +1277,7 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     // `e_sum_max` and `e_sum_min` were mentioned nowhere in this port. Their
     // defaults are the infinities, so an unset budget is invisible and a set one
     // was dropped outright -- the largest discrepancy the sweep turned up, at
-    // 30,900 against 6,500.
+    // 7,320 against 30,600.
     val expected = results("energy-budget")("optimize")
     assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
 

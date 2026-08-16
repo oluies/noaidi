@@ -55,10 +55,31 @@ import org.noaidi.prima.LpBuilder
   */
 object Ramps:
 
-  /** The components PyPSA ramps: those declaring the attributes. */
+  /** The four attributes that make a unit ramp-limited. */
+  private val attributes =
+    Seq("ramp_limit_up", "ramp_limit_down", "ramp_limit_start_up", "ramp_limit_shut_down")
+
+  /** The components PyPSA ramps: those declaring any of the attributes. */
   private def declares(table: ComponentTable): Boolean =
-    table.spec.attribute("ramp_limit_up").isDefined ||
-      table.spec.attribute("ramp_limit_down").isDefined
+    attributes.exists(table.spec.attribute(_).isDefined)
+
+  /** Whether any ramp attribute appears in this table's '''data'''.
+    *
+    * Gated on the data, not the spec, and for the reason the `stand_by_cost`
+    * guard in [[UnitCommitment]] gives at length: every attribute here is
+    * declared on Generator and Link, so [[declares]] is unconditionally true and
+    * the per-snapshot sweep below would run for every solve even where no ramp
+    * column exists. Each `valueAt` on an absent column re-parses the schema
+    * default, so a few thousand generators over a year is tens of millions of
+    * parses to find nothing.
+    *
+    * The series is checked as well as the static column, so a `<component>-
+    * ramp_limit_up.csv` with no static counterpart still passes -- which is the
+    * whole defect this module was written to close, and would be reintroduced
+    * here by a `static.contains` test alone.
+    */
+  private def present(table: ComponentTable): Boolean =
+    attributes.exists(a => table.static.contains(a) || table.series.contains(a))
 
   /** A static float the spec may not declare at all, as NaN where it does not.
     *
@@ -69,6 +90,21 @@ object Ramps:
     */
   private def optional(table: ComponentTable, attribute: String, id: String): Double =
     if table.spec.attribute(attribute).isDefined then table.float(attribute, id) else Double.NaN
+
+  /** The same, for an attribute that may vary by snapshot.
+    *
+    * [[declares]] admits a table carrying only one of the two limits, so reading
+    * the other through `valueAt` -- which resolves to `spec.require` for an
+    * undeclared attribute -- would throw rather than emit the one row it can.
+    */
+  private def optionalAt(
+      table: ComponentTable,
+      attribute: String,
+      id: String,
+      snapshot: Int,
+  ): Double =
+    if table.spec.attribute(attribute).isDefined then table.valueAt(attribute, id, snapshot)
+    else Double.NaN
 
   /** The effective limits at one snapshot.
     *
@@ -82,17 +118,31 @@ object Ramps:
   final case class Limits(up: Double, down: Double, hasUp: Boolean, hasDown: Boolean):
     def binds: Boolean = hasUp || hasDown
 
-  def limitsAt(table: ComponentTable, id: String, snapshot: Int): Limits =
-    val up    = table.valueAt("ramp_limit_up", id, snapshot)
-    val down  = table.valueAt("ramp_limit_down", id, snapshot)
-    val start = optional(table, "ramp_limit_start_up", id)
-    val shut  = optional(table, "ramp_limit_shut_down", id)
+  /** The start-up and shut-down limits, which are static and so read once per
+    * entity rather than once per entity per snapshot.
+    */
+  private def endpoints(table: ComponentTable, id: String): (Double, Double) =
+    (optional(table, "ramp_limit_start_up", id), optional(table, "ramp_limit_shut_down", id))
+
+  private def limitsAt(
+      table: ComponentTable,
+      id: String,
+      snapshot: Int,
+      start: Double,
+      shut: Double,
+  ): Limits =
+    val up   = optionalAt(table, "ramp_limit_up", id, snapshot)
+    val down = optionalAt(table, "ramp_limit_down", id, snapshot)
     Limits(
       up = if up.isNaN then 1.0 else up,
       down = if down.isNaN then 1.0 else down,
       hasUp = !(up.isNaN && start.isNaN),
       hasDown = !(down.isNaN && shut.isNaN),
     )
+
+  def limitsAt(table: ComponentTable, id: String, snapshot: Int): Limits =
+    val (start, shut) = endpoints(table, id)
+    limitsAt(table, id, snapshot, start, shut)
 
   /** Whether this entity is ramp-limited at any snapshot.
     *
@@ -102,7 +152,10 @@ object Ramps:
     * miss it while its own comment asserted the attributes were static.
     */
   def limited(table: ComponentTable, id: String, snapshots: Range): Boolean =
-    declares(table) && snapshots.exists(t => limitsAt(table, id, t).binds)
+    if !present(table) then false
+    else
+      val (start, shut) = endpoints(table, id)
+      snapshots.exists(t => limitsAt(table, id, t, start, shut).binds)
 
   /** Refuse the ramp cases this module does not build.
     *
@@ -144,10 +197,11 @@ object Ramps:
       capacity: String => Option[Int],
       builder: LpBuilder,
   ): Unit =
-    if !declares(table) then return
+    if !present(table) then return
 
     table.ids.foreach { id =>
-      val cap = capacity(id)
+      val cap           = capacity(id)
+      val (start, shut) = endpoints(table, id)
 
       // Zero where the capacity is a decision, so the fixed term drops out and
       // the whole limit rides on the capacity column. PyPSA's `where(~is_ext,
@@ -166,7 +220,7 @@ object Ramps:
       val pInit = if initiallyUp then optional(table, "p_init", id) else 0.0
 
       snapshots.foreach { t =>
-        val limit = limitsAt(table, id, t)
+        val limit = limitsAt(table, id, t, start, shut)
         if limit.binds then
           val here = column(id, t)
 

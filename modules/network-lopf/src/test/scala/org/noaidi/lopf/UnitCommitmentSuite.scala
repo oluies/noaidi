@@ -177,6 +177,41 @@ class UnitCommitmentSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("ramp"), failure.getMessage)
   }
 
+  test("a ramp limit arriving only as a series is rejected too") {
+    assume(available, "goldens missing")
+    // The regression, at the site where it happened. The test above appends a
+    // *static* `ramp_limit_up`, which the old `static.contains` sweep already
+    // caught; this one writes the series file with no static counterpart, which
+    // it did not. `ramp_limit_up` is `static or series` in PyPSA -- the guard
+    // one block above it in the source says so about `stand_by_cost` and the
+    // ramp check asserted the opposite -- so without this, reverting
+    // `UnitCommitment.reject` to the old sweep leaves every test green.
+    val dir = Files.createTempDirectory("noaidi-uc-")
+    temporaries += dir
+    val source = goldens.resolve("networks").resolve("unit-commitment")
+    scala.util.Using.resource(Files.list(source)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+
+    // Deliberately not touching generators.csv: the static column stays absent,
+    // so a reader that only consults it sees no limit anywhere.
+    val original   = CsvReader.read(dir, schema, "unit-commitment")
+    val generators = original.require("Generator").ids
+    val header     = ("" +: generators).mkString(",")
+    val rows =
+      original.snapshots.indices.map(t => (t.toString +: generators.map(_ => "0.4")).mkString(","))
+    Files.writeString(dir.resolve("generators-ramp_limit_up.csv"), (header +: rows).mkString("\n") + "\n")
+
+    val broken = CsvReader.read(dir, schema, "unit-commitment")
+    assert(!broken.require("Generator").static.contains("ramp_limit_up"),
+      "the fixture gained a static column, so this no longer tests the series path")
+    assert(broken.require("Generator").series.contains("ramp_limit_up"),
+      "the series file was not read, so this asserts nothing")
+
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("ramp"), failure.getMessage)
+  }
+
   test("a network with transmission is refused rather than solved bus-by-bus") {
     assume(available, "goldens missing")
     // The balance rows carry no flow variables, so a multi-bus network would be

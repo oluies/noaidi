@@ -529,8 +529,15 @@ object Lopf:
       )
     }
 
-    generators.foreach { g =>
-      EnergySum.constrain(g, network, snapshots, (id, t) => columns((g.spec.name, id, t)), builder)
+    // The same tables the ramp rows sweep, not just `generators`. PyPSA hardcodes
+    // Generator here and no other class declares the attributes, so this changes
+    // nothing today -- `EnergySum.constrain` returns immediately for a spec
+    // without them. It is written this way so the module's claim to be driven by
+    // the schema rather than by a component name is actually true at the call
+    // site, which it was not when the call was `generators.foreach`.
+    (generators ++ controllable).foreach { table =>
+      val component = table.spec.name
+      EnergySum.constrain(table, network, snapshots, (id, t) => columns((component, id, t)), builder)
     }
 
     // Global constraints -- an emissions cap, typically. Ignoring one is not

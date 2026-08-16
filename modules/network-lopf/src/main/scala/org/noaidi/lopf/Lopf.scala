@@ -78,6 +78,11 @@ object Lopf:
     val snapshots = network.snapshots.indices
     if snapshots.isEmpty then throw new UnsupportedNetwork("network has no snapshots")
 
+    // After the snapshot check, because a ramp limit is read per snapshot and a
+    // network with none would report "committable and ramp-limited" for a
+    // network whose real problem is that it has nothing to solve over.
+    Ramps.reject(network, snapshots, m => throw new UnsupportedNetwork(m))
+
     val buses = network.table("Bus").map(_.ids).getOrElse(IndexedSeq.empty)
     if buses.isEmpty then throw new UnsupportedNetwork("network has no buses")
 
@@ -498,6 +503,34 @@ object Lopf:
           }
         }
       }
+    }
+
+    // Ramp limits and energy budgets. Both are inequalities, and both belong
+    // after every equality block for the reason the capacity rows above give:
+    // `LpBuilder.build` hoists equalities to the front, so an inequality emitted
+    // among them shifts every later equality's standard-form index and breaks
+    // the row-by-row copy `Sclopf` performs.
+    //
+    // Ramp rows are the first rows here to reference two snapshots of the same
+    // variable. Everything else in this model is either within one snapshot or,
+    // in the storage balances, a chain the builder already emits per snapshot --
+    // so nothing about the column layout had to change to carry them.
+    (generators ++ controllable).foreach { table =>
+      val component = table.spec.name
+      Ramps.constrain(
+        table,
+        snapshots,
+        (id, t) => columns((component, id, t)),
+        id =>
+          if extendable(table, id) then
+            Some(columns((Expansion.capacityKey(component), id, Expansion.NoSnapshot)))
+          else None,
+        builder,
+      )
+    }
+
+    generators.foreach { g =>
+      EnergySum.constrain(g, network, snapshots, (id, t) => columns((g.spec.name, id, t)), builder)
     }
 
     // Global constraints -- an emissions cap, typically. Ignoring one is not

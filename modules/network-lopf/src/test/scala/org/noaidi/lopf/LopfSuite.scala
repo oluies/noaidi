@@ -1149,3 +1149,183 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     )
     assertEqualsDouble(result.dispatch("Line", "hv23", 0), 0.0, 1e-9, "the inactive line carries power")
   }
+
+  test("ramp-limited dispatch matches PyPSA's") {
+    assume(available, "goldens missing")
+    // Ramp limits were the third defect the schema-minus-source sweep turned up:
+    // `ramp_limit_up` and `ramp_limit_down` were named in this module only inside
+    // `UnitCommitment`'s refusal, so a plain LOPF solved the unconstrained
+    // problem and reported `Optimal`. No pre-existing golden could see it --
+    // none of them sets a ramp limit at all.
+    val expected = results("ramp-limits")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("ramp-limits")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    // Generators and the link both, because ramp limits are not a generator
+    // attribute -- PyPSA ramps Generator, Link and Process alike, and an
+    // implementation that swept only generators would match the objective here
+    // only by accident.
+    val generators = expected("generator_p")
+    val links      = expected("link_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(generators, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      n.require("Link").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Link", id, t), frameValue(links, t, id), 1e-4,
+          s"link $id at snapshot $t")
+      }
+    }
+
+    // The extendable unit's limits ride on its capacity variable rather than on
+    // a number in the file, so the capacity has to come out right for the ramp
+    // rows to mean anything.
+    assertEqualsDouble(result.capacity("Generator", "new"),
+      expected("nominal_opt")("Generator")("new").num, 1e-4, "the extendable unit's capacity")
+  }
+
+  test("each ramp path in the fixture binds, rather than merely being set") {
+    assume(available, "goldens missing")
+    // Guarding the guard, as for `storage-cycle` and `store-bank`. A limit that
+    // is set but never tight tests nothing: the comparison above would pass
+    // against an implementation that dropped the rows. Each number here is a
+    // constraint sitting exactly on its bound at the golden optimum.
+    val expected = results("ramp-limits")("optimize")
+    val p        = expected("generator_p")
+    val flow     = expected("link_p0")
+
+    // `base`: the first snapshot is bounded against `p_init`, not against a
+    // previous dispatch that does not exist. 60 + 0.2 * 300.
+    assertEqualsDouble(frameValue(p, 0, "base"), 120.0, 1e-6, "p_init does not bind at the first snapshot")
+
+    // `cold`: `up_time_before = 0` makes PyPSA read `p_init` as 0 *and* scale the
+    // up row by a prior status of zero, which pins the first snapshot to zero.
+    // This is the one attribute here that changes whether a row exists at all.
+    assertEqualsDouble(frameValue(p, 0, "cold"), 0.0, 1e-6, "up_time_before does not hold the unit down")
+
+    // `flex`: the time-varying limit. Its down limit of 0.5 * 150 is hit exactly
+    // between the first two snapshots, and a `static.contains` reader would see
+    // no limit at all -- both are `static or series` in PyPSA.
+    assertEqualsDouble(frameValue(p, 0, "flex") - frameValue(p, 1, "flex"), 75.0, 1e-6,
+      "the series ramp limit is not tight anywhere")
+
+    // `new`: extendable, so its band is 0.3 times a capacity *variable*.
+    val built = expected("nominal_opt")("Generator")("new").num
+    assertEqualsDouble(built, 200.0, 1e-6, "the extendable unit was not built")
+    assertEqualsDouble(frameValue(p, 3, "new") - frameValue(p, 2, "new"), 0.3 * built, 1e-6,
+      "the extendable unit's ramp band is not tight")
+
+    // `tie`: a Link, stepping exactly 0.25 * 200.
+    assertEqualsDouble(frameValue(flow, 3, "tie") - frameValue(flow, 2, "tie"), 50.0, 1e-6,
+      "the link's ramp limit is not tight")
+  }
+
+  test("dropping the ramp columns makes this port cheaper, as it silently was") {
+    assume(available, "goldens missing")
+    // The discriminating half. The comparison above would also pass if the rows
+    // were built but vacuous, so this asserts the sign of the error the bug
+    // actually had: a dropped restriction is indistinguishable from an absent one
+    // to an inequality, and the answer comes out *below* the truth.
+    val limited = Lopf.solve(network("ramp-limits"), params).objective
+    val free = Lopf.solve(
+      mutate("ramp-limits", "generators.csv", text =>
+        setColumn(setColumn(text, "ramp_limit_up", "nan"), "ramp_limit_down", "nan")),
+      params,
+    ).objective
+    // The series file still carries `flex`'s up limit, so this is not the whole
+    // gap -- it does not need to be. What it establishes is that the columns are
+    // read.
+    assert(free < limited - 1.0, s"stripping the ramp limits changed nothing: $free against $limited")
+  }
+
+  test("a series ramp limit is read, which a static-column check misses") {
+    assume(available, "goldens missing")
+    // The specific hole that made `UnitCommitment`'s refusal wrong, asserted
+    // here where the rows are actually built. `ramp_limit_up` arrives for `flex`
+    // as `generators-ramp_limit_up.csv` with no static counterpart, so a
+    // `static.contains` reader sees nothing at all.
+    val n = network("ramp-limits")
+    assert(!n.require("Generator").static.contains("ramp_limit_up") ||
+      n.require("Generator").series.contains("ramp_limit_up"),
+      "the fixture no longer carries a time-varying ramp limit")
+    assert(Ramps.limited(n.require("Generator"), "flex", n.snapshots.indices),
+      "the series ramp limit is invisible to Ramps.limited")
+  }
+
+  test("a committable ramp-limited unit is refused rather than solved continuously") {
+    assume(available, "goldens missing")
+    // PyPSA charges a committable unit's start-up and shut-down ramps against a
+    // binary status. Building the continuous rows anyway returns a number for a
+    // different model, which is the failure this whole change exists to stop
+    // repeating.
+    val n = mutate("ramp-limits", "generators.csv",
+      setColumn(_, "committable", (id, _) => if id == "base" then "True" else "False"))
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("committable"), failure.getMessage)
+    assert(failure.getMessage.contains("base"), failure.getMessage)
+  }
+
+  test("energy budgets match PyPSA's") {
+    assume(available, "goldens missing")
+    // `e_sum_max` and `e_sum_min` were mentioned nowhere in this port. Their
+    // defaults are the infinities, so an unset budget is invisible and a set one
+    // was dropped outright -- the largest discrepancy the sweep turned up, at
+    // 30,900 against 6,500.
+    val expected = results("energy-budget")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("energy-budget")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val p = expected("generator_p")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+    }
+  }
+
+  test("the energy budgets bind, and against the weighting PyPSA actually uses") {
+    assume(available, "goldens missing")
+    // Both halves tight at the optimum, and both computed with the `generators`
+    // weighting of 2.0 rather than the `objective` weighting of 1.0 sitting right
+    // next to it in the same file. Every other fixture here holds all three
+    // weightings at 1.0, which is precisely where reading the wrong column cannot
+    // be seen; this one sets them apart so that it can.
+    val n        = network("energy-budget")
+    val expected = results("energy-budget")("optimize")
+    val p        = expected("generator_p")
+    val ts       = n.snapshots.indices
+
+    assertEqualsDouble(ts.map(t => n.weighting("generators", t)).distinct.head, 2.0, 1e-9,
+      "the fixture no longer separates the generators weighting from the objective one")
+    assertEqualsDouble(ts.map(t => n.weighting("objective", t)).distinct.head, 1.0, 1e-9,
+      "the fixture no longer separates the generators weighting from the objective one")
+
+    def energy(id: String): Double = ts.map(t => 2.0 * frameValue(p, t, id)).sum
+    assertEqualsDouble(energy("cheap"), 200.0, 1e-6, "e_sum_max is not tight")
+    assertEqualsDouble(energy("must"), 120.0, 1e-6, "e_sum_min is not tight")
+  }
+
+  test("dropping the energy budgets makes this port cheaper, as it silently was") {
+    assume(available, "goldens missing")
+    val budgeted = Lopf.solve(network("energy-budget"), params).objective
+    val free = Lopf.solve(
+      mutate("energy-budget", "generators.csv", text =>
+        setColumn(setColumn(text, "e_sum_max", "inf"), "e_sum_min", "-inf")),
+      params,
+    ).objective
+    assert(free < budgeted - 1.0, s"stripping the budgets changed nothing: $free against $budgeted")
+  }

@@ -1,0 +1,631 @@
+{
+ "lpf": {
+  "bus_v_ang": {
+   "columns": [
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "mid",
+    "must"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     150.0,
+     0.0,
+     0.0
+    ],
+    [
+     180.0,
+     0.0,
+     0.0
+    ],
+    [
+     120.0,
+     0.0,
+     0.0
+    ],
+    [
+     200.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "link_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "optimize": {
+  "bus_marginal_price": {
+   "columns": [
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     50.0
+    ],
+    [
+     46.0
+    ],
+    [
+     57.0
+    ],
+    [
+     52.0
+    ]
+   ]
+  },
+  "condition": "optimal",
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "mid",
+    "must"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     -0.0,
+     150.0,
+     -0.0
+    ],
+    [
+     -0.0,
+     180.0,
+     -0.0
+    ],
+    [
+     100.0,
+     -0.0,
+     20.0
+    ],
+    [
+     -0.0,
+     160.0,
+     40.0
+    ]
+   ]
+  },
+  "generator_status": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "global_constraint_mu": {},
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "link_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "nominal_opt": {
+   "Generator": {
+    "cheap": 200.0,
+    "mid": 200.0,
+    "must": 100.0
+   }
+  },
+  "objective": 30600.0,
+  "objective_constant": 0.0,
+  "status": "ok",
+  "storage_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_p_dispatch": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_p_store": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_spill": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_state_of_charge": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "store_e": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "store_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "total_system_cost": 30600.0,
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "pf": {
+  "bus_p": {
+   "columns": [
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ]
+   ]
+  },
+  "bus_q": {
+   "columns": [
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ]
+   ]
+  },
+  "bus_v_ang": {
+   "columns": [
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ],
+    [
+     0.0
+    ]
+   ]
+  },
+  "bus_v_mag_pu": {
+   "columns": [
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     1.0
+    ],
+    [
+     1.0
+    ],
+    [
+     1.0
+    ],
+    [
+     1.0
+    ]
+   ]
+  },
+  "converged": {
+   "columns": [
+    "0"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     1.0
+    ],
+    [
+     1.0
+    ],
+    [
+     1.0
+    ],
+    [
+     1.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "mid",
+    "must"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ]
+   ]
+  },
+  "generator_q": {
+   "columns": [
+    "cheap",
+    "mid",
+    "must"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "line_p1": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "line_q0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "line_q1": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  }
+ }
+}

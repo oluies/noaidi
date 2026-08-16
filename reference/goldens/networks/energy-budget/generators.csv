@@ -1,0 +1,4 @@
+name,bus,control,p_nom,e_sum_min,e_sum_max
+cheap,b,Slack,200.0,-inf,200.0
+mid,b,PQ,200.0,-inf,inf
+must,b,PQ,100.0,120.0,inf

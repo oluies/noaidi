@@ -50,12 +50,20 @@ import org.noaidi.prima.LpBuilder
   *
   * PyPSA's ramp rows for a committable unit carry `ramp_limit_start_up` and
   * `ramp_limit_shut_down` against the binary status, which is a mixed-integer
-  * formulation. [[Commitment.reject]] refuses every committable entity, and it
-  * runs before [[Lopf]] builds anything — so the rows below are never reached
-  * for one, and this module needs no refusal of its own. It carried one until
-  * the plain committable case was refused generally, at which point a second
-  * check describing one fragment of the same gap was only a second place to keep
-  * in step.
+  * formulation. [[Commitment.reject]] refuses every committable entity ahead of
+  * [[Lopf]]'s build, so the rows [[constrain]] emits are never reached for one
+  * and this module needs no refusal of its own. It carried one until the plain
+  * committable case was refused generally, at which point a second check
+  * describing one fragment of the same gap was only a second place to keep in
+  * step.
+  *
+  * '''Not''' that committable units never reach this module. [[limited]] is
+  * called on them, by [[UnitCommitment]]'s own refusal, which sweeps every
+  * generator of a network whose whole point is that some are committable — and
+  * the `ramp_limit_start_up`/`ramp_limit_shut_down` reads in [[limitsAt]] exist
+  * for exactly that case, since PyPSA gives a unit carrying only a start-up
+  * limit a full-rating up limit. Read as "committable never gets here" they look
+  * like dead code, and deleting them would break that refusal quietly.
   */
 object Ramps:
 

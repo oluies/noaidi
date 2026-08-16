@@ -14,7 +14,7 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // sbt 2 already defaults to -deprecation -feature -unchecked -Wunused:all
 // -Wvalue-discard, so scalacOptions stays empty rather than setting them twice.
 
-val munitVersion  = "1.3.4"
+val munitVersion  = "1.3.5"
 val zioVersion    = "2.1.26"
 val ojalgoVersion = "57.1.0"
 

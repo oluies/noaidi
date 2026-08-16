@@ -73,15 +73,17 @@ object Lopf:
     val network = Active.only(StandardTypes.expand(input))
     rejectUnhandled(network)
     rejectDanglingBuses(network)
+    // Ahead of `Expansion.reject`, which used to carry the committable half of
+    // this itself for the extendable case only. One refusal rather than three
+    // partial ones: the narrower checks each described a different fragment of
+    // the same gap, and the fragment nobody had written down -- a unit that is
+    // merely committable -- was the one that returned a number.
+    Commitment.reject(network, m => throw new UnsupportedNetwork(m))
     Expansion.reject(network)
 
     val snapshots = network.snapshots.indices
     if snapshots.isEmpty then throw new UnsupportedNetwork("network has no snapshots")
 
-    // After the snapshot check, because a ramp limit is read per snapshot and a
-    // network with none would report "committable and ramp-limited" for a
-    // network whose real problem is that it has nothing to solve over.
-    Ramps.reject(network, snapshots, m => throw new UnsupportedNetwork(m))
 
     val buses = network.table("Bus").map(_.ids).getOrElse(IndexedSeq.empty)
     if buses.isEmpty then throw new UnsupportedNetwork("network has no buses")

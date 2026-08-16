@@ -157,25 +157,12 @@ object Ramps:
       val (start, shut) = endpoints(table, id)
       snapshots.exists(t => limitsAt(table, id, t, start, shut).binds)
 
-  /** Refuse the ramp cases this module does not build.
-    *
-    * Only the committable one. Everything else is built below, so nothing here
-    * refuses a network for carrying a limit — which is the point of the change
-    * this object arrived with.
-    */
-  def reject(network: Network, snapshots: Range, refuse: String => Nothing): Unit =
-    network.tables.values.foreach { table =>
-      if declares(table) && table.spec.attribute("committable").isDefined then
-        table.ids.foreach { id =>
-          val committable = table.static.contains("committable") && table.bool("committable", id)
-          if committable && limited(table, id, snapshots) then
-            refuse(
-              s"${table.spec.name} '$id' is committable and ramp-limited; PyPSA charges its " +
-                "start-up and shut-down ramps against a binary status, which is a mixed-integer " +
-                "model and this builds a linear one"
-            )
-        }
-    }
+  // There is no `reject` here any more. This object carried one, for a unit
+  // both committable and ramp-limited -- PyPSA charges its start-up and
+  // shut-down ramps against a binary status, which the rows below cannot
+  // express. `Commitment.reject` refuses every committable entity ahead of
+  // `Lopf`'s build, so that case can no longer arrive, and a second refusal
+  // describing one fragment of it would only be a second place to keep in step.
 
   /** Emit the ramp rows for one table.
     *

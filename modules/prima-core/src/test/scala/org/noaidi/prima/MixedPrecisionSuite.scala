@@ -171,12 +171,39 @@ class MixedPrecisionSuite extends munit.FunSuite:
     assertEquals(result.solution.status, SolveStatus.PrimalInfeasible, s"$result")
   }
 
+  /** A tolerance float32 can actually establish, so the fp64 re-check passes and
+    * refinement is skipped. Every other case in this suite refines, which is
+    * what left the skip branch untested.
+    */
+  private val loose = params.copy(infeasibilityTolerance = 1e-4)
+
+  test("a certificate that does meet the caller's tolerance is skipped past") {
+    // The other half of the fp64 re-verification, and the one nothing covered.
+    // Every other infeasibility case here demands a tolerance float32 cannot
+    // reach, so all of them refine -- and a suite in which nothing ever skips
+    // stays green if `certificateHolds` becomes unsatisfiable, whether by a typo
+    // in the `.contains` check, a status-preference mismatch, or a change in
+    // `Certificates`. The fast path would then disappear silently.
+    val device = Float32Kernels()
+    try
+      val result = MixedPrecision.solve(LpFixtures.infeasible.problem, loose, device)
+      assert(!result.refined, s"the device certificate was not trusted at 1e-4: $result")
+      assertEquals(result.refinementIterations, 0, s"$result")
+      assertEquals(result.solution.status, SolveStatus.PrimalInfeasible, s"$result")
+    finally device.close()
+  }
+
   test("alwaysRefine forces the second pass even on a conclusive status") {
+    // On `loose`, deliberately: at the suite's default tolerance this fixture
+    // refines anyway, so the assertion below held whether or not `alwaysRefine`
+    // was honoured. Paired with the test above -- same problem, same tolerance,
+    // opposite verdict on `refined` -- it is the flag that makes the difference
+    // and nothing else.
     val device = Float32Kernels()
     try
       val result = MixedPrecision.solve(
         LpFixtures.infeasible.problem,
-        params,
+        loose,
         device,
         MixedPrecision.Params(alwaysRefine = true),
       )

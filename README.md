@@ -151,9 +151,13 @@ The module as configured targets **macOS on Apple Silicon**, which is where
 the spike was run. Everything host-specific is gated on the host in
 `build.sbt`, so another platform gets a build that compiles and simply has no
 Vulkan wiring, rather than one that fails at runtime in a way that looks like a
-missing driver. Running it elsewhere means adding the right LWJGL `natives-*`
-classifier for that platform — the macOS one is not a default — and leaving the
-ICD to normal loader discovery.
+missing driver.
+
+On **Linux** the LWJGL natives arrive transitively with Cyfra, so nothing needs
+adding to the build and the ICD is left to normal loader discovery. The
+classifier is added explicitly only on macOS on Apple Silicon, where it is not a
+default — which is what `build.sbt` gates on the host. On any **other** platform
+you would need the matching `natives-*` classifier as well as the ICD.
 
 ## Using the solver
 

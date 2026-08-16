@@ -1328,11 +1328,24 @@ Three constraints the spike surfaced, none fatal:
   when the program is built. That is only tolerable if a built program can be
   dispatched repeatedly, which the spike exercises rather than assumes: one
   `GProgram` reused across 25 dispatches costs 17.3 ms on the first and a
-  median of 1.4 ms thereafter. A twelvefold drop is consistent with SPIR-V
-  compilation being hoisted out of `execute` and paid once, which is what makes
-  this a per-solve cost rather than a per-iteration one. The timing is
-  informational — wall clock on a shared machine is too noisy to assert on —
-  but correctness across all 25 dispatches is checked.
+  median of 1.4 ms thereafter.
+
+  **What that twelvefold drop is and is not evidence for.** Each of the 25
+  iterations opens a fresh `GBufferRegion` and re-uploads all five buffers,
+  including `rowPtr`/`colIndices`/`values`, which a real solve would upload
+  once. So the gap bundles JVM warm-up of the whole Cyfra path and first-touch
+  device allocation together with any SPIR-V compilation, and on its own it does
+  not attribute the cost to program building. The spike therefore also times
+  building a *second* identical program after the path is warm: near zero says
+  the first dispatch was warm-up, comparable to the gap says it was compilation.
+  What the test establishes without qualification is that reuse works and stays
+  correct across all 25 dispatches; the timing is informational, wall clock on a
+  shared machine being too noisy to assert on.
+
+  Buffer **residency** across dispatches — the matrix staying on the device
+  while only `x` is rewritten, which is what `Kernels.allocate`/`upload`/
+  `download` would depend on — is still not exercised. That is the next thing to
+  demonstrate before a backend is written against this.
 - **`limit` needs a static cap**, satisfied by the maximum row non-zero count,
   which is a plain Scala `Int` at construction time. A pathological matrix with
   one very long row makes every invocation's loop bound that long, though

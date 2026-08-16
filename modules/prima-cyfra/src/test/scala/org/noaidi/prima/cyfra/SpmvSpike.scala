@@ -161,6 +161,13 @@ class SpmvSpike extends munit.FunSuite:
       cols = 4,
     )
 
+    // Through the same guard every other dispatch goes through. Building the
+    // layout inline let this one caller bypass `requireSupported`, so a matrix
+    // the kernel cannot express would fail here as a wrong answer rather than
+    // as the refusal that guard exists to give. The vector is representative:
+    // every one below has the same length.
+    requireSupported(matrix, Array.tabulate(matrix.cols)(_.toDouble))
+
     CyfraRuntimeFixture.withRuntime { runtime =>
       given VkCyfraRuntime = runtime
 
@@ -180,12 +187,12 @@ class SpmvSpike extends munit.FunSuite:
           .map(layout => program.execute(matrix.nnz, layout))
           .runUnsafe(
             init = SpmvLayout(
-            rowPtr = GBuffer(Array.tabulate(matrix.rows + 1)(matrix.rowPtr.apply)),
-            colIndices = GBuffer(Array.tabulate(matrix.nnz)(matrix.colIndices.apply)),
-            values = GBuffer(Array.tabulate(matrix.nnz)(i => matrix.values(i).toFloat)),
-            x = GBuffer(vector.map(_.toFloat)),
-            out = GBuffer[Float32](matrix.rows),
-          ),
+              rowPtr = GBuffer(Array.tabulate(matrix.rows + 1)(matrix.rowPtr.apply)),
+              colIndices = GBuffer(Array.tabulate(matrix.nnz)(matrix.colIndices.apply)),
+              values = GBuffer(Array.tabulate(matrix.nnz)(i => matrix.values(i).toFloat)),
+              x = GBuffer(vector.map(_.toFloat)),
+              out = GBuffer[Float32](matrix.rows),
+            ),
             onDone = layout => layout.out.readArray(results),
           )
         timings += System.nanoTime() - started
@@ -195,13 +202,35 @@ class SpmvSpike extends munit.FunSuite:
         }
       }
 
+      // A control, because the first-versus-rest gap alone does not say what it
+      // looks like it says. Every iteration above opens a fresh region and
+      // re-uploads all five buffers, so that gap bundles JVM warm-up of the
+      // whole Cyfra path and first-touch device allocation together with any
+      // SPIR-V compilation. Building a second identical program here, after the
+      // path is warm, isolates the compile cost: if it is near zero the first
+      // dispatch's cost was warm-up, and if it is comparable to the gap it was
+      // compilation.
+      val controlStart   = System.nanoTime()
+      val secondProgram  = spmvProgram(matrix.rows, matrix.cols, maxRowNnzOf(matrix))
+      val controlMillis  = (System.nanoTime() - controlStart) / 1000000.0
+      assert(secondProgram != null)
+
       // Informational, not asserted: wall-clock on a shared machine is too
       // noisy to gate a build on. What the test establishes is that reuse
-      // works and stays correct; whether SPIR-V compilation is hoisted out of
-      // `execute` is inferred from this, not proven by it.
+      // works and stays correct.
+      //
+      // `rest` is indexed by its own length. Off the 25-element `timings` the
+      // old expression read element 12 of a 24-element sequence -- off by one as
+      // a median, and an IndexOutOfBoundsException for any dispatch count of two
+      // or fewer, which is exactly what someone debugging this would reduce it
+      // to.
+      val rest   = timings.drop(1).sorted
       val first  = timings.head / 1000000.0
-      val median = timings.drop(1).sorted.apply(timings.size / 2) / 1000000.0
-      println(f"repeated dispatch: first ${first}%.1f ms, median of the rest ${median}%.1f ms")
+      val median = rest(rest.size / 2) / 1000000.0
+      println(
+        f"repeated dispatch: first ${first}%.1f ms, median of the rest ${median}%.1f ms, " +
+          f"second program build ${controlMillis}%.1f ms"
+      )
     }
   }
 

@@ -304,3 +304,80 @@ class CertificatesSuite extends munit.FunSuite:
     )
     assertEquals(status, None)
   }
+
+  test("an unrelated large coefficient cannot dilute a primal violation") {
+    // The hole a *global* matrix norm left open. Normalising the reduced-cost
+    // term by `spectralNormBound` fixed the units and not the dilution: that
+    // bound is built from the largest row and column sums, so a coefficient on
+    // a row and a variable the direction never touches shrank every reported
+    // shortfall by its size.
+    //
+    // Here the second row's coefficient is the unrelated one. The problem is
+    // feasible at `x0 = 1, x1 = 1e-10` at every scale, and `y = (1, 0)` is not a
+    // certificate of anything -- its reduced cost on `x0` is entirely
+    // unabsorbed, `x0` having no finite upper bound.
+    def shortfall(unrelated: Double): Double =
+      val b = LpProblem.builder(2)
+      b.bounds(0, 0.0, inf)
+      b.bounds(1, 0.0, inf)
+      b.greaterThan(Seq(0 -> 1.0), 1.0)
+      b.greaterThan(Seq(1 -> unrelated), 1.0)
+      Certificates.primalInfeasibility(b.build()._1, Array(1.0, 0.0)).get
+
+    // Fully unabsorbed, so the shortfall is the largest it can be.
+    assertEqualsDouble(shortfall(1.0), 1.0, 1e-12)
+    Seq(1e4, 1e10, 1e14).foreach { big =>
+      assertEqualsDouble(shortfall(big), 1.0, 1e-12,
+        s"a coefficient of $big elsewhere in K moved the shortfall")
+    }
+
+    // And the verdict, which is what a caller sees: at 1e10 the global-norm
+    // version reported 1e-10 and `classify` called a feasible problem
+    // infeasible.
+    val b = LpProblem.builder(2)
+    b.bounds(0, 0.0, inf)
+    b.bounds(1, 0.0, inf)
+    b.greaterThan(Seq(0 -> 1.0), 1.0)
+    b.greaterThan(Seq(1 -> 1e10), 1.0)
+    val problem = b.build()._1
+    assertEquals(
+      Certificates.classify(problem, Array(0.0, 0.0), Array(1.0, 0.0), 1e-8),
+      None,
+      "a feasible problem was reported infeasible",
+    )
+  }
+
+  test("an unrelated large coefficient cannot dilute a bound violation") {
+    // The dual mirror. `x0 <= 0` with `x0 >= 0` pins `x0` to zero, so
+    // minimising `-x0` is bounded; the direction `d = (1, 0)` decreases the
+    // objective but walks straight out of the first row, which is exactly the
+    // violation the measure has to report. The second row's coefficient is
+    // again unrelated to `d`.
+    def shortfall(unrelated: Double): Double =
+      val b = LpProblem.builder(2)
+      b.bounds(0, 0.0, inf)
+      b.bounds(1, 0.0, inf)
+      b.objectiveCoefficient(0, -1.0)
+      b.lessThan(Seq(0 -> 1.0), 0.0)
+      b.lessThan(Seq(1 -> unrelated), 1.0)
+      Certificates.dualInfeasibility(b.build()._1, Array(1.0, 0.0)).get
+
+    assertEqualsDouble(shortfall(1.0), 1.0, 1e-12)
+    Seq(1e4, 1e10, 1e14).foreach { big =>
+      assertEqualsDouble(shortfall(big), 1.0, 1e-12,
+        s"a coefficient of $big elsewhere in K moved the shortfall")
+    }
+
+    val b = LpProblem.builder(2)
+    b.bounds(0, 0.0, inf)
+    b.bounds(1, 0.0, inf)
+    b.objectiveCoefficient(0, -1.0)
+    b.lessThan(Seq(0 -> 1.0), 0.0)
+    b.lessThan(Seq(1 -> 1e10), 1.0)
+    val problem = b.build()._1
+    assertEquals(
+      Certificates.classify(problem, Array(1.0, 0.0), Array(0.0, 0.0), 1e-8),
+      None,
+      "a bounded problem was reported unbounded",
+    )
+  }

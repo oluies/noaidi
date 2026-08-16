@@ -50,8 +50,12 @@ import org.noaidi.prima.LpBuilder
   *
   * PyPSA's ramp rows for a committable unit carry `ramp_limit_start_up` and
   * `ramp_limit_shut_down` against the binary status, which is a mixed-integer
-  * formulation. [[reject]] refuses that combination rather than building the
-  * continuous rows and returning a number for a different model.
+  * formulation. [[Commitment.reject]] refuses every committable entity, and it
+  * runs before [[Lopf]] builds anything — so the rows below are never reached
+  * for one, and this module needs no refusal of its own. It carried one until
+  * the plain committable case was refused generally, at which point a second
+  * check describing one fragment of the same gap was only a second place to keep
+  * in step.
   */
 object Ramps:
 
@@ -59,19 +63,15 @@ object Ramps:
   private val attributes =
     Seq("ramp_limit_up", "ramp_limit_down", "ramp_limit_start_up", "ramp_limit_shut_down")
 
-  /** The components PyPSA ramps: those declaring any of the attributes. */
-  private def declares(table: ComponentTable): Boolean =
-    attributes.exists(table.spec.attribute(_).isDefined)
-
   /** Whether any ramp attribute appears in this table's '''data'''.
     *
     * Gated on the data, not the spec, and for the reason the `stand_by_cost`
     * guard in [[UnitCommitment]] gives at length: every attribute here is
-    * declared on Generator and Link, so [[declares]] is unconditionally true and
-    * the per-snapshot sweep below would run for every solve even where no ramp
-    * column exists. Each `valueAt` on an absent column re-parses the schema
-    * default, so a few thousand generators over a year is tens of millions of
-    * parses to find nothing.
+    * declared on Generator and Link, so a spec test is unconditionally true for
+    * them and the per-snapshot sweep below would run for every solve even where
+    * no ramp column exists. Each `valueAt` on an absent column re-parses the
+    * schema default, so a few thousand generators over a year is tens of
+    * millions of parses to find nothing.
     *
     * The series is checked as well as the static column, so a `<component>-
     * ramp_limit_up.csv` with no static counterpart still passes -- which is the
@@ -93,7 +93,7 @@ object Ramps:
 
   /** The same, for an attribute that may vary by snapshot.
     *
-    * [[declares]] admits a table carrying only one of the two limits, so reading
+    * [[present]] admits a table carrying only one of the two limits, so reading
     * the other through `valueAt` -- which resolves to `spec.require` for an
     * undeclared attribute -- would throw rather than emit the one row it can.
     */

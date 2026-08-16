@@ -61,11 +61,18 @@ object Commitment:
       if table.spec.attribute("committable").isDefined && table.static.contains("committable") then
         table.ids.foreach { id =>
           if table.bool("committable", id) then
+            // The remedy is qualified rather than a bare "use UnitCommitment".
+            // That model is formulated without branch flows, so it refuses any
+            // network carrying a branch, storage or a global constraint -- which
+            // is most of them, and every network that can hold a committable
+            // Link at all. Naming it without that caveat sends the reader to a
+            // path that refuses them a second time for an unrelated reason.
             refuse(
               s"${table.spec.name} '$id' is committable, which is a binary status per snapshot and " +
                 "so a mixed-integer model; this builds a linear one, and solving it with the flag " +
-                "ignored holds the unit at its p_min_pu floor when it should be off. Use " +
-                "UnitCommitment, or clear the flag if the commitment is not wanted"
+                "ignored holds the unit at its p_min_pu floor when it should be off. Clear the flag " +
+                "if the commitment is not wanted, or use UnitCommitment -- which models a single " +
+                "bus and so takes no network with branches"
             )
         }
     }

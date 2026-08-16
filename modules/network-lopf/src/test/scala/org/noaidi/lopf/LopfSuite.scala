@@ -1277,6 +1277,29 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assert(committable.getMessage.contains("committable"), committable.getMessage)
   }
 
+  test("a committable Link is refused too, not only a Generator") {
+    assume(available, "goldens missing")
+    // The sweep runs over every table declaring `committable` rather than over
+    // `Generator` by name, because PyPSA declares it on Link and Process as well
+    // and Link is in `rejectUnhandled`'s handled set -- so a committable Link is
+    // a network this builder used to answer.
+    //
+    // Without this case both assertions above run against generators, and
+    // narrowing the sweep back to `network.table("Generator")` -- the exact
+    // regression the design note argues against -- would leave every test green
+    // while a committable Link was again solved with the flag ignored.
+    val n = mutate("ac-dc-meshed", "links.csv",
+      setColumn(_, "committable", (id, _) => if id == "DC link" then "True" else "False"))
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("committable"), failure.getMessage)
+    assert(failure.getMessage.contains("DC link"), failure.getMessage)
+    assert(failure.getMessage.contains("Link"), failure.getMessage)
+
+    // And the unmutated fixture still solves, so the refusal is attributable to
+    // the flag rather than to anything else `ac-dc-meshed` carries.
+    assertEquals(Lopf.solve(network("ac-dc-meshed"), params).status, SolveStatus.Optimal)
+  }
+
   test("the committable refusal is not gratuitous: the linear answer is wrong") {
     assume(available, "goldens missing")
     // Guarding the refusal. A refusal that blocks a network the port would have

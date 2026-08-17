@@ -149,12 +149,39 @@ jobs:
           sbt --batch \
             "set networkModel/Test/envVars += (\"NOAIDI_GOLDENS\" -> \"$RUNNER_TEMP/latest\"); networkModel/testOnly org.noaidi.network.SchemaSweepSuite" \
             2>&1 | tee sweep.log || status=$?
+
+          # Every guard below leaves through here rather than through a bare
+          # `exit 1`, and the reason is the one failure mode where silence is
+          # indistinguishable from a clean run.
+          #
+          # `clean` used to be written *after* the guards. So a sweep that died
+          # before munit reported -- a compile error, an
+          # `ExceptionInInitializerError`, an OOM -- hit a guard, exited, and left
+          # `steps.sweep.outputs.clean` unset. The `Open or update the drift
+          # issue` step is conditioned on `drifted == 'true' || clean == 'false'`,
+          # and an unset output is neither, so the hardest failure this job can
+          # have opened nothing at all. A red cross on a weekly cron is exactly
+          # what nobody is watching.
+          #
+          # The report is written here too, so the issue carries a reason rather
+          # than an empty fence.
+          fail_hard() {
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "$1"
+              echo
+              echo "The sweep did not get far enough to report per-case results, so there is"
+              echo "no attribute list here. The full log is in the workflow run."
+            } > sweep-report.txt
+            exit 1
+          }
+
           # A `set` that failed to parse would leave the suite reading the pinned
           # schema and passing, which is the same output as no drift. The suite
           # prints the schema it opened for exactly this reason.
           grep -qF "$RUNNER_TEMP/latest" sweep.log || {
             echo "::error::the sweep did not read the generated schema -- the set command did not take"
-            exit 1
+            fail_hard "The sweep did not read the generated schema: the sbt \`set\` command did not take."
           }
           # The same guard ci.yml applies to `testFull`: a green sbt run is not
           # evidence that anything executed, and a sweep that ran zero tests
@@ -173,11 +200,11 @@ jobs:
           echo "sweep: ${summary:-<no summary line>}"
           if [ -z "${total:-}" ] || [ "$total" -lt 1 ]; then
             echo "::error::the sweep reported no cases -- it did not run"
-            exit 1
+            fail_hard "The sweep emitted no munit summary line, so it never ran its cases."
           fi
           if [ "${ignored:-0}" -ne 0 ]; then
             echo "::error::$ignored sweep case(s) were skipped; the schema was not readable"
-            exit 1
+            fail_hard "$ignored sweep case(s) were skipped, so the generated schema was not readable."
           fi
           echo "clean=$([ "$status" -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
@@ -194,12 +221,15 @@ jobs:
           # break both.
           if [ "$status" -ne 0 ]; then
             # `|| true` because `grep -v` exits 1 when it emits nothing, which
-            # under `pipefail` would abort the step. That is not a hypothetical
-            # branch: it is what happens when the suite fails at the *suite*
-            # level -- an initialisation exception rather than a `==> X` case
-            # failure -- so the start anchor never matches and `sed` prints
-            # nothing. The step would then die before `exit 0` and the issue
-            # opened below would carry no sweep content and no reason for it.
+            # under `pipefail` would abort the step before `exit 0` and leave the
+            # issue below with an empty fence.
+            #
+            # Reaching here at all means munit reported, so this is *not* the
+            # suite-level failure `fail_hard` covers -- everything in
+            # `SchemaSweepSuite` is a `lazy val` forced inside a test, so even a
+            # schema that will not parse surfaces as a per-case `==> X` that the
+            # range below catches. What is left is the start anchor missing a
+            # failure that is there: an ANSI-coloured `==> X`, a renamed suite.
             sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/^Test run .* finished/p' sweep.log \
               | grep -vE '^\s+at |^[0-9]+:' > sweep-full.txt || true
             # Truncation is stated rather than silent. It matters most in exactly
@@ -212,13 +242,13 @@ jobs:
             fi
             # And an empty extraction says so. Silence here reads as "the sweep
             # had nothing to report", which is the opposite of what a non-zero
-            # status means.
+            # status means. Stated as what was observed rather than as a
+            # diagnosis: the script knows the pattern did not match, and not why.
             if [ ! -s sweep-report.txt ]; then
-              echo "the sweep failed with status $status, but no per-case failure could be" \
-                > sweep-report.txt
-              echo "extracted from its log -- the failure was above the case level." \
-                >> sweep-report.txt
-              echo "The full log is in the workflow run." >> sweep-report.txt
+              {
+                echo "The sweep failed with status $status, but no per-case failure line matched"
+                echo "in its log. The full log is in the workflow run."
+              } > sweep-report.txt
             fi
           fi
           exit 0

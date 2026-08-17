@@ -22,6 +22,71 @@ object Admittance:
   /** The network uses a branch this admittance model does not cover. */
   final class Unsupported(message: String) extends RuntimeException(message)
 
+  /** Whether this branch is declared with the T equivalent circuit. */
+  private def isTModel(table: ComponentTable, id: String): Boolean =
+    table.spec.attribute("model").isDefined && table.static.contains("model") &&
+      table.string("model", id) == "t"
+
+  /** Which end carries the tap: 0 for `bus0`, 1 for `bus1`, 0 by default.
+    *
+    * PyPSA's default is 0, and it is a property of the *transformer type* as
+    * well as of the transformer, so a typed unit inherits it. Read defensively
+    * because a Line declares no such attribute.
+    */
+  private def tapSide(table: ComponentTable, id: String): Int =
+    if table.spec.attribute("tap_side").isDefined && table.static.contains("tap_side") then
+      table.int("tap_side", id)
+    else 0
+
+  /** The T equivalent circuit as an equivalent pi, in per unit.
+    *
+    * PyPSA's `apply_transformer_t_model` runs a wye–delta conversion on the
+    * three impedances `z/2`, `z/2` and `1/y` and keeps two of the three results.
+    * With the first two equal the algebra collapses to a closed form, which is
+    * what this computes:
+    *
+    * {{{
+    * z' = z + y z² / 4          y' = 4 y / (z y + 4)
+    * }}}
+    *
+    * Derived rather than transcribed, and worth showing because the general
+    * `summand / z_i` form hides that `za` and `zb` are equal here: with
+    * `z1 = z2 = z/2` and `z3 = 1/y`, `summand = z²/4 + z/y`, so
+    * `zc = summand · y = z + y z²/4` and `za = summand · 2/z = z/2 + 2/y`,
+    * whence `y' = 2/za = 4y/(zy + 4)`.
+    *
+    * Applied only where the shunt is non-zero. `1/y` is the third leg of the
+    * wye, so a lossless, non-charging transformer has no T to convert and the
+    * expression would divide by zero — PyPSA masks on exactly that condition.
+    */
+  private[pf] def tModelToPi(
+      r: Double,
+      x: Double,
+      g: Double,
+      b: Double,
+  ): (Double, Double, Double, Double) =
+    // z = r + jx, y = g + jb, computed with explicit real and imaginary parts
+    // rather than a complex type, for the reason the class doc gives.
+    val zzR = r * r - x * x // z²
+    val zzI = 2.0 * r * x
+    // y z² / 4
+    val quarterR = (g * zzR - b * zzI) / 4.0
+    val quarterI = (g * zzI + b * zzR) / 4.0
+    val zR = r + quarterR
+    val zI = x + quarterI
+
+    // z y + 4
+    val zyR = r * g - x * b + 4.0
+    val zyI = r * b + x * g
+    val denom = zyR * zyR + zyI * zyI
+    // 4y / (zy + 4)
+    val numR = 4.0 * g
+    val numI = 4.0 * b
+    val yR = (numR * zyR + numI * zyI) / denom
+    val yI = (numI * zyR - numR * zyI) / denom
+
+    (zR, zI, yR, yI)
+
   /** Build `Y` for a sub-network from its passive branches.
     *
     * The per-unit conventions are PyPSA's, and were read off its own `Y` rather
@@ -76,50 +141,27 @@ object Admittance:
                   val sNom = table.float("s_nom", id)
                   if !(sNom > 0.0) then
                     throw new Unsupported(s"Transformer '$id' has s_nom = $sNom, its per-unit base")
-                  // Off-nominal taps and the T-model are refused rather than
-                  // approximated. PyPSA folds `tap_ratio` into `x_pu_eff` for the
-                  // *linear* models, which this module's linear counterpart
-                  // follows, but the AC admittance of an off-nominal transformer
-                  // is an ideal-transformer model that makes Y asymmetric -- not
-                  // a scalar. And `model = "t"` with a non-zero shunt is a
-                  // wye-delta conversion before Y is built at all. No golden has
-                  // either, so neither is written blind.
-                  val tap = Branches.tapRatio(table, id)
-                  if math.abs(tap - 1.0) > 1e-12 then
-                    throw new Unsupported(
-                      s"Transformer '$id' has tap_ratio = $tap; an off-nominal tap changes the AC " +
-                        "admittance by more than a scalar and is not modelled"
-                    )
-                  // Phase shift, refused here for the same reason and found the
-                  // same way. PyPSA multiplies the off-diagonals by `exp(jφ)` and
-                  // its conjugate, so `Y` is no longer symmetric -- not a scaling.
-                  // The linear flow *does* model it (see `LinearPowerFlow`); this
-                  // path silently returned the unshifted answer because nothing
-                  // read the attribute, which is exactly the failure a refusal
-                  // exists to prevent.
-                  val shift = Branches.optional(table, "phase_shift", id)
-                  if shift != 0.0 then
-                    throw new Unsupported(
-                      s"Transformer '$id' has phase_shift = $shift degrees; that makes Y asymmetric " +
-                        "(`exp(jφ)` on one off-diagonal and its conjugate on the other) and is not " +
-                        "modelled here, though the linear flow does model it"
-                    )
-                  val shunt = Branches.optional(table, "b", id) + Branches.optional(table, "g", id)
-                  val isT   = table.static.contains("model") && table.string("model", id) == "t"
-                  if isT && shunt != 0.0 then
-                    throw new Unsupported(
-                      s"Transformer '$id' uses the T model with a non-zero shunt, which PyPSA " +
-                        "converts to an equivalent pi model before building Y; that is not " +
-                        "implemented"
-                    )
                   sNom
                 case other =>
                   throw new Unsupported(
                     s"$other '$id' is a passive branch whose per-unit base is not known here"
                   )
 
-              val rPu = table.float("r", id) / base
-              val xPu = table.float("x", id) / base
+              val rRaw = table.float("r", id) / base
+              val xRaw = table.float("x", id) / base
+              val gRaw = Branches.optional(table, "g", id) * base
+              val bRaw = Branches.optional(table, "b", id) * base
+
+              // The T model, converted to its equivalent pi before anything else
+              // reads the impedance. PyPSA does this in `apply_transformer_t_model`
+              // ahead of `calculate_Y`, and only where the shunt is non-zero --
+              // with no shunt the two models coincide and the conversion would
+              // divide by zero.
+              val (rPu, xPu, shuntGpu, shuntBpu) =
+                if isTModel(table, id) && (gRaw != 0.0 || bRaw != 0.0) then
+                  tModelToPi(rRaw, xRaw, gRaw, bRaw)
+                else (rRaw, xRaw, gRaw, bRaw)
+
               val magnitude = rPu * rPu + xPu * xPu
               if !(magnitude > 0.0) then
                 throw new Unsupported(
@@ -130,18 +172,45 @@ object Admittance:
               val yG = rPu / magnitude
               val yB = -xPu / magnitude
 
-              val shuntG = Branches.optional(table, "g", id) * base / 2.0
-              val shuntB = Branches.optional(table, "b", id) * base / 2.0
+              val shuntG = shuntGpu / 2.0
+              val shuntB = shuntBpu / 2.0
 
-              g(i * n + i) += yG + shuntG
-              b(i * n + i) += yB + shuntB
-              g(k * n + k) += yG + shuntG
-              b(k * n + k) += yB + shuntB
+              // The ideal-transformer ratio, complex: magnitude from `tap_ratio`
+              // and argument from `phase_shift`. `tap_side` decides which end
+              // carries it -- 0 is bus0, 1 is bus1 -- and the other end gets 1.
+              // A Line has neither attribute and so gets 1 at both ends, which
+              // reduces every expression below to the plain pi model.
+              val tap  = Branches.tapRatio(table, id)
+              val side = tapSide(table, id)
+              val tauHv = if side == 0 then tap else 1.0
+              val tauLv = if side == 1 then tap else 1.0
+              val phi   = math.toRadians(Branches.optional(table, "phase_shift", id))
+              val cosPhi = math.cos(phi)
+              val sinPhi = math.sin(phi)
 
-              g(i * n + k) -= yG
-              b(i * n + k) -= yB
-              g(k * n + i) -= yG
-              b(k * n + i) -= yB
+              // PyPSA's `calculate_Y`, with the complex arithmetic written out:
+              //
+              //   Y00 = (y_se + y_sh/2) / tau_hv²      Y11 = (y_se + y_sh/2) / tau_lv²
+              //   Y10 = -y_se / (tau_lv tau_hv e^{jφ})
+              //   Y01 = -y_se / (tau_lv tau_hv e^{-jφ})
+              //
+              // The two off-diagonals differ by the *conjugate* of the phase
+              // term, which is what makes Y asymmetric rather than merely
+              // scaled. Everything downstream indexes `(i, k)` in the general
+              // form and the Jacobian is solved by LU, so nothing needed to
+              // change to carry that.
+              g(i * n + i) += (yG + shuntG) / (tauHv * tauHv)
+              b(i * n + i) += (yB + shuntB) / (tauHv * tauHv)
+              g(k * n + k) += (yG + shuntG) / (tauLv * tauLv)
+              b(k * n + k) += (yB + shuntB) / (tauLv * tauLv)
+
+              val scale = 1.0 / (tauHv * tauLv)
+              // Dividing by e^{-jφ} multiplies by cos φ + j sin φ.
+              g(i * n + k) -= scale * (yG * cosPhi - yB * sinPhi)
+              b(i * n + k) -= scale * (yG * sinPhi + yB * cosPhi)
+              // Dividing by e^{+jφ} multiplies by cos φ − j sin φ.
+              g(k * n + i) -= scale * (yG * cosPhi + yB * sinPhi)
+              b(k * n + i) -= scale * (yB * cosPhi - yG * sinPhi)
 
             case _ => () // A branch outside this island.
         }

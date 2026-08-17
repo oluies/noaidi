@@ -250,6 +250,56 @@ def transformer_levels():
     return n
 
 
+def transformer_taps():
+    """Off-nominal taps and the T model, which the AC path used to refuse.
+
+    `transformer-levels` deliberately holds every tap nominal and every shunt at
+    zero, so it validates the per-unit conversion and nothing around it. This is
+    the rest, and each transformer isolates one thing:
+
+      - `thv` taps on the **high-voltage side** (`tap_side = 0`, PyPSA's
+        default), so `Y00` is divided by `tau^2` and `Y11` is not.
+      - `tlv` taps on the **low-voltage side** (`tap_side = 1`), the mirror. The
+        two sides are not interchangeable and a model that ignored `tap_side`
+        would reproduce one and not the other, which is why both are here.
+      - `tt` uses the **T model with a non-zero shunt**, so it exercises the
+        wye-delta conversion PyPSA applies before `Y` is built. Its `g` and `b`
+        are deliberately large enough to move the answer: with a negligible shunt
+        the T and pi models coincide and the conversion would be untested.
+      - `tshift` combines an off-nominal tap **with** a phase shift, which is the
+        case the two features could each get right alone and still get wrong
+        together -- `Y01` and `Y10` then differ by both a magnitude and a
+        conjugated argument.
+
+    The topology is `transformer-levels`': two voltage levels, a line at each and
+    a transformer at each end, so there is a cycle crossing the transformers.
+    Radial flows are fixed by topology and would hide an impedance error.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "hv1", v_nom=380.0)
+    n.add("Bus", "hv2", v_nom=380.0)
+    n.add("Bus", "lv1", v_nom=110.0)
+    n.add("Bus", "lv2", v_nom=110.0)
+    n.add("Line", "hv", bus0="hv1", bus1="hv2", x=0.5, r=0.02, s_nom=600.0)
+    n.add("Line", "lv", bus0="lv1", bus1="lv2", x=0.3, r=0.01, s_nom=400.0)
+
+    n.add("Transformer", "thv", bus0="hv1", bus1="lv1", x=0.10, r=0.004,
+          s_nom=500.0, model="pi", tap_ratio=1.05, tap_side=0)
+    n.add("Transformer", "tlv", bus0="hv2", bus1="lv2", x=0.12, r=0.005,
+          s_nom=400.0, model="pi", tap_ratio=0.94, tap_side=1)
+    n.add("Transformer", "tt", bus0="hv1", bus1="lv2", x=0.15, r=0.006,
+          s_nom=300.0, model="t", g=0.004, b=0.02)
+    n.add("Transformer", "tshift", bus0="hv2", bus1="lv1", x=0.11, r=0.005,
+          s_nom=350.0, model="pi", tap_ratio=1.03, tap_side=0, phase_shift=12.0)
+
+    n.add("Generator", "g", bus="hv1", control="Slack", p_nom=900.0, marginal_cost=10.0)
+    n.add("Generator", "gl", bus="lv2", p_nom=300.0, marginal_cost=60.0)
+    n.add("Load", "d1", bus="lv1", p_set=[150.0, 120.0, 180.0])
+    n.add("Load", "d2", bus="lv2", p_set=[100.0, 140.0, 90.0])
+    return n
+
+
 def storage_cycle():
     """Storage that has to be arbitraged, with every flag `scigrid-de` leaves off.
 
@@ -874,6 +924,7 @@ NETWORKS = {
     "sclopf-triangle": sclopf_triangle,
     "lodf-mesh": lodf_mesh,
     "transformer-levels": transformer_levels,
+    "transformer-taps": transformer_taps,
     "standard-types": standard_types_network,
     "storage-cycle": storage_cycle,
     "phase-shift": phase_shift,

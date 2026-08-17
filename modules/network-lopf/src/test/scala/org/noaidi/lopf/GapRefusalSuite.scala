@@ -125,8 +125,12 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 
   // Whole features, refused as networks rather than as attributes.
   refuses("multi-investment periods", "investment period")(network("investment-periods"))
-  refuses("Link delay", "delay")(network("link-delay"))
   refuses("committable units", "committable")(network("unit-commitment"))
+  // `Link delay` was here. `Delays` implements it, so the case is gone rather
+  // than reworded -- the same way three transformer cases went when the AC model
+  // was written. What replaced it is a golden comparison on `link-delay` and
+  // `link-delay-wrap`, plus the two invalid-delay refusals in `LopfSuite`, which
+  // are PyPSA parity rather than a gap.
 
   test("gap: security-constrained expansion of the transmission is refused") {
     assume(available, "goldens missing")

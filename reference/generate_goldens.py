@@ -635,8 +635,12 @@ def link_delay():
     returned the 500 either way.
 
     `cyclic_delay` is off, so energy still in flight at the end of the horizon
-    is lost rather than wrapping to the beginning. With it on, the model would
-    have a second thing to get right, and the refusal covers both.
+    is lost rather than wrapping to the beginning.
+
+    What this fixture cannot gate is the shift itself. The delay here makes the
+    link *useless*, so an implementation that deleted the link outright would
+    reproduce every number in it. `link-delay-wrap` is the one that makes the
+    shift carry something.
     """
     n = pypsa.Network()
     n.set_snapshots(range(4))
@@ -648,6 +652,90 @@ def link_delay():
     n.add("Link", "tie", bus0="a", bus1="b", p_nom=150.0, efficiency=1.0,
           delay=1, cyclic_delay=False)
     n.add("Load", "d", bus="b", p_set=[100.0, 0.0, 0.0, 0.0])
+    return n
+
+
+def link_delay_wrap():
+    """A delay that is used rather than merely blocking, and the wrap.
+
+    `link-delay` proves the refusal was worth having and nothing more: its delay
+    makes the only route to the load useless, so every number in it is
+    reproduced by an implementation that deletes the link. Four things have to
+    bind before the shift itself is gated, and each is a separate wrong reading
+    that would otherwise pass.
+
+    ==The delay is elapsed time, not a snapshot count==
+
+    `delay` is declared in "snapshot weighting units" and measured against
+    `snapshot_weightings.generators` -- the same column the energy budgets read,
+    not the `objective` one beside it. Here `generators` is 2.0, so both links'
+    delays are half what they look like: `wrap` at 2 reaches back one snapshot
+    and `lag` at 4 reaches back two. An implementation counting snapshots reaches
+    back two and four instead.
+
+    The `objective` weighting is 1, 1, 3, 1 rather than flat, so *when* the cheap
+    unit runs changes what it costs. Without that, reaching back the wrong number
+    of snapshots lands on the same objective and only the dispatch frames can see
+    it.
+
+    ==`cyclic_delay` wraps, and the mask is not a zero==
+
+    `wrap` is cyclic. Its load sits at the first snapshot and the only source of
+    energy for it is the *last* one, which is a snapshot that has not happened
+    yet in every reading but PyPSA's -- 500 against the 9,000 of running the
+    local unit instead.
+
+    `lag` is not cyclic, and its first two snapshots have no source at all. PyPSA
+    still computes an index for them and discards it through a validity mask; the
+    index it discards is 0. Keeping it makes the link instantaneous at the first
+    snapshot, and since nothing at `d` can absorb the arrival, that pins the
+    link's flow to zero and the load at the third snapshot falls to `local2`:
+    24,000 rather than 400.
+
+    ==Efficiency is read at the arrival snapshot==
+
+    `wrap`'s efficiency is 0.5 at the first snapshot and 1.0 elsewhere, and the
+    constraint multiplies the *shifted* flow by the efficiency of the snapshot it
+    arrives in -- so 200 MW must leave at the fourth snapshot for 100 MW to
+    arrive at the first. Reading the departure snapshot's efficiency instead
+    sends 100 and pays 500 where PyPSA pays 1,000.
+
+    PyPSA disagrees with itself here, which is worth recording rather than
+    smoothing over. `_apply_delay_shift` shifts `-p0 * efficiency` as a product
+    when it writes the results back, so `links_t.p1` reports -200 at the first
+    snapshot against the 100 its own balance row received. The constraint is what
+    the objective and the dispatch come from, and it is what this port matches;
+    nothing here reads `p1`.
+
+    The two links sit on disjoint sub-networks so that neither can serve the
+    other's load. Both loads are single-snapshot, which leaves the whole schedule
+    forced rather than merely optimal: the arrival at a bus with no load has to be
+    zero, so every other flow is pinned at zero too.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    n.snapshot_weightings.loc[:, "generators"] = 2.0
+    n.snapshot_weightings.loc[:, "objective"] = [1.0, 1.0, 3.0, 1.0]
+    n.snapshot_weightings.loc[:, "stores"] = 1.0
+
+    # Cyclic: the load at the first snapshot is served from the last one.
+    n.add("Bus", "a", v_nom=110.0)
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Generator", "cheap", bus="a", p_nom=400.0, marginal_cost=5.0)
+    n.add("Generator", "local", bus="b", p_nom=400.0, marginal_cost=90.0)
+    n.add("Link", "wrap", bus0="a", bus1="b", p_nom=250.0, delay=2,
+          cyclic_delay=True, efficiency=[0.5, 1.0, 1.0, 1.0])
+    n.add("Load", "dw", bus="b", p_set=[100.0, 0.0, 0.0, 0.0])
+
+    # Non-cyclic: the first two snapshots have no source, and the load at the
+    # third is served from the first.
+    n.add("Bus", "c", v_nom=110.0)
+    n.add("Bus", "d", v_nom=110.0)
+    n.add("Generator", "cheap2", bus="c", p_nom=400.0, marginal_cost=4.0)
+    n.add("Generator", "local2", bus="d", p_nom=400.0, marginal_cost=80.0)
+    n.add("Link", "lag", bus0="c", bus1="d", p_nom=150.0, delay=4,
+          cyclic_delay=False)
+    n.add("Load", "dl", bus="d", p_set=[0.0, 0.0, 100.0, 0.0])
     return n
 
 
@@ -934,6 +1022,7 @@ NETWORKS = {
     "energy-budget": energy_budget,
     "investment-periods": investment_periods,
     "link-delay": link_delay,
+    "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,

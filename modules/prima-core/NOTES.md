@@ -1071,13 +1071,16 @@ Multi-period is a feature with its own goldens, not a fix.
 `Network` now carries `investmentPeriods`, read from the file that was being
 skipped, and `Periods.reject` refuses on it from both `Lopf` and
 `UnitCommitment` — a single-bus multi-period network reaches the second entry
-point and not the first. Delayed links are refused in `Lopf`, which is the only
+point and not the first. Delayed links were refused in `Lopf`, which is the only
 model that builds a Link at all.
 
 Both fixtures keep PyPSA's own answer in the goldens, so the refusals are
 evidenced rather than asserted, and both refusals have a test that they are *not
 gratuitous*: solving each network the way the port used to gives an answer below
 PyPSA's, which is the benefit the refusal buys.
+
+`Link.delay` has since been implemented — see *Delays, and the one refusal that
+was cheaper to lift than to keep* below. Multi-period still stands.
 
 ### The model layer cannot hold a multi-period network, and now says so
 
@@ -1112,13 +1115,13 @@ looked at* is the shape of all six.
 
 ### The residue is committed, with reasons
 
-323 of the 422 attributes are inputs. 235 are named outright and another 24 are
+323 of the 422 attributes are inputs. 236 are named outright and another 24 are
 built by interpolation — `Expansion` reads capacity bounds as
 `s"${attribute}_max"`, so `p_nom_max` is read by code that never writes it down.
 Resolving those in the sweep rather than the ledger matters: filing the
 mechanism's blind spot as a human judgement is how a check starts lying.
 
-That leaves **64**, each with a line saying why it cannot change an answer.
+That leaves **63**, each with a line saying why it cannot change an answer.
 Eleven belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
 attributes are unreachable rather than ignored — the distinction that made
 `investment_periods.csv` a bug and makes this not one. Eighteen are `build_year`,
@@ -1155,6 +1158,115 @@ zero, and every network that could observe it is refused. But the comment
 asserted a check that does not exist, which is the same failure as a gap on a
 list with no code site — and it survived precisely because no procedure ever
 asked the question of that attribute by name.
+
+Its ruling is now gone rather than reworded: `Delays` reads the attribute, so the
+sweep's stale-ruling rule would have fired on it. That is the rule working — the
+ledger entry that said "unreachable, because refused" stopped being true in the
+commit that made it reachable.
+
+## Delays, and the one refusal that was cheaper to lift than to keep
+
+`Link.delay` was refused on the grounds that the bus balances pair `bus0` and
+`bus1` inside one snapshot. That is a description of the code, not of the
+difficulty: shifting the receiving term changes which *column* a balance row
+references and nothing else. No new variable, no new row, no change to the row
+ordering `Sclopf`'s copy depends on. It came to one new file and eleven lines in
+`Lopf`.
+
+`Delays` implements it. `Delays.reject` survives, but only for the two shapes
+PyPSA's own consistency check refuses.
+
+### Three things the transcription turned on
+
+**The delay is elapsed time, not a snapshot count.** The declared unit is
+"snapshot weighting units" and the weighting is `snapshot_weightings.generators`
+— the same column the energy budgets read, and neither the `objective` one
+beside it in the file nor the `stores` one the storage balances use. Writing
+`tau(t)` for the time at which snapshot `t` begins, the source of `t` is the
+latest `s` with `tau(s) <= tau(t) - delay`, so a delay landing between two
+boundaries rounds *down* to one. PyPSA logs a warning and rounds the same way;
+this follows it rather than refusing, since the contract is to agree with that
+implementation.
+
+**The arrival mask is not a zero.** Without `cyclic_delay`, the first targets
+have no source at all. PyPSA still computes an index for them — it clips the
+`searchsorted` result into range — and then discards it through a boolean mask.
+The index it discards is `0`. An implementation that dropped the mask and kept
+the index would deliver the *first* snapshot's inflow to every target before the
+delay elapsed, which on `link-delay-wrap` costs 24,000 against 400.
+
+**Efficiency is read at the arrival snapshot.** In
+`define_nodal_balance_constraints` only `p` is shifted; `coeff` stays indexed by
+the target. So a time-varying `efficiency` applies at the snapshot the energy
+arrives in, not the one it left in.
+
+### PyPSA disagrees with itself about `p1`, and it does not matter here
+
+`_apply_delay_shift` shifts `-p0 * efficiency` as a *product* when the results
+are written back, so `links_t.p1` uses the departure snapshot's efficiency while
+the constraint used the arrival's. On `link-delay-wrap` the balance row at bus
+`b` receives 100 MW and PyPSA reports `p1 = -200` for the same snapshot.
+
+Recorded rather than smoothed over, because it decides which of the two to copy.
+The constraint is where the objective and the dispatch come from, and
+`LopfResult.dispatch` returns `p0` — nothing in this port reads `p1` at all. If
+something ever does, this is the paragraph that says the two conventions are not
+interchangeable.
+
+### `link-delay` could not gate any of it
+
+The fixture that justified the refusal proves the refusal and nothing more. Its
+delay makes the only route to the load useless, so every number in it is
+reproduced by an implementation that deletes the link outright — the objective,
+the dispatch, and a link flow of zero at all four snapshots.
+
+`link-delay-wrap` is built so that each of the three readings above is a separate
+visible failure. Two links on disjoint sub-networks: `wrap` is cyclic and serves a
+load at the first snapshot from the *last* one, and `lag` is not, and serves a
+load at the third from the first. `generators` is weighted 2.0 against an
+`objective` of 1, 1, 3, 1 — so a snapshot-counting reading reaches the wrong way
+back *and* pays a different price for it, 3,400 rather than 1,400. `wrap`'s
+efficiency is 0.5 at the arrival snapshot alone, so 200 MW leaves for 100 to
+arrive and a departure-efficiency reading sends 100 and pays half.
+
+Both loads are single-snapshot, which leaves the whole schedule forced rather
+than merely optimal: an arrival at a bus with no load has to be zero, so every
+flow the fixture does not want is pinned at zero too.
+
+### The error had no reliable sign, which is why it was a feature
+
+On `link-delay`, ignoring the delay was eighteen times too cheap — 500 against
+9,000. On `link-delay-wrap` it is too *dear*: 2,200 against 1,400, because the
+shift is what lets the energy leave in a cheaply weighted snapshot. So there was
+never a conservative reading to fall back on, and "solve it as instantaneous and
+note the caveat" would have been wrong in both directions on two fixtures of the
+same feature.
+
+### Two refusals kept, and why they are not gaps
+
+`n.optimize` runs `consistency_check` before it builds, and
+`check_dispatch_delays` is strict by default, so PyPSA has no answer for a
+negative delay or for one at least as long as the horizon. `Delays.reject`
+refuses both, which keeps the two implementations agreeing about which networks
+*have* an answer — the same contract as agreeing about the answer.
+
+PyPSA's optimiser would not refuse either on its own, which is what makes the
+check worth transcribing rather than assuming: `_iter_balance_args` groups a
+negative delay as immediate, and one longer than the horizon leaves every target
+invalid. Silently instantaneous and silently inert, respectively.
+
+The horizon is measured in weighting units too. On `link-delay-wrap` it is 8, not
+4, so a delay of 5 solves and one of 8 is refused — backwards under a
+snapshot-counting reading, and asserted in `LopfSuite` for that reason.
+
+### The power flow deliberately does not shift
+
+PyPSA's `lpf` and `pf` write `p{i} = -p0 * efficiency` within one snapshot and
+never read `delay`; only the optimiser shifts it. So `LinearPowerFlow` and
+`NewtonRaphson` go on ignoring it, and both now say so at the call site. Applying
+it there would agree with PyPSA's optimiser and disagree with PyPSA's power flow,
+and the contract is the latter — `link-delay` and `link-delay-wrap` each carry an
+`lpf` block that would start failing.
 
 ## The AC transformer model, and an assumption that was never made
 

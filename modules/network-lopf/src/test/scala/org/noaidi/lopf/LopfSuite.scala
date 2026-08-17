@@ -1422,23 +1422,43 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     )
   }
 
-  test("a delayed link is refused rather than delivered instantly") {
+  test("a delayed link matches PyPSA's") {
     assume(available, "goldens missing")
-    // `delay` shifts a link's output by whole snapshots. Default 0, so inert
-    // unless set and no other fixture sets one -- the same shape as the four
-    // attributes the schema sweep found. The balance rows here pair both ends
-    // within one snapshot, which delivers the import in time when it cannot be.
-    val n       = network("link-delay")
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    assert(failure.getMessage.contains("delay"), failure.getMessage)
-    assert(failure.getMessage.contains("tie"), failure.getMessage)
+    // `delay` shifts a link's output into a later snapshot. Default 0, so inert
+    // unless set and no fixture set one -- the same shape as the four attributes
+    // the schema sweep found. Until `Delays` this model paired both ends of a
+    // link within one snapshot, which delivered the import in time when it
+    // cannot be: 500 against PyPSA's 9,000, `Optimal`.
+    val expected = results("link-delay")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("link-delay")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val generators = expected("generator_p")
+    val links      = expected("link_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(generators, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      n.require("Link").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Link", id, t), frameValue(links, t, id), 1e-4,
+          s"link $id at snapshot $t")
+      }
+    }
   }
 
-  test("the delay refusal is not gratuitous: the instantaneous answer is wrong") {
+  test("clearing the delay undercuts PyPSA, as this model silently did") {
     assume(available, "goldens missing")
-    // The same guard. With the delay cleared the link carries the load at the
-    // first snapshot for 500; PyPSA, honouring it, pays 9,000 for local
-    // generation because the import cannot arrive in time. Eighteen times.
+    // The discriminating half, and the one that survives the feature being
+    // implemented: `link-delay` is a fixture where the delay makes the only route
+    // to the load useless, so the shift is worth nothing unless honouring it is
+    // what produces the 9,000.
     val target = results("link-delay")("optimize")("objective").num
     assertEqualsDouble(target, 9000.0, 1e-6)
 
@@ -1448,4 +1468,144 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       instant.objective < target - 1.0,
       s"ignoring the delay gives ${instant.objective}, not below PyPSA's $target",
     )
+  }
+
+  test("a wrapped and a lagging delay both match PyPSA's") {
+    assume(available, "goldens missing")
+    // `link-delay` cannot gate the shift itself: its delay makes the link
+    // useless, so deleting the link reproduces every number in it. Here both
+    // links carry the load they were built for, one across the wrap and one two
+    // snapshots forward.
+    val expected = results("link-delay-wrap")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("link-delay-wrap")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val generators = expected("generator_p")
+    val links      = expected("link_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(generators, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      n.require("Link").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Link", id, t), frameValue(links, t, id), 1e-4,
+          s"link $id at snapshot $t")
+      }
+    }
+  }
+
+  test("each reading the wrap fixture rules out is visible in the golden") {
+    assume(available, "goldens missing")
+    // Guarding the guard, as for `ramp-limits` and `store-bank`. The comparison
+    // above passes against several wrong implementations unless each of these
+    // holds, and every one of them is a separate plausible misreading.
+    val n        = network("link-delay-wrap")
+    val expected = results("link-delay-wrap")("optimize")
+    val p        = expected("generator_p")
+    val flow     = expected("link_p0")
+    val ts       = n.snapshots.indices
+
+    // The delay is elapsed time against the `generators` weighting, not a
+    // snapshot count and not the `objective` weighting sitting beside it in the
+    // same file. At 2.0, `wrap`'s delay of 2 reaches back one snapshot.
+    assertEqualsDouble(ts.map(t => n.weighting("generators", t)).distinct.head, 2.0, 1e-9,
+      "the fixture no longer separates the generators weighting from the objective one")
+    assertEquals(ts.map(t => n.weighting("objective", t)), IndexedSeq(1.0, 1.0, 3.0, 1.0),
+      "the objective weighting is flat again, so which snapshot the source runs in is free")
+
+    // The wrap. The load sits at the first snapshot and its energy leaves at the
+    // last, which is a snapshot that has not happened yet in every reading but
+    // PyPSA's.
+    assertEqualsDouble(frameValue(flow, 3, "wrap"), 200.0, 1e-6, "the cyclic link does not wrap")
+    ts.filter(_ != 3).foreach { t =>
+      assertEqualsDouble(frameValue(flow, t, "wrap"), 0.0, 1e-6, s"the cyclic link also flows at $t")
+    }
+
+    // Efficiency at the *arrival* snapshot, not the departure. 0.5 applies at
+    // the first snapshot, so 200 leaves for 100 to arrive; reading the departure
+    // snapshot's 1.0 would send 100.
+    assertEqualsDouble(frameValue(p, 3, "cheap"), 200.0, 1e-6,
+      "the efficiency is being read at the snapshot the energy left in")
+
+    // The mask, which is not a zero. `lag` is not cyclic, so its first two
+    // snapshots have no source at all -- and the index PyPSA computes for them
+    // and then discards is 0. Keeping it would deliver this 100 at the first
+    // snapshot, where nothing at `d` can absorb it, pinning the flow to zero and
+    // handing the load to `local2`.
+    assertEqualsDouble(frameValue(flow, 0, "lag"), 100.0, 1e-6,
+      "the lagging link carries nothing, so the arrival mask cannot be gated here")
+    assertEqualsDouble(frameValue(p, 2, "local2"), 0.0, 1e-6,
+      "the expensive local unit runs, so the lagging link did not serve its load")
+  }
+
+  test("each half of the delay changes the answer when it is changed") {
+    assume(available, "goldens missing")
+    // The mutation half. Every number here is PyPSA's, re-solved with one
+    // attribute moved -- so a model that built the rows but read the wrong
+    // snapshot would have to be wrong in exactly the same way three times.
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("link-delay-wrap", "links.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // A delay of 1 rounds *down* to the same snapshot boundary as one of 2,
+    // because a snapshot is 2 weighting units long. Identical objective, and
+    // this is the reading that separates elapsed time from a snapshot count: a
+    // model counting snapshots would move `wrap`'s source and pay 3,400.
+    assertEqualsDouble(solved(setColumn(_, "delay", (id, d) => if id == "wrap" then "1" else d)),
+      1400.0, 1e-4, "a delay of 1 and one of 2 no longer round to the same boundary")
+
+    // Three units reaches back past that boundary, into the snapshot the
+    // objective weighting prices at 3.
+    assertEqualsDouble(solved(setColumn(_, "delay", "3")), 3400.0, 1e-4,
+      "reaching a snapshot further back costs nothing, so the shift is not being read")
+
+    // Without the wrap the load at the first snapshot has no source at all, and
+    // the expensive local unit carries it.
+    assertEqualsDouble(solved(setColumn(_, "cyclic_delay", "False")), 9400.0, 1e-4,
+      "turning off the wrap changes nothing")
+
+    // And the sign of the error is not fixed, which is why this was a feature
+    // rather than an approximation to tighten. Ignoring the delay here costs
+    // *more* than honouring it -- 2,200 against 1,400 -- because the shift is
+    // what lets the energy leave in a cheaply weighted snapshot. On `link-delay`
+    // the same omission was eighteen times too cheap.
+    assertEqualsDouble(solved(setColumn(_, "delay", "0")), 2200.0, 1e-4,
+      "dropping the delay reproduces the delayed answer")
+  }
+
+  test("the delays PyPSA's own consistency check refuses are refused here") {
+    assume(available, "goldens missing")
+    // `n.optimize` runs `consistency_check` first and `check_dispatch_delays` is
+    // strict, so PyPSA has no answer for either of these. Its optimiser would
+    // not refuse them on its own -- a negative delay is grouped as immediate and
+    // one longer than the horizon leaves every target invalid -- so the link
+    // would silently become instantaneous or inert.
+    def refusal(edit: String => String): String =
+      intercept[Lopf.UnsupportedNetwork](
+        Lopf.build(mutate("link-delay-wrap", "links.csv", edit))
+      ).getMessage
+
+    val negative = refusal(setColumn(_, "delay", (id, d) => if id == "wrap" then "-1" else d))
+    assert(negative.contains("wrap") && negative.contains("-1"), negative)
+
+    // The horizon is 8 weighting units, not 4 snapshots -- so this is refused for
+    // being too long while a delay of 5 is not, which a snapshot-counting reading
+    // has backwards.
+    val long = refusal(setColumn(_, "delay", (id, d) => if id == "lag" then "8" else d))
+    assert(long.contains("lag") && long.contains("horizon"), long)
+
+    val fits = Lopf.solve(
+      mutate("link-delay-wrap", "links.csv",
+             setColumn(_, "delay", (id, d) => if id == "lag" then "5" else d)),
+      params,
+    )
+    assertEquals(fits.status, SolveStatus.Optimal,
+      s"a delay of 5 is inside an 8-unit horizon and should solve: ${fits.solution}")
   }

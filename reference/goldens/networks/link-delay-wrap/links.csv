@@ -1,0 +1,3 @@
+name,bus0,bus1,p_nom,delay,cyclic_delay
+wrap,a,b,250.0,2,True
+lag,c,d,150.0,4,False

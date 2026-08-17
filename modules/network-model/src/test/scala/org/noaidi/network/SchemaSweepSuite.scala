@@ -345,15 +345,12 @@ object SchemaSweepSuite:
         Inert,
         "weights a generator in PyPSA's network-clustering helpers, not in any optimisation",
       )("Generator.weight") ++
-      // Default `True`, so unlike the rest of this group it is not inert on its
-      // face -- it decides whether energy still in flight at the end of the
-      // horizon wraps to the beginning. What makes it unreachable is that there
-      // is only energy in flight when `delay` is non-zero, and
-      // `Lopf.rejectDelayedLinks` refuses exactly that.
-      ruled(
-        Inert,
-        "only reachable with a non-zero delay, and Lopf.rejectDelayedLinks refuses those",
-      )("Link.cyclic_delay") ++
+      // `Link.cyclic_delay` was ruled inert here, on the grounds that only a
+      // non-zero `delay` can observe it and `Lopf.rejectDelayedLinks` refused
+      // those. `Delays` implements both, so the ruling is gone rather than
+      // reworded -- the sources name the attribute now, which is what the
+      // stale-ruling rule below is for.
+      //
       // The type library's expansion produces r, x, g, b, s_nom, tap_ratio and
       // phase_shift, and `standard-types`, `transformer-levels` and
       // `transformer-taps` agree with PyPSA on every one. These four feed none of

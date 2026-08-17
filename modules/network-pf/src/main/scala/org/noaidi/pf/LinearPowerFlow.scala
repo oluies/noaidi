@@ -280,6 +280,14 @@ object LinearPowerFlow:
           // A link's flow is given, so it is an injection here rather than an
           // unknown. It also spans two sub-networks, which is precisely why it
           // does not merge them: each end sees a fixed number.
+          //
+          // `delay` is deliberately not applied. PyPSA's own power flow writes
+          // `p{i} = -p0 * efficiency` at the same snapshot and never consults the
+          // attribute — only the optimiser shifts it, which is where [[Delays]]
+          // in `network-lopf` reproduces it. Honouring it here would agree with
+          // PyPSA's optimiser and disagree with PyPSA's `lpf`, and the contract
+          // is the latter. `link-delay` and `link-delay-wrap` both carry an `lpf`
+          // block that would fail the moment this changed.
           val ports = Topology.branchPorts(table)
           table.ids.foreach { id =>
             val p = rawSetpoint(table, id, snapshot)

@@ -27,6 +27,12 @@ import scala.collection.mutable
   * refuses its own remaining gaps — set points, per-period cycling and
   * quadratic costs.
   *
+  * '''A controllable branch may deliver late.''' `delay` shifts a link's output
+  * into a later snapshot, measured in elapsed time rather than in snapshots —
+  * see [[Delays]], which also covers the wrap `cyclic_delay` controls and why
+  * the arrival mask is not the same as a zero. It is the only thing in this
+  * model that puts the two ends of one component in two different bus balances.
+  *
   * '''Kirchhoff voltage law is enforced''' over a cycle basis of the passive
   * branches, which is PyPSA's own formulation rather than a bus-angle DC-OPF —
   * the brief is specific about that, because equivalence is judged against
@@ -79,7 +85,9 @@ object Lopf:
     // duplicated labels for a network whose real problem is that this model does
     // not have periods at all.
     Periods.reject(network, m => throw new UnsupportedNetwork(m))
-    rejectDelayedLinks(network)
+    // Only the delays PyPSA's own consistency check refuses. The rest are
+    // modelled -- see `Delays`, and the shift applied in the balance rows below.
+    Delays.reject(network, m => throw new UnsupportedNetwork(m))
     // Ahead of `Expansion.reject`, which used to carry the committable half of
     // this itself for the extendable case only. One refusal rather than three
     // partial ones: the narrower checks each described a different fragment of
@@ -292,6 +300,14 @@ object Lopf:
     if expandable.nonEmpty then builder.objectiveOffset(-Expansion.objectiveConstant(network))
 
     // Bus balance: everything injected at a bus must equal everything withdrawn.
+    //
+    // Resolved once for the whole table rather than per bus per snapshot: the
+    // shift depends only on `(delay, cyclic_delay)` and the snapshot weightings,
+    // and computing it costs a walk over the horizon.
+    val delays = (passive ++ controllable)
+      .map(table => table.spec.name -> Delays.forTable(network, table))
+      .toMap
+
     val balanceRows = mutable.LinkedHashMap.empty[(String, Int), Int]
     var rowIndex    = 0
 
@@ -324,15 +340,30 @@ object Lopf:
 
         (passive ++ controllable).foreach { branch =>
           val ports = Topology.branchPorts(branch)
+          val shift = delays(branch.spec.name)
           branch.ids.foreach { id =>
-            val c = columns((branch.spec.name, id, t))
             ports.foreach { port =>
               if branch.string(port, id) == bus then
                 // bus0 is where flow enters the branch, so it leaves that bus.
                 // Every other port receives, scaled by that port's efficiency --
                 // the difference is conversion loss, not a balance violation.
-                if port == "bus0" then terms += ((c, -1.0))
-                else terms += ((c, Topology.portEfficiency(branch, id, port, t)))
+                if port == "bus0" then terms += ((columns((branch.spec.name, id, t)), -1.0))
+                else
+                  // A delayed port receives the flow that entered earlier, so the
+                  // column is the *source* snapshot's while the efficiency is
+                  // this one's -- PyPSA shifts `p` alone and leaves `coeff`
+                  // indexed by the arrival. An undelayed port has itself as its
+                  // source, which is how everything but two fixtures reads.
+                  //
+                  // No term at all when the source is outside the horizon: a
+                  // non-cyclic link has nothing in flight at the start, and
+                  // treating that as a zero-flow arrival from snapshot 0 is the
+                  // one wrong reading available -- see `Delays`.
+                  val source = shift.get((id, port)).fold(Some(t))(_.sourceOf(t))
+                  source.foreach { s =>
+                    terms += ((columns((branch.spec.name, id, s)),
+                               Topology.portEfficiency(branch, id, port, t)))
+                  }
             }
           }
         }
@@ -639,42 +670,6 @@ object Lopf:
         s"network contains unmodelled component(s): " +
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
-
-  /** Reject a link that delivers its energy in a later snapshot.
-    *
-    * PyPSA's `delay` shifts a link's output by whole snapshots: power entering
-    * at `t` leaves at `t + delay`, and `cyclic_delay` decides whether what is
-    * still in flight at the end of the horizon wraps to the beginning or is
-    * lost. The balance rows built here pair `bus0` and `bus1` within a single
-    * snapshot, so a delayed link is modelled as instantaneous.
-    *
-    * The default is 0 and the attribute reads as inert, which is why nothing
-    * caught it: no fixture sets one. On a two-bus network whose only load sits
-    * at the first snapshot, a delay of 1 makes the cheap import useless and
-    * PyPSA pays 9,000 for local generation; this model delivered the import
-    * instantly and reported 500. An eighteen-fold under-price, `Optimal`.
-    *
-    * Only `delay` is checked, and `cyclic_delay` deliberately is not. It defaults
-    * to `True` rather than `False`, so it is not inert on its face — but it
-    * decides only what happens to energy still in flight at the end of the
-    * horizon, and nothing is ever in flight while `delay` is zero. Every network
-    * that could observe it is refused here first, which is what
-    * `SchemaSweepSuite` records against it rather than leaving it to read as an
-    * attribute nobody looked at.
-    */
-  private def rejectDelayedLinks(network: Network): Unit =
-    network.tables.values.foreach { table =>
-      if table.spec.attribute("delay").isDefined && table.static.contains("delay") then
-        table.ids.foreach { id =>
-          val delay = table.int("delay", id)
-          if delay != 0 then
-            throw new UnsupportedNetwork(
-              s"${table.spec.name} '$id' has delay = $delay, so its energy arrives $delay " +
-                "snapshot(s) after it enters; the balance rows here pair both ends within one " +
-                "snapshot, which would deliver it instantly"
-            )
-        }
-    }
 
   /** Reject a component whose bus does not exist.
     *

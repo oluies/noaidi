@@ -219,11 +219,12 @@ class SpmvSpike extends munit.FunSuite:
       // noisy to gate a build on. What the test establishes is that reuse
       // works and stays correct.
       //
-      // `rest` is indexed by its own length. Off the 25-element `timings` the
-      // old expression read element 12 of a 24-element sequence -- off by one as
-      // a median, and an IndexOutOfBoundsException for any dispatch count of two
-      // or fewer, which is exactly what someone debugging this would reduce it
-      // to.
+      // `rest` is indexed by its own length. At 25 dispatches that picks the
+      // same element the old expression did -- `timings.size / 2` and
+      // `rest.size / 2` are both 12 -- so this is not a bug fix at the count in
+      // the file. What it removes is the IndexOutOfBoundsException the old form
+      // threw for any dispatch count of two or fewer, which is exactly what
+      // someone debugging this would reduce it to.
       val rest   = timings.drop(1).sorted
       val first  = timings.head / 1000000.0
       val median = rest(rest.size / 2) / 1000000.0

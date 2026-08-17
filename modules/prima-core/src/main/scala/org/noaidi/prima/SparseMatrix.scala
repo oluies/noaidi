@@ -153,18 +153,66 @@ final class SparseMatrix private (
     val out = new Array[Double](rows)
     var r   = 0
     while r < rows do
-      var s = 0.0
-      var p = rowPtrRaw(r)
-      val e = rowPtrRaw(r + 1)
-      while p < e do
-        s += valuesRaw(p) * valuesRaw(p)
-        p += 1
-      out(r) = math.sqrt(s)
+      // Scaled by the row's largest entry before squaring. Accumulating `v*v`
+      // directly overflows to Infinity above ~1.3e154 and underflows to 0.0
+      // below ~1.5e-154, and both erase the residual the norm divides: an
+      // infinite norm sends it to zero, a zero norm takes the "empty column"
+      // branch in `Certificates` and drops it. That would resurrect the exact
+      // dilution this normalisation exists to prevent -- `1e200 x0 >= 1` is
+      // feasible at `x0 = 1e-200` and would be reported infeasible -- and
+      // nothing in `LpProblem.constraint` bounds coefficient magnitude. The
+      // global `spectralNormBound` this replaced had no such hazard, being
+      // built from absolute sums.
+      val mx = rowMaxAbs(r)
+      if mx > 0.0 then
+        var s = 0.0
+        var p = rowPtrRaw(r)
+        val e = rowPtrRaw(r + 1)
+        while p < e do
+          val t = valuesRaw(p) / mx
+          s += t * t
+          p += 1
+        out(r) = mx * math.sqrt(s)
+      else out(r) = 0.0
       r += 1
     out
 
-  /** Euclidean norm of each column, the counterpart of [[rowNorms]] for `K'y`. */
-  private[prima] lazy val columnNorms: Array[Double] = transpose.rowNorms
+  /** Euclidean norm of each column, the counterpart of [[rowNorms]] for `K'y`.
+    *
+    * Accumulated straight off the CSR arrays rather than as `transpose.rowNorms`.
+    * The transpose is a `lazy val` holding two arrays of length `nnz` for the
+    * matrix's lifetime, and on the live path -- `Pdhg.classify` into
+    * `primalInfeasibility` with `K'y` already supplied -- the *original*
+    * problem's transpose is otherwise never built, the solver transposing only
+    * the scaled matrix. This costs `cols` doubles and the same O(nnz) time.
+    *
+    * Scaled like [[rowNorms]], in two passes: the column maxima first, then the
+    * scaled squares.
+    */
+  private[prima] lazy val columnNorms: Array[Double] =
+    val maxima = new Array[Double](cols)
+    var k      = 0
+    while k < nnz do
+      val a = math.abs(valuesRaw(k))
+      val c = colIndicesRaw(k)
+      if a > maxima(c) then maxima(c) = a
+      k += 1
+
+    val acc = new Array[Double](cols)
+    k = 0
+    while k < nnz do
+      val c  = colIndicesRaw(k)
+      val mx = maxima(c)
+      if mx > 0.0 then
+        val t = valuesRaw(k) / mx
+        acc(c) += t * t
+      k += 1
+
+    var c = 0
+    while c < cols do
+      acc(c) = if maxima(c) > 0.0 then maxima(c) * math.sqrt(acc(c)) else 0.0
+      c += 1
+    acc
 
   /** Induced 1-norm, i.e. the largest absolute column sum.
     *

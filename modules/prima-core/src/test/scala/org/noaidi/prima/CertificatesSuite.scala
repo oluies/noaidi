@@ -347,7 +347,7 @@ class CertificatesSuite extends munit.FunSuite:
     )
   }
 
-  test("an unrelated large coefficient cannot dilute a bound violation") {
+  test("an unrelated large coefficient cannot dilute a row violation") {
     // The dual mirror. `x0 <= 0` with `x0 >= 0` pins `x0` to zero, so
     // minimising `-x0` is bounded; the direction `d = (1, 0)` decreases the
     // objective but walks straight out of the first row, which is exactly the
@@ -380,4 +380,27 @@ class CertificatesSuite extends munit.FunSuite:
       None,
       "a bounded problem was reported unbounded",
     )
+  }
+
+  test("an extreme coefficient does not overflow the per-column norm") {
+    // The hazard the per-component normalisation introduced, and the reason it
+    // is scaled. Accumulating `v*v` for the column norm overflows to Infinity
+    // above ~1.3e154 and underflows to 0.0 below ~1.5e-154, and both erase the
+    // residual: an infinite norm divides it to zero, and a zero norm takes the
+    // "structurally empty column" branch, which assumes the residual is zero
+    // because the column is. Either way the dilution hole reopens, on data no
+    // API here rejects -- `LpProblem.constraint` puts no bound on magnitude.
+    //
+    // `1e200 x0 >= 1` is feasible at `x0 = 1e-200`, and `y = 1` is not a
+    // certificate of anything: its reduced cost is entirely unabsorbed.
+    def shortfall(coefficient: Double): Double =
+      val b = LpProblem.builder(1)
+      b.bounds(0, 0.0, inf)
+      b.greaterThan(Seq(0 -> coefficient), 1.0)
+      Certificates.primalInfeasibility(b.build()._1, Array(1.0)).get
+
+    Seq(1e-200, 1e-160, 1.0, 1e160, 1e200, 1e300).foreach { c =>
+      assertEqualsDouble(shortfall(c), 1.0, 1e-12,
+        s"a coefficient of $c collapsed the shortfall")
+    }
   }

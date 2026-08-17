@@ -335,14 +335,9 @@ Not implemented, and rejected rather than mis-solved in every case:
   constraints. A `Store`'s `e_set` and `p_set` are both refused, the latter
   because PyPSA pins it too, out of the generic loop, and admitting it silently
   would drop exactly the constraint the other refusal exists for.
-- **Off-nominal tap ratios and the transformer T model, in the AC path only.**
-  Transformers themselves are modelled — see *Transformers* below — but an
-  off-nominal tap makes `Y` asymmetric rather than scaled, and `model = "t"` with
-  a non-zero shunt needs a wye–delta conversion before `Y` is built. The linear
-  models handle `tap_ratio` as PyPSA does, as a plain multiplier.
-- **Phase shift, in the AC path only.** The linear flow models it — see *Phase
-  shift* below. `Y` needs `exp(jφ)` on one off-diagonal and its conjugate on the
-  other, which is refused rather than approximated.
+- **Multi-investment periods, and `Link.delay`.** See *The two the sweep left*
+  below: both were silently mis-solved rather than merely unimplemented, which is
+  why they are listed here at all.
 - **Global constraints other than `primary_energy` with sense `<=`.** PyPSA
   dispatches on `type` to entirely different builders, so assuming one would
   build an energy cap as an emissions cap wearing the same right-hand side.
@@ -902,10 +897,10 @@ So the LOPF here was never wrong — it matches PyPSA including this omission �
 `phase-shift` pins both halves: that the linear flow honours the shift, and that
 the optimisation does not.
 
-The AC path refuses it. `Y` needs `exp(jφ)` on one off-diagonal and its conjugate
-on the other, which is asymmetry rather than scaling, and PyPSA does converge on
-this fixture — so the golden records an answer the port declines to compute,
-which is the honest shape for a gap.
+The AC path refused it for a long time — `Y` needs `exp(jφ)` on one off-diagonal
+and its conjugate on the other, which is asymmetry rather than scaling — and the
+golden recorded an answer the port declined to compute. It is now modelled; see
+*The AC transformer model* below for what that turned out to cost.
 
 ## Ramp limits and energy budgets: the same shape, twice more
 
@@ -1094,6 +1089,70 @@ dataset to read. The manifest carries a `multi_period` flag and `GoldenNetwork`,
 covered automatically, and with the reason stated in each rather than a name in a
 list. That skip is the model-layer half of the same limitation `Periods.reject`
 enforces at the solve layer.
+
+## The AC transformer model, and an assumption that was never made
+
+Off-nominal taps, phase shift and the T model were three separate refusals in the
+AC path, each with a golden recording a PyPSA answer the port declined to
+compute. They are now modelled, and the interesting part is how little it took.
+
+**The risk was assumed to be the solver.** A phase shift makes `Y` asymmetric —
+`Y01` and `Y10` differ by the conjugate of `exp(jφ)`, not by a scale factor — and
+the whole plan was built around finding out whether Newton-Raphson could carry
+that. So it was checked *before* any admittance code was written, three ways:
+
+- `Admittance` stores a full dense `n × n` pair of arrays and accumulates `(i,k)`
+  and `(k,i)` as separate writes. Nothing keeps a triangle, nothing mirrors.
+- Every consumer — the mismatch equations and all four Jacobian blocks — indexes
+  `(i,k)` in the general form.
+- The Jacobian was **already** asymmetric, `∂P/∂|V|` and `∂Q/∂θ` differing, which
+  is why `Lu` exists and `Cholesky` is used only by the linear flow.
+
+Then measured rather than concluded: a throwaway spike implementing PyPSA's
+`calculate_Y` reproduced its bus voltage angles to **3.3e-16** on `phase-shift`
+and **1.0e-17** on `transformer-levels`, first attempt, with no change to the
+solver. The refusals had been guarding an assumption the code did not make.
+
+That is worth recording as a general point. **A refusal can outlive its reason**,
+and nothing about it says so — it goes on reading as a considered limitation long
+after the limitation is gone. The way to find out is to spike the thing the
+refusal is protecting and see what breaks, which costs an afternoon and is
+cheaper than the feature it defers.
+
+### The formulation
+
+Per branch, with `τ = tap_ratio` on the side `tap_side` selects and 1 on the
+other:
+
+```
+Y00 = (y_se + y_sh/2) / τ_hv²        Y11 = (y_se + y_sh/2) / τ_lv²
+Y10 = −y_se / (τ_lv τ_hv e^{jφ})     Y01 = −y_se / (τ_lv τ_hv e^{−jφ})
+```
+
+A Line declares neither attribute, so both ratios are 1 and every expression
+collapses to the plain pi model it had before.
+
+The T model is a wye–delta conversion applied to the per-unit values *before* `Y`
+is built, as PyPSA does in `apply_transformer_t_model`. With the two series
+halves equal the general `summand / z_i` form collapses:
+
+```
+z' = z + y z² / 4                    y' = 4 y / (z y + 4)
+```
+
+Derived rather than transcribed, and checked against the general form in a test
+rather than only through a converged solve — an error there could hide inside the
+iteration. It applies only where the shunt is non-zero: `1/y` is the third leg of
+the wye, so a transformer with no shunt has no T to convert and PyPSA masks on
+exactly that condition.
+
+### `tap_side` is the part that looks interchangeable and is not
+
+`transformer-taps` has one transformer tapping the HV side and one the LV side,
+because a model that applied the tap to whichever end it happened to pick would
+reproduce one and not the other. It also has one combining a tap *with* a phase
+shift, which is the case each feature could get right alone and still get wrong
+together.
 
 ## Standard types, and the 585-bus network they unblock
 

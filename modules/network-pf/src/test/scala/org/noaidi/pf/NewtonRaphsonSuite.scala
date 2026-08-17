@@ -218,23 +218,101 @@ class NewtonRaphsonSuite extends munit.FunSuite:
         }
     }
 
-  test("a phase-shifting transformer is refused by the AC path, not answered") {
+  test("the transformer features that were refused now match PyPSA") {
     assume(available, "goldens missing")
-    // PyPSA converges on `phase-shift` and the golden records its voltages, so
-    // this is a genuine gap rather than an impossibility -- `exp(jphi)` on one
-    // off-diagonal and its conjugate on the other, which makes Y asymmetric.
+    // These were three separate refusals: an off-nominal tap, a phase shift, and
+    // the T model with a non-zero shunt. Each was a real gap -- PyPSA converges
+    // on all of them and the goldens recorded answers this port declined to
+    // compute.
     //
-    // Refused rather than approximated, and the refusal is the point: the linear
-    // flow silently returned the unshifted answer for months because nothing read
-    // the attribute. A gap with a diagnostic is a different thing from a gap
-    // without one.
-    val n = CsvReader.read(goldens.resolve("networks").resolve("phase-shift"), schema, "phase-shift")
-    val failure = intercept[Admittance.Unsupported](NewtonRaphson.solve(n))
-    assert(failure.getMessage.contains("phase_shift"), failure.getMessage)
+    // What made them tractable in the end was that the solver never needed
+    // changing. `Y` becomes asymmetric (`exp(jphi)` on one off-diagonal and its
+    // conjugate on the other), but `Admittance` already stored a full dense
+    // matrix with the two off-diagonals written separately, every consumer
+    // indexes `(i, k)` in the general form, and the Jacobian was already
+    // asymmetric and solved by LU rather than Cholesky. The refusals were
+    // guarding an assumption the code did not actually make.
+    Seq("phase-shift", "transformer-taps").foreach { name =>
+      val expected = pf(name)
+      assert(!expected.obj.contains("error"), s"$name: golden pf failed")
 
-    // And PyPSA does have an answer here, so the golden is evidence of the gap.
-    val pf = ujson.read(
-      Files.readString(goldens.resolve("results").resolve("phase-shift.json"))
-    )("pf")
-    assert(!pf.obj.contains("error"), "PyPSA no longer solves this, so the gap is moot")
+      val n      = network(name)
+      val result = NewtonRaphson.solve(n)
+      assert(result.allConverged, s"$name did not converge: ${result.converged}")
+
+      n.snapshots.indices.foreach { t =>
+        n.require("Bus").ids.foreach { bus =>
+          assertEqualsDouble(result.voltageMagnitude(bus, t),
+            frameValue(expected("bus_v_mag_pu"), t, bus), 1e-9, s"$name |V| at $t, $bus")
+          assertEqualsDouble(result.voltageAngle(bus, t),
+            frameValue(expected("bus_v_ang"), t, bus), 1e-9, s"$name angle at $t, $bus")
+        }
+      }
+    }
+  }
+
+  test("each transformer feature in the fixture is load-bearing") {
+    assume(available, "goldens missing")
+    // Guarding the guard. Every one of these could be set and change nothing, in
+    // which case the comparison above would pass against a model that ignored
+    // it. Each assertion below is the smallest thing that distinguishes the
+    // feature from its absence.
+    val n = network("transformer-taps")
+    val tr = n.require("Transformer")
+
+    // `tap_side` is the one most easily ignored: a model that applied the tap to
+    // whichever end it liked would reproduce `thv` and not `tlv`.
+    assertEquals(tr.int("tap_side", "thv"), 0, "thv no longer taps the HV side")
+    assertEquals(tr.int("tap_side", "tlv"), 1, "tlv no longer taps the LV side")
+    assert(math.abs(tr.float("tap_ratio", "thv") - 1.0) > 1e-6, "thv's tap is nominal")
+    assert(math.abs(tr.float("tap_ratio", "tlv") - 1.0) > 1e-6, "tlv's tap is nominal")
+
+    // The T conversion is skipped where the shunt is zero, so a T transformer
+    // with no shunt would test nothing.
+    assertEquals(tr.string("model", "tt"), "t", "tt is no longer a T model")
+    assert(tr.float("g", "tt") != 0.0 || tr.float("b", "tt") != 0.0,
+      "tt has no shunt, so the wye-delta conversion is not exercised")
+
+    // Tap and shift together, the case each could get right alone.
+    assert(tr.float("phase_shift", "tshift") != 0.0, "tshift has no phase shift")
+    assert(math.abs(tr.float("tap_ratio", "tshift") - 1.0) > 1e-6, "tshift's tap is nominal")
+  }
+
+  test("the T-model conversion matches PyPSA's wye-delta term for term") {
+    // The closed form is derived rather than transcribed -- with the two series
+    // halves equal, PyPSA's `summand / z_i` collapses to `z' = z + y z^2 / 4`
+    // and `y' = 4y / (zy + 4)` -- so it is checked against the general form it
+    // came from rather than only through a converged solve, where a slip could
+    // hide inside the iteration.
+    val (r, x, g, b) = (0.006, 0.15, 0.004, 0.02)
+    val (rp, xp, gp, bp) = Admittance.tModelToPi(r, x, g, b)
+
+    // PyPSA: z1 = z2 = z/2, z3 = 1/y; summand = z1 z2 + z2 z3 + z3 z1;
+    //        zc = summand/z3 -> series, 2/za with za = summand/z2 -> shunt.
+    def mul(a: (Double, Double), c: (Double, Double)) =
+      (a._1 * c._1 - a._2 * c._2, a._1 * c._2 + a._2 * c._1)
+    def div(a: (Double, Double), c: (Double, Double)) =
+      val d = c._1 * c._1 + c._2 * c._2
+      ((a._1 * c._1 + a._2 * c._2) / d, (a._2 * c._1 - a._1 * c._2) / d)
+
+    val z  = (r, x)
+    val y  = (g, b)
+    val z1 = (r / 2.0, x / 2.0)
+    val z3 = div((1.0, 0.0), y)
+    val summand = {
+      val a = mul(z1, z1); val c = mul(z1, z3)
+      (a._1 + 2.0 * c._1, a._2 + 2.0 * c._2)
+    }
+    val zc = div(summand, z3)
+    val za = div(summand, z1)
+    val yShunt = div((2.0, 0.0), za)
+
+    assertEqualsDouble(rp, zc._1, 1e-15, "series r")
+    assertEqualsDouble(xp, zc._2, 1e-15, "series x")
+    assertEqualsDouble(gp, yShunt._1, 1e-15, "shunt g")
+    assertEqualsDouble(bp, yShunt._2, 1e-15, "shunt b")
+
+    // And a zero shunt is left alone rather than converted, which would divide
+    // by zero -- PyPSA masks on the same condition.
+    assertEquals(Admittance.tModelToPi(r, x, 0.0, 0.0), (r, x, 0.0, 0.0))
   }

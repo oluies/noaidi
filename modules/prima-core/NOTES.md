@@ -1681,9 +1681,27 @@ certificates against the reduced problem, which is the one the solver actually
 proved infeasible — sound, because every reduction here is exact, so an
 infeasible reduced problem implies an infeasible original.
 
-**No MILP.** Unit commitment needs branch-and-bound around the LP. Nothing here
-is specific to continuous problems, but the warm-start path a tree needs does
-not exist yet.
+**The MILP search is the naive one.** This entry used to read "No MILP … the
+warm-start path a tree needs does not exist yet", and both halves had been false
+for some time: `BranchAndBound` is 21K of it, `warmStart` defaults to `true`, and
+unit commitment is built on it and gated on a PyPSA golden. A gap list that keeps
+claiming a feature is missing is the same failure as one that keeps quiet about a
+feature being wrong, and this one survived only because nothing re-reads a list of
+things that are absent.
+
+What is actually missing is everything that makes a tree *fast*: no cutting
+planes, no pseudocost or strong branching, no best-first search, no node
+presolve. The search is depth-first on the most fractional variable, which is
+chosen for the warm start rather than for the node count. On top of that the
+pruning margin — necessary, see above, because the bound is inexact — deliberately
+explores nodes an exact solver would cut.
+
+The consequence that bites is the interaction with the entry below. A node whose
+LP hits `maxIterations` is not a bound, so it is branched rather than pruned and
+counted in `unprovenNodes`, and an incumbent found while any exist is reported
+`Feasible` rather than `Optimal`. So a MILP large enough for the fixed iteration
+limit to bind comes back correct but unproven, and the fix for that is the
+adaptive limit, not the tree.
 
 **Iteration limit is not adaptive.** `maxIterations` defaults to 100k, which the
 600-variable random instance nearly reaches. Anything larger needs the limit
@@ -1708,7 +1726,10 @@ can be loose by up to `sqrt(min(m,n))`, which costs a conservative first step
 that the adaptive rule grows away — the safe direction to err in, since an
 underestimate would start the method outside the region where it converges.
 
-**No golden files from PyPSA yet.** That gate belongs to the layers above this
-one — this module has no power-system concepts in it. The `economic-dispatch`
-fixture is shaped like a PyPSA LOPF and its congestion prices are asserted, but
-it was constructed here rather than exported from a PyPSA run.
+**No golden files from PyPSA in *this* module.** The heading used to read "No
+golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
+there are twenty-two golden networks and every module above this one is gated on
+them. The scoped claim is the one that still holds: this module has no
+power-system concepts in it, so the gate belongs to the layers above. The
+`economic-dispatch` fixture is shaped like a PyPSA LOPF and its congestion prices
+are asserted, but it was constructed here rather than exported from a PyPSA run.

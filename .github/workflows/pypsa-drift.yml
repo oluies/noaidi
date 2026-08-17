@@ -1,0 +1,267 @@
+name: PyPSA drift
+
+# The goldens are pinned, so they cannot drift. Upstream can.
+#
+# Everything in CI reads `reference/goldens`, which was generated from PyPSA
+# 1.2.4 and will keep saying the port is correct long after PyPSA has moved. The
+# only way to see that is to go and look at a version this repository is not
+# pinned to, which is what this does: install the newest PyPSA, ask it for its
+# component registry, and diff.
+#
+# It deliberately does not regenerate the goldens. A schema from an unpinned
+# version is not a golden, it is the thing a golden gets compared against, and a
+# workflow that quietly rewrote the pinned files would destroy the one artefact
+# that makes a version bump reviewable.
+
+on:
+  schedule:
+    # Mondays at 07:00 UTC, an hour after Scala Steward. Same cadence and the
+    # same argument: weekly is often enough to catch a release within days and
+    # rare enough that the result still gets read. PyPSA releases every few
+    # months, so most runs will find nothing, which is the intended state.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+# Only what opening the drift issue needs.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: pypsa-drift
+  cancel-in-progress: false
+
+jobs:
+  schema-drift:
+    name: Schema against the newest PyPSA
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: sbt
+
+      - uses: sbt/setup-sbt@v1
+
+      # The checker before the check, as with the dependabot job. `schema_drift.py`
+      # is a set comparison whose failure mode is reporting "no drift" while a
+      # default moved, and a green run here is taken as evidence that upstream is
+      # unchanged -- so a broken comparator is worse than no comparator at all.
+      #
+      # Stdlib only, so this needs nothing installed and runs before the venv
+      # below has a chance to fail.
+      - name: Test the drift comparator
+        run: python3 reference/test_schema_drift.py
+
+      # Unpinned on purpose -- "the newest one" is the question being asked. The
+      # solver and HDF5 extras that `reference/README.md` lists are omitted:
+      # `--schema-only` reads the component registry and writes JSON, so it
+      # neither solves nor exports, and installing highspy here would only add
+      # ways for the job to fail for reasons that are not drift.
+      - name: Install the newest PyPSA
+        id: install
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pypsa
+          latest=$("$RUNNER_TEMP/venv/bin/python" -c "import pypsa; print(pypsa.__version__)")
+          pinned=$(python3 -c "import json; print(json.load(open('reference/goldens/manifest.json'))['versions']['pypsa'])")
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "pinned $pinned, latest $latest"
+
+      # A failure here is the loudest drift signal available and must not be
+      # confused with an infrastructure problem: it means the registry API this
+      # repository reads the schema *through* has changed, so there is no schema
+      # to compare and the generator itself needs rewriting before the goldens
+      # can be regenerated at all.
+      - name: Read the newest schema
+        id: capture
+        run: |
+          set -euo pipefail
+          if ! "$RUNNER_TEMP/venv/bin/python" reference/generate_goldens.py \
+                --schema-only "$RUNNER_TEMP/latest/schema.json" 2>&1 | tee capture.log; then
+            {
+              echo "## PyPSA ${{ steps.install.outputs.latest }} — the schema could not be read"
+              echo
+              echo "\`generate_goldens.py --schema-only\` failed. This is not a flake: the"
+              echo "generator reads \`pypsa.components.types\`, so a failure means the API the"
+              echo "schema is derived from has changed shape. The generator needs fixing before"
+              echo "the goldens can be regenerated."
+              echo
+              echo '```'
+              cat capture.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Diff against the pinned schema
+        id: drift
+        run: |
+          set -euo pipefail
+          # `|| true` so the non-zero exit that *means drift* does not abort the
+          # step before the report can be published. The status is captured
+          # instead and drives the steps below.
+          status=0
+          python3 reference/schema_drift.py \
+            reference/goldens/schema.json "$RUNNER_TEMP/latest/schema.json" > drift.md || status=$?
+          [ "$status" -le 1 ] || { cat drift.md; exit "$status"; }
+          echo "drifted=$([ "$status" -eq 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          cat drift.md
+
+      # The sweep, pointed at the newest schema instead of the pinned one.
+      #
+      # This is the half the diff cannot do. `schema_drift.py` reports that
+      # `Generator.foo` was added; only the sweep knows whether anything in this
+      # port names it, and it applies the ledger -- so an upstream attribute that
+      # some existing code already reads passes quietly, and one that nothing
+      # reads and no ruling covers fails by name. That is the same question the
+      # original sweep asked by hand, asked automatically against a version
+      # nobody has pinned yet.
+      #
+      # Only this suite runs. The rest of the tree reads golden networks and
+      # results that were generated from the pinned version, and running them
+      # against a foreign schema would produce failures about tolerances rather
+      # than about drift.
+      #
+      # The schema path goes in as an sbt `set` rather than an environment
+      # variable. sbt 2's thin client does not share its environment with the
+      # build server, so `NOAIDI_GOLDENS=... sbt ...` reaches neither the build
+      # nor the forked test JVM -- the suite would fall back to the pinned schema
+      # and pass, reporting no drift for a schema it never opened. A `set`
+      # travels with the command line.
+      - name: Sweep the newest schema for unaccounted attributes
+        id: sweep
+        if: always() && steps.capture.outcome == 'success'
+        run: |
+          set -euo pipefail
+          status=0
+          sbt --batch \
+            "set networkModel/Test/envVars += (\"NOAIDI_GOLDENS\" -> \"$RUNNER_TEMP/latest\"); networkModel/testOnly org.noaidi.network.SchemaSweepSuite" \
+            2>&1 | tee sweep.log || status=$?
+          # A `set` that failed to parse would leave the suite reading the pinned
+          # schema and passing, which is the same output as no drift. The suite
+          # prints the schema it opened for exactly this reason.
+          grep -qF "$RUNNER_TEMP/latest" sweep.log || {
+            echo "::error::the sweep did not read the generated schema -- the set command did not take"
+            exit 1
+          }
+          # The same guard ci.yml applies to `testFull`: a green sbt run is not
+          # evidence that anything executed, and a sweep that ran zero tests
+          # would report exactly the same "no unaccounted attributes" as one that
+          # ran five and found none.
+          if ! grep -qE 'Total 5' sweep.log; then
+            echo "::error::the sweep did not report its five cases -- it did not run"
+            exit 1
+          fi
+          echo "clean=$([ "$status" -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+          # The failures, once, for both the summary and the issue to read. Built
+          # here rather than twice below so the two cannot report different
+          # things. Every rule the suite has is picked up, not just the first:
+          # a removed attribute orphans its ruling and is as much drift as an
+          # added one. Stack frames are dropped -- the assertion messages name
+          # the attributes, which is the whole content.
+          if [ "$status" -ne 0 ]; then
+            sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/^Test run .* finished/p' sweep.log \
+              | grep -vE '^\s+at |^[0-9]+:' \
+              | head -80 > sweep-report.txt
+          fi
+          exit 0
+
+      - name: Publish the report
+        if: always()
+        run: |
+          {
+            echo "## PyPSA drift"
+            echo
+            echo "| | version |"
+            echo "| --- | --- |"
+            echo "| pinned | \`${{ steps.install.outputs.pinned }}\` |"
+            echo "| latest | \`${{ steps.install.outputs.latest }}\` |"
+            echo
+            if [ -f drift.md ]; then cat drift.md; fi
+            if [ -f sweep-report.txt ]; then
+              echo
+              echo "## The sweep failed against the newest schema"
+              echo
+              echo "\`SchemaSweepSuite\` names what is unaccounted for. An added input"
+              echo "attribute is one a network may now set that nothing in this port reads —"
+              echo "the shape of every silent wrong answer the original sweep turned up. A"
+              echo "removed one orphans the ruling that explained why it was safe to ignore."
+              echo
+              echo '```'
+              cat sweep-report.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One issue per drifting version, commented on rather than duplicated, so a
+      # release that sits unaddressed for a month produces one thread instead of
+      # four identical ones.
+      - name: Open or update the drift issue
+        if: >-
+          always() &&
+          (steps.drift.outputs.drifted == 'true' || steps.sweep.outputs.clean == 'false')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "PyPSA ${{ steps.install.outputs.latest }}: schema drift against the pinned ${{ steps.install.outputs.pinned }}"
+        run: |
+          set -euo pipefail
+          {
+            echo "Found by \`.github/workflows/pypsa-drift.yml\` ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))."
+            echo
+            echo "This repository is pinned to PyPSA \`${{ steps.install.outputs.pinned }}\`."
+            echo "PyPSA \`${{ steps.install.outputs.latest }}\` declares a different component registry."
+            echo
+            echo "Nothing is broken by this on its own — the port agrees with the version it is"
+            echo "pinned to, which is the whole contract. What it means is that bumping the pin"
+            echo "is no longer free, and the changes below are what it would cost."
+            echo
+            if [ -f drift.md ]; then cat drift.md; fi
+            if [ -f sweep-report.txt ]; then
+              echo "## The sweep failed against the newest schema"
+              echo
+              echo '```'
+              cat sweep-report.txt
+              echo '```'
+            fi
+            echo
+            echo "To act on it: regenerate the goldens against the new pin as"
+            echo "\`reference/README.md\` describes, and review the diff — a change in the"
+            echo "goldens *is* the compatibility break. Any new input attribute needs the"
+            echo "sweep's question asked of it and a line in \`SchemaSweepSuite\`."
+          } > issue.md
+
+          existing=$(gh issue list --state open --search "$TITLE in:title" \
+            --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file issue.md
+            echo "commented on #$existing"
+          else
+            gh issue create --title "$TITLE" --body-file issue.md
+          fi
+
+      # Reported, not failed. A new PyPSA release is not a defect in this
+      # repository and a red cross on a weekly cron trains people to ignore it;
+      # the issue is the artefact that survives. A *broken generator* does fail,
+      # above, because that one means the schema cannot be read at all.
+      - name: Summarise
+        if: always()
+        run: |
+          if [ "${{ steps.drift.outputs.drifted }}" = "true" ] \
+            || [ "${{ steps.sweep.outputs.clean }}" = "false" ]; then
+            echo "Drift found; see the job summary and the issue."
+          else
+            echo "No drift: PyPSA ${{ steps.install.outputs.latest }} declares the same registry as the pinned ${{ steps.install.outputs.pinned }}."
+          fi

@@ -1475,7 +1475,42 @@ def write_malformed(out: Path) -> None:
     print(f"  wrote malformed fixtures to {out}")
 
 
+def write_schema_only(target: Path) -> int:
+    """Just `schema.json`, for checking a PyPSA this repository is not pinned to.
+
+    The drift workflow installs the *latest* PyPSA and needs the component
+    registry out of it, and nothing else: the networks take minutes and several
+    of them call a solver, none of which says anything about whether upstream
+    moved an attribute. It also must not touch `goldens/`, because a schema from
+    an unpinned version is not a golden -- it is the thing a golden gets compared
+    against.
+
+    Writing the same shape as `main` does, so `schema_drift.py` and the Scala
+    sweep read one format regardless of which produced the file.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(capture_reference_schema(), indent=1, sort_keys=True))
+    print(f"wrote {target}")
+    print(f"pypsa {pypsa.__version__}, pandas {pd.__version__}, python {sys.version.split()[0]}")
+    return 0
+
+
 def main() -> int:
+    # Deliberately hand-rolled rather than argparse: there is exactly one flag,
+    # and it exists to make the file usable by the drift workflow without giving
+    # anyone a way to half-regenerate the goldens.
+    argv = sys.argv[1:]
+    if argv[:1] == ["--schema-only"]:
+        if len(argv) == 2:
+            return write_schema_only(Path(argv[1]))
+        if len(argv) == 1:
+            return write_schema_only(OUT / "schema.json")
+        print("usage: generate_goldens.py [--schema-only [PATH]]", file=sys.stderr)
+        return 2
+    if argv:
+        print("usage: generate_goldens.py [--schema-only [PATH]]", file=sys.stderr)
+        return 2
+
     OUT.mkdir(parents=True, exist_ok=True)
 
     manifest = {

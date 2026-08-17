@@ -1090,6 +1090,72 @@ covered automatically, and with the reason stated in each rather than a name in 
 list. That skip is the model-layer half of the same limitation `Periods.reject`
 enforces at the solve layer.
 
+## The sweep itself, made permanent
+
+Everything in the three sections above came out of one procedure — enumerate the
+attributes the schema declares as input, subtract the ones the sources ever name,
+and look hard at what is left. Six confirmed silent wrong answers, the largest
+under-pricing an objective by 23,280 while reporting `Optimal`.
+
+It was a throwaway grep, run twice. Which is precisely the position
+`GapRefusalSuite` was written to fix one level down: an audit that proved the
+state of the tree on one afternoon and left nothing behind. Nobody is going to
+remember to re-run it when PyPSA 1.3 adds a column, and *an attribute nobody has
+looked at* is the shape of all six.
+
+`SchemaSweepSuite` is that sweep as a test. It fails on three things:
+
+- an input attribute no source names and no ruling covers;
+- a ruling whose attribute the sources have started naming, which means it was
+  implemented or refused and the ruling now asserts the opposite;
+- a ruling naming an attribute the schema no longer declares.
+
+### The residue is committed, with reasons
+
+323 of the 422 attributes are inputs. 235 are named outright and another 24 are
+built by interpolation — `Expansion` reads capacity bounds as
+`s"${attribute}_max"`, so `p_nom_max` is read by code that never writes it down.
+Resolving those in the sweep rather than the ledger matters: filing the
+mechanism's blind spot as a human judgement is how a check starts lying.
+
+That leaves **64**, each with a line saying why it cannot change an answer.
+Eleven belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
+attributes are unreachable rather than ignored — the distinction that made
+`investment_periods.csv` a bug and makes this not one. Eighteen are `build_year`,
+`lifetime` and `discount_rate`, read only on a multi-period network, which
+`Periods.reject` refuses. The rest are inert in PyPSA's own optimiser, reached
+under a name that arrives in the data — `Carrier.co2_emissions` is read through
+`GlobalConstraint.carrier_attribute` and appears nowhere in this port — or
+descriptive.
+
+### What it does not do, and one attribute it misses
+
+It checks that some code *names* an attribute, not that it handles it correctly.
+That is what the goldens are for, and being named is a far weaker claim.
+
+It matches bare attribute names rather than `(component, attribute)` pairs,
+because the sources refer to attributes by bare name: `table.float("x", id)`
+reads a Line's reactance and nothing in the call says so. One attribute is masked
+by that today. `Bus.x` is a map coordinate, and it is invisible to the sweep
+because `Line.x` is a reactance the sources quote constantly — it cannot even be
+ruled on, because the stale-ruling rule would fire the moment the line was added.
+`ShuntImpedance` is masked wholesale for the same reason, and survives it only
+because `Lopf.rejectUnhandled` refuses the component outright.
+
+### `Link.cyclic_delay`, and a comment that overclaimed
+
+Writing the ledger turned up one thing the sweep alone would not have. The
+docstring on `rejectDelayedLinks` said `delay` and `cyclic_delay` were "both
+checked", and that `cyclic_delay = false` was the default. Neither is true: only
+`delay` is checked, and the default is `True`.
+
+It is not a wrong answer. `cyclic_delay` decides what happens to energy still in
+flight at the end of the horizon, nothing is ever in flight while `delay` is
+zero, and every network that could observe it is refused. But the comment
+asserted a check that does not exist, which is the same failure as a gap on a
+list with no code site — and it survived precisely because no procedure ever
+asked the question of that attribute by name.
+
 ## The AC transformer model, and an assumption that was never made
 
 Off-nominal taps, phase shift and the T model were three separate refusals in the

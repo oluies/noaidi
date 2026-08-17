@@ -654,9 +654,13 @@ object Lopf:
     * PyPSA pays 9,000 for local generation; this model delivered the import
     * instantly and reported 500. An eighteen-fold under-price, `Optimal`.
     *
-    * `delay` is an `Int` and `cyclic_delay` a boolean, both static, and both are
-    * checked: a zero delay with `cyclic_delay = false` is the default behaviour
-    * and passes, since there is nothing in flight to wrap.
+    * Only `delay` is checked, and `cyclic_delay` deliberately is not. It defaults
+    * to `True` rather than `False`, so it is not inert on its face — but it
+    * decides only what happens to energy still in flight at the end of the
+    * horizon, and nothing is ever in flight while `delay` is zero. Every network
+    * that could observe it is refused here first, which is what
+    * `SchemaSweepSuite` records against it rather than leaving it to read as an
+    * attribute nobody looked at.
     */
   private def rejectDelayedLinks(network: Network): Unit =
     network.tables.values.foreach { table =>

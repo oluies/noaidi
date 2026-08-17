@@ -24,6 +24,41 @@ without Python present. Regenerate and commit the diff when the pinned version
 is bumped — a change in the goldens *is* the compatibility break, and reviewing
 it is the point.
 
+## Noticing that upstream moved
+
+The goldens are pinned, so they cannot drift. Upstream can, and nothing in CI
+can see it: CI only ever reads this directory, which will keep reporting the port
+correct long after PyPSA has changed underneath it.
+
+`.github/workflows/pypsa-drift.yml` runs weekly, installs the *newest* PyPSA and
+compares. It deliberately does not regenerate anything here — a schema from an
+unpinned version is not a golden, it is the thing a golden gets compared
+against, and a job that quietly rewrote these files would destroy the reviewable
+diff that is the whole point of pinning.
+
+```bash
+# Just the component registry, from whichever PyPSA is installed.
+./reference/.venv/bin/python reference/generate_goldens.py --schema-only /tmp/schema.json
+
+# What changed, and whether any of it can move a number. Stdlib only, so it runs
+# on a bare checkout. Exit 1 means drift.
+python3 reference/schema_drift.py reference/goldens/schema.json /tmp/schema.json
+python3 reference/test_schema_drift.py     # the comparator's own tests
+```
+
+A reworded description is reported and passes. A changed `type`, `default`,
+`status`, `varying` or `unit` fails — `unit` included, because MW against kW is
+the one change where PyPSA and this port would go on agreeing with each other
+and both be wrong about the world.
+
+The workflow then runs `SchemaSweepSuite` against the new schema, which is the
+half a diff cannot do: the diff says `Generator.foo` was added, and only the
+sweep knows whether anything in this port already reads it. A new input
+attribute that nothing reads and no ruling covers fails by name. What comes out
+is an issue, not a red cross — a new PyPSA release is not a defect in this
+repository. A generator that *cannot read the registry at all* does fail the
+job, because that means the API these files are derived from has changed shape.
+
 ## What is here
 
 | Path | What it is |

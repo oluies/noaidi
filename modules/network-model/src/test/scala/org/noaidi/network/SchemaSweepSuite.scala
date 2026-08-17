@@ -1,0 +1,383 @@
+package org.noaidi.network
+
+import java.nio.file.{Files, Path, Paths}
+import scala.jdk.CollectionConverters.*
+import scala.util.Using
+
+import SchemaSweepSuite.*
+
+/** Every input attribute PyPSA declares, accounted for or the build fails.
+  *
+  * This is the sweep that found `active`, `phase_shift`, `ramp_limit_up`,
+  * `ramp_limit_down`, `e_sum_max`, `e_sum_min`, multi-investment periods and
+  * `Link.delay` — enumerate the attributes the schema declares as input,
+  * subtract the ones the sources ever name, and look hard at what is left. Six
+  * confirmed silent wrong answers came out of it, the largest under-pricing an
+  * objective by 23,280 while reporting `Optimal`.
+  *
+  * '''It was a throwaway grep, run twice.''' Exactly the position
+  * [[org.noaidi.lopf.GapRefusalSuite]] was written to fix one level down: an
+  * audit that proved the state of the tree on one afternoon and left nothing
+  * behind. Re-running it by hand is not something anyone will remember to do
+  * when PyPSA 1.3 adds a column, and an attribute nobody has looked at is
+  * precisely the failure mode that produced all six.
+  *
+  * So the sweep is the test, and its residue is committed as [[ledger]] — one
+  * line per attribute, with the reason it cannot change an answer. An attribute
+  * that is neither named by the sources nor ruled on here fails the build.
+  *
+  * ==The three rules==
+  *
+  *   - '''Unaccounted fails.''' An input attribute that the sweep cannot see and
+  *     the ledger does not name is drift: either upstream added it, or it was
+  *     always there and nobody looked.
+  *   - '''A stale ruling fails.''' If the sources start naming a ledgered
+  *     attribute, the ruling is now a lie about the code and must be deleted in
+  *     the change that implemented it — the same deliberate deletion
+  *     `GapRefusalSuite` asks for when a gap is closed.
+  *   - '''A ruling on nothing fails.''' An entry naming a component or attribute
+  *     the schema no longer has means upstream removed it, and the line should
+  *     go with it.
+  *
+  * ==What it does not do==
+  *
+  * It does not check that an attribute the sources *name* is handled
+  * '''correctly''', only that some code names it. That is what the goldens are
+  * for, and being named is a far weaker claim than being right.
+  *
+  * It matches attribute names, not `(component, attribute)` pairs, because the
+  * sources refer to attributes by bare name — `table.float("x", id)` reads a
+  * Line's reactance and there is nothing in the call to say so. One attribute is
+  * masked by that today: `Bus.x` is a map coordinate and is invisible to this
+  * sweep because `Line.x` is a reactance, so it is ruled on in prose beside
+  * `Bus.y` rather than mechanically. `ShuntImpedance` is masked wholesale for the
+  * same reason — every one of its attributes shares a name with a component that
+  * is modelled — and it is refused outright by `Lopf.rejectUnhandled`, which is
+  * what makes that survivable.
+  *
+  * A ruling's *reason* is prose and nothing checks it. The rules above check that
+  * a reason exists and still applies to a real attribute; whether it is true is a
+  * review question, which is why the ledger is a diff rather than a suppression
+  * file.
+  */
+class SchemaSweepSuite extends munit.FunSuite:
+
+  private def goldens: Path =
+    Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
+
+  /** The port's own sources. Read as text from disk rather than reached through
+    * the classpath: the sweep is over what the code *says*, and the modules above
+    * this one are not on it.
+    */
+  private def sources: Path =
+    Paths.get(sys.env.getOrElse("NOAIDI_SOURCES", "modules"))
+
+  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
+  private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
+
+  /** The modules that make up the port. Prima is deliberately absent: it is an LP
+    * solver and knows nothing about PyPSA's component model, so a hit there would
+    * be a coincidence rather than a use.
+    */
+  private val ported = Seq("network-model", "network-lopf", "network-pf", "network-io")
+
+  private lazy val sourceFiles: IndexedSeq[Path] =
+    ported.toIndexedSeq.flatMap { module =>
+      val root = sources.resolve(module).resolve("src").resolve("main").resolve("scala")
+      if !Files.isDirectory(root) then IndexedSeq.empty
+      else
+        Using.resource(Files.walk(root)) { walk =>
+          walk.iterator.asScala.filter(_.getFileName.toString.endsWith(".scala")).toIndexedSeq
+        }
+    }
+
+  private lazy val text: String = sourceFiles.map(Files.readString).mkString("\n")
+
+  /** Attribute names the sources quote outright. */
+  private lazy val quoted: Set[String] =
+    """"([A-Za-z][A-Za-z0-9_]*)"""".r.findAllMatchIn(text).map(_.group(1)).toSet
+
+  /** Suffixes the sources append to an interpolated attribute name.
+    *
+    * `Expansion` reads a component's capacity bounds as `s"${attribute}_max"`
+    * where `attribute` is `p_nom`, `s_nom` or `e_nom` — so `p_nom_max` is read by
+    * code that never writes it down. A literal sweep reports twenty-four such
+    * attributes as unhandled, and burying them in the ledger would be filing the
+    * mechanism's blind spot as a human judgement.
+    */
+  private lazy val suffixes: Set[String] =
+    """\$\{[A-Za-z][A-Za-z0-9_]*\}(_[A-Za-z0-9_]+)""".r.findAllMatchIn(text).map(_.group(1)).toSet
+
+  /** Names the sources build by appending a known suffix to a name they quote. */
+  private lazy val interpolated: Set[String] =
+    for stem <- quoted; suffix <- suffixes yield stem + suffix
+
+  private def named(attribute: String): Boolean =
+    quoted.contains(attribute) || interpolated.contains(attribute)
+
+  /** Whether the sources name the attribute a `Component.attribute` key points at. */
+  private def namedByKey(key: String): Boolean = named(attributeOf(key))
+
+  /** Every input attribute, as `Component.attribute`. */
+  private lazy val inputs: IndexedSeq[String] =
+    schema.components.flatMap(c => c.inputAttributes.map(a => s"${c.name}.${a.name}"))
+
+  // The sweep is a search over text, and a search that finds nothing looks
+  // exactly like a search that has nothing to find. A tree that failed to be
+  // located would otherwise report every attribute as unhandled -- or, with the
+  // ledger absorbing the ones it names, report a suspiciously tidy result.
+  test("the sweep actually read the port and the schema") {
+    assume(available, "goldens missing")
+    // Printed, not merely asserted. The drift workflow runs this suite against a
+    // schema generated from a newer PyPSA, and if the override failed to take it
+    // would read the pinned one and pass -- which is indistinguishable from
+    // finding no drift. The workflow greps this line to tell those apart.
+    println(s"schema sweep: ${inputs.size} input attributes from ${goldens.resolve("schema.json")}")
+    println(s"schema sweep: ${sourceFiles.size} source files under $sources")
+    assert(sourceFiles.sizeIs >= 20, s"only ${sourceFiles.size} source files under $sources")
+    assert(inputs.sizeIs >= 300, s"only ${inputs.size} input attributes in the schema")
+    assert(quoted.sizeIs >= 100, s"only ${quoted.size} quoted names in the sources")
+    assertEquals(
+      suffixes,
+      Set("_extendable", "_max", "_min", "_mod"),
+      "the set of interpolated attribute suffixes moved; the resolution above needs rechecking",
+    )
+  }
+
+  test("every input attribute is named by the port or ruled on here") {
+    assume(available, "goldens missing")
+    val ruled       = ledger.map(_.key).toSet
+    val unaccounted = inputs.filterNot(namedByKey).filterNot(ruled.contains)
+    assert(
+      unaccounted.isEmpty,
+      s"${unaccounted.size} input attribute(s) that no source names and no ruling covers.\n" +
+        "Each is a possible silent wrong answer: read it, decide, and either handle it, " +
+        "refuse it, or add a ruling saying why it cannot change an answer.\n  " +
+        unaccounted.mkString("\n  "),
+    )
+  }
+
+  test("no ruling covers an attribute the port now names") {
+    assume(available, "goldens missing")
+    val stale = ledger.filter(r => named(r.attribute))
+    assert(
+      stale.isEmpty,
+      s"${stale.size} ruling(s) whose attribute the sources now name. If it was implemented or " +
+        "refused, delete the ruling in that change rather than leaving it to assert the opposite.\n  " +
+        stale.map(_.key).mkString("\n  "),
+    )
+  }
+
+  test("no ruling covers an attribute the schema does not declare") {
+    assume(available, "goldens missing")
+    val declared = inputs.toSet
+    val orphans  = ledger.map(_.key).filterNot(declared.contains)
+    assert(
+      orphans.isEmpty,
+      s"${orphans.size} ruling(s) naming something the pinned schema has no input attribute for. " +
+        "Upstream removed it, or the key is misspelt.\n  " + orphans.mkString("\n  "),
+    )
+  }
+
+  test("no attribute is ruled on twice") {
+    val duplicates = ledger.groupBy(_.key).collect { case (k, rs) if rs.sizeIs > 1 => k }
+    assert(duplicates.isEmpty, s"duplicate ruling(s): ${duplicates.mkString(", ")}")
+  }
+
+object SchemaSweepSuite:
+
+  /** Why an attribute the sources never name cannot change an answer. */
+  enum Verdict:
+    /** The component itself is refused, so none of its attributes can be
+      * silently dropped — the network is.
+      */
+    case ComponentRefused
+
+    /** PyPSA reads it only on a multi-investment-period network, and
+      * `Periods.reject` refuses those from both entry points.
+      */
+    case MultiPeriodOnly
+
+    /** PyPSA's own optimiser and power flow never read it, so no value of it can
+      * move an answer this port is checked against.
+      */
+    case Inert
+
+    /** Read, but under a name that arrives in the data rather than in the source. */
+    case NamedIndirectly
+
+    /** Carries no physics: presentation, provenance, or library bookkeeping. */
+    case Descriptive
+
+  import Verdict.*
+
+  /** The bare attribute name out of a `Component.attribute` key. */
+  def attributeOf(key: String): String = key.substring(key.indexOf('.') + 1)
+
+  final case class Ruling(key: String, verdict: Verdict, because: String):
+    def attribute: String = attributeOf(key)
+
+  private def ruled(verdict: Verdict, because: String)(keys: String*): Vector[Ruling] =
+    keys.toVector.map(Ruling(_, verdict, because))
+
+  /** The sweep's residue, one line per attribute.
+    *
+    * Sixty-four entries, and the reason each is here matters more than the count.
+    * A ruling is a claim that the attribute cannot change an answer — not that it
+    * is unimportant, and not that nobody got round to it. When that stops being
+    * true the line is the thing to delete.
+    */
+  val ledger: Vector[Ruling] =
+    // ---- Whole components this port refuses -----------------------------------
+    //
+    // `Lopf.rejectUnhandled` throws on any table outside its handled set, so a
+    // network carrying processes is refused rather than solved without them. The
+    // attributes below are therefore unreachable, not ignored -- which is the
+    // distinction that made `investment_periods.csv` a bug and makes this not one.
+    ruled(
+      ComponentRefused,
+      "Process is not modelled; Lopf.rejectUnhandled refuses any network that carries one",
+    )(
+      "Process.build_year",
+      "Process.cyclic_delay0",
+      "Process.cyclic_delay1",
+      "Process.delay0",
+      "Process.delay1",
+      "Process.discount_rate",
+      "Process.lifetime",
+      "Process.p_nom_set",
+      "Process.rate0",
+      "Process.rate1",
+      "Process.terrain_factor",
+    ) ++
+      // ---- Multi-period only ---------------------------------------------------
+      //
+      // An asset is active only between its build year and the end of its
+      // lifetime, and costs are discounted per period. On a single-period network
+      // PyPSA builds none of that, so these three are read by nothing; on a
+      // multi-period one the whole network is refused. The refusal is what makes
+      // the ruling safe -- before `Periods.reject` existed, a build year of 2040
+      // was silently ignored and the answer came out at 2,000 against PyPSA's
+      // 17,000.
+      ruled(
+        MultiPeriodOnly,
+        "read only when the network declares investment periods, which Periods.reject refuses",
+      )(
+        "Generator.build_year",
+        "Generator.discount_rate",
+        "Generator.lifetime",
+        "Line.build_year",
+        "Line.discount_rate",
+        "Line.lifetime",
+        "Link.build_year",
+        "Link.discount_rate",
+        "Link.lifetime",
+        "StorageUnit.build_year",
+        "StorageUnit.discount_rate",
+        "StorageUnit.lifetime",
+        "Store.build_year",
+        "Store.discount_rate",
+        "Store.lifetime",
+        "Transformer.build_year",
+        "Transformer.discount_rate",
+        "Transformer.lifetime",
+      ) ++
+      ruled(
+        MultiPeriodOnly,
+        "PyPSA's define_growth_limit returns immediately unless the network is multi-period",
+      )("Carrier.max_growth", "Carrier.max_relative_growth") ++
+      ruled(
+        MultiPeriodOnly,
+        "scopes a global constraint to one investment period; single-period builds ignore it",
+      )("GlobalConstraint.investment_period") ++
+      // ---- Inert in PyPSA itself -----------------------------------------------
+      //
+      // The strongest form of ruling available: the attribute gets zero hits in
+      // PyPSA's own optimiser, so there is no value of it that makes PyPSA and
+      // this port disagree. Each was checked against the pinned install rather
+      // than inferred from the documentation.
+      ruled(
+        Inert,
+        "a target capacity for PyPSA's own heuristics; its optimiser never reads it",
+      )(
+        "Generator.p_nom_set",
+        "Line.s_nom_set",
+        "Link.p_nom_set",
+        "StorageUnit.p_nom_set",
+        "Store.e_nom_set",
+        "Transformer.s_nom_set",
+      ) ++
+      ruled(
+        Inert,
+        "scales a length-based capital cost in PyPSA's cost helpers, not in the LP it builds",
+      )("Line.terrain_factor", "Link.terrain_factor") ++
+      ruled(
+        Inert,
+        "a voltage-angle bound PyPSA's linear optimiser does not constrain on",
+      )("Line.v_ang_min", "Line.v_ang_max", "Transformer.v_ang_min", "Transformer.v_ang_max") ++
+      ruled(
+        Inert,
+        "a desired voltage band; neither the LOPF nor the Newton-Raphson solve bounds on it, " +
+          "which reads v_mag_pu_set instead",
+      )("Bus.v_mag_pu_min", "Bus.v_mag_pu_max") ++
+      ruled(
+        Inert,
+        "weights a generator in PyPSA's network-clustering helpers, not in any optimisation",
+      )("Generator.weight") ++
+      // Default `True`, so unlike the rest of this group it is not inert on its
+      // face -- it decides whether energy still in flight at the end of the
+      // horizon wraps to the beginning. What makes it unreachable is that there
+      // is only energy in flight when `delay` is non-zero, and
+      // `Lopf.rejectDelayedLinks` refuses exactly that.
+      ruled(
+        Inert,
+        "only reachable with a non-zero delay, and Lopf.rejectDelayedLinks refuses those",
+      )("Link.cyclic_delay") ++
+      // The type library's expansion produces r, x, g, b, s_nom, tap_ratio and
+      // phase_shift, and `standard-types`, `transformer-levels` and
+      // `transformer-taps` agree with PyPSA on every one. These four feed none of
+      // them: the winding voltages are documentation of what the type is for, and
+      // the tap bounds are a range PyPSA does not clamp `tap_position` to either.
+      ruled(
+        Inert,
+        "not read by the transformer-type expansion, which the standard-types goldens pin",
+      )(
+        "TransformerType.v_nom_0",
+        "TransformerType.v_nom_1",
+        "TransformerType.tap_min",
+        "TransformerType.tap_max",
+      ) ++
+      // ---- Read under a name that comes from the data --------------------------
+      //
+      // A primary-energy constraint names the carrier column it charges in its own
+      // `carrier_attribute` field, and `Lopf` reads whatever it says. So the
+      // commonest emissions cap in PyPSA works without `co2_emissions` appearing
+      // anywhere in this port -- and would keep working if a network charged some
+      // other carrier attribute instead.
+      ruled(
+        NamedIndirectly,
+        "read through GlobalConstraint.carrier_attribute, which holds the column name as data",
+      )("Carrier.co2_emissions") ++
+      // ---- Descriptive ----------------------------------------------------------
+      //
+      // Presentation, provenance and library bookkeeping. `Bus.x` belongs here too
+      // and cannot be written down: this sweep matches bare attribute names, and
+      // `Line.x` is a reactance the sources quote constantly, so a ruling on
+      // `Bus.x` would fail the stale-ruling rule the moment it was added.
+      ruled(Descriptive, "map coordinate, for plotting")("Bus.y") ++
+      ruled(Descriptive, "a free-text place name")("Bus.location") ++
+      ruled(Descriptive, "plot colour and display label")("Carrier.color", "Carrier.nice_name") ++
+      ruled(
+        Descriptive,
+        "geometry bookkeeping: which component a shape belongs to and its index within it",
+      )("Shape.component", "Shape.idx") ++
+      ruled(
+        Descriptive,
+        "line-type catalogue metadata: conductor geometry, thermal rating and where the row came from",
+      )(
+        "LineType.cross_section",
+        "LineType.i_nom",
+        "LineType.mounting",
+        "LineType.references",
+      ) ++
+      ruled(Descriptive, "where the transformer-type row came from")("TransformerType.references")

@@ -179,12 +179,18 @@ final class SparseMatrix private (
 
   /** Euclidean norm of each column, the counterpart of [[rowNorms]] for `K'y`.
     *
-    * Accumulated straight off the CSR arrays rather than as `transpose.rowNorms`.
-    * The transpose is a `lazy val` holding two arrays of length `nnz` for the
-    * matrix's lifetime, and on the live path -- `Pdhg.classify` into
-    * `primalInfeasibility` with `K'y` already supplied -- the *original*
-    * problem's transpose is otherwise never built, the solver transposing only
-    * the scaled matrix. This costs `cols` doubles and the same O(nnz) time.
+    * Accumulated straight off the CSR arrays rather than as `transpose.rowNorms`,
+    * so reading it does not *force* the transpose. That matters for callers who
+    * would not otherwise build one -- [[Certificates]] used standalone, or a
+    * solve with `ScalingParams.none`.
+    *
+    * It does '''not''' save anything on the default solve path, and an earlier
+    * version of this comment claimed it did. `Pdhg.Solve` hands the same
+    * `problem` to `Scaling` and to `Certificates.classify`, and `Scaling`
+    * evaluates `matrix.transpose` on its first Ruiz iteration; `Kkt` and
+    * `Presolve` reach for it too. Being a `lazy val`, it is already materialised
+    * and retained by then. Cheaper than a second traversal either way: `cols`
+    * doubles, one O(nnz) pass.
     *
     * Scaled like [[rowNorms]], in two passes: the column maxima first, then the
     * scaled squares.

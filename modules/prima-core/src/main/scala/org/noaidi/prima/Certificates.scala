@@ -119,10 +119,21 @@ object Certificates:
     val columnNorms = problem.constraintMatrix.columnNorms
 
     def scaled(reduced: Double, j: Int): Double =
+      val cj = columnNorms(j)
+      // A norm that is not finite is passed through as infinite rather than
+      // used as a divisor. Scaling the accumulator keeps the *sum* of squares
+      // in range, but the norm itself can still exceed `Double.MaxValue` -- a
+      // column holding 1e308 four times over is 2e308 -- and dividing by
+      // Infinity would send a genuine residual to exactly 0.0 and report a
+      // certificate. Infinity here propagates through `hypot` to the
+      // `.filter(_.isFinite)` below, so the direction is reported as no
+      // candidate, which is the safe reading.
+      //
       // A structurally empty column makes `(K'y)_j` exactly zero, so there is
       // nothing to scale and the division is skipped rather than producing NaN.
-      val cj = columnNorms(j)
-      if cj > 0.0 then reduced / cj else 0.0
+      if !cj.isFinite then Double.PositiveInfinity
+      else if cj > 0.0 then reduced / cj
+      else 0.0
 
     var residualSq = 0.0
     i = 0
@@ -217,8 +228,12 @@ object Certificates:
       val rowNorms = problem.constraintMatrix.rowNorms
 
       def scaledRow(v: Double, r: Int): Double =
+        // Non-finite norms propagate rather than divide, as in
+        // `primalInfeasibility` and for the same reason.
         val ri = rowNorms(r)
-        if ri > 0.0 then v / ri else 0.0
+        if !ri.isFinite then Double.PositiveInfinity
+        else if ri > 0.0 then v / ri
+        else 0.0
 
       var rowSq = 0.0
       i = 0

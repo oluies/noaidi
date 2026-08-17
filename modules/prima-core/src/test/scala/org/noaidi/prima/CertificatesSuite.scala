@@ -404,3 +404,55 @@ class CertificatesSuite extends munit.FunSuite:
         s"a coefficient of $c collapsed the shortfall")
     }
   }
+
+  test("an extreme coefficient does not overflow the per-row norm") {
+    // The mirror of the column sweep, on the dual side. `rowNorms` got the same
+    // scaling fix and feeds a different consumer -- `scaledRow` in
+    // `dualInfeasibility` -- with the same two collapse modes, so without this
+    // the `rowNorms` half of that change could be reverted with the suite still
+    // green.
+    //
+    // `min -x0` subject to `c x0 <= 0` and `x0 >= 0` pins x0 to zero, so the
+    // objective is bounded; `d = 1` decreases it and walks straight out of the
+    // row, which is the violation that has to survive at every scale.
+    def shortfall(coefficient: Double): Double =
+      val b = LpProblem.builder(1)
+      b.bounds(0, 0.0, inf)
+      b.objectiveCoefficient(0, -1.0)
+      b.lessThan(Seq(0 -> coefficient), 0.0)
+      Certificates.dualInfeasibility(b.build()._1, Array(1.0)).get
+
+    Seq(1e-200, 1e-160, 1.0, 1e160, 1e200, 1e300).foreach { c =>
+      assertEqualsDouble(shortfall(c), 1.0, 1e-12,
+        s"a coefficient of $c collapsed the row shortfall")
+    }
+  }
+
+  test("a norm too large to represent is not treated as a certificate") {
+    // Scaling keeps the *accumulator* in range; the norm itself can still
+    // exceed Double.MaxValue. Four entries of 1e308 in one column give 2e308,
+    // and dividing a residual by Infinity yields exactly 0.0 -- a shortfall of
+    // zero, which reads as an exact certificate. So a non-finite norm is
+    // propagated instead, and the direction is reported as no candidate.
+    //
+    // The problem is feasible at `x0 = 1e-308`, and `y` picks out one row.
+    val b = LpProblem.builder(1)
+    b.bounds(0, 0.0, inf)
+    (0 until 4).foreach(_ => b.greaterThan(Seq(0 -> 1e308), 1.0))
+    val problem = b.build()._1
+
+    assert(
+      !problem.constraintMatrix.columnNorms(0).isFinite,
+      "the fixture no longer overflows the column norm, so this tests nothing",
+    )
+    assertEquals(
+      Certificates.primalInfeasibility(problem, Array(1.0, 0.0, 0.0, 0.0)),
+      None,
+      "an unrepresentable norm was read as an exact certificate",
+    )
+    assertEquals(
+      Certificates.classify(problem, Array(0.0), Array(1.0, 0.0, 0.0, 0.0), 1e-8),
+      None,
+      "a feasible problem was reported infeasible",
+    )
+  }

@@ -71,8 +71,22 @@ class GoldenNetworkSuite extends munit.FunSuite:
     * The manifest is the authority for which networks exist, so a fixture added
     * to `generate_goldens.py` is covered here without anyone remembering to.
     */
+  /** Every golden network except the multi-period ones.
+    *
+    * A multi-period network's snapshots are `(period, timestep)` pairs, and
+    * `Network` carries a flat list of labels — so the reader takes the `period`
+    * column and produces duplicates. Excluding them here is not a suppressed
+    * failure: it is the model-layer statement of the same limitation
+    * `Periods.reject` enforces at the solve layer, and the fixture exists to
+    * hold PyPSA's answer for the network this port declines to model.
+    *
+    * Read off the manifest's `multi_period` flag rather than a name, so a second
+    * such fixture is covered without anyone remembering to add it.
+    */
   private lazy val goldenNetworks: List[String] =
-    manifest("networks").obj.keys.toList.sorted
+    manifest("networks").obj.collect {
+      case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name
+    }.toList.sorted
 
   goldenNetworks.foreach { name =>
     test(s"$name loads with the component counts PyPSA reported") {

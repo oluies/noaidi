@@ -1387,3 +1387,65 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     ).objective
     assert(free < budgeted - 1.0, s"stripping the budgets changed nothing: $free against $budgeted")
   }
+
+  test("a multi-period network is refused rather than solved as one period") {
+    assume(available, "goldens missing")
+    // `investment_periods.csv` was in the reader's set of non-component files
+    // and nothing else read it, so a multi-period network reached the builder
+    // looking like an ordinary one. `new` has build_year 2040 and does not
+    // exist in 2030; solved flat it ran there anyway, for 2,000 against PyPSA's
+    // 17,000. Found by asking what the reader skips, not what the code refuses.
+    val n = network("investment-periods")
+    assertEquals(n.investmentPeriods, IndexedSeq("2030", "2040"),
+      "the reader no longer picks up the investment periods")
+
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("investment period"), failure.getMessage)
+    assert(failure.getMessage.contains("2040"), failure.getMessage)
+  }
+
+  test("the multi-period refusal is not gratuitous: the flat answer is wrong") {
+    assume(available, "goldens missing")
+    // Guarding the refusal, as for `committable`. Stripping the periods is
+    // exactly what solving it flat amounted to, and the gap it leaves is the
+    // benefit the refusal buys: PyPSA's 17,000 against a flat 2,000, because
+    // the cheap unit runs a period before it is built.
+    val target = results("investment-periods")("optimize")("objective").num
+    assertEqualsDouble(target, 17000.0, 1e-6)
+
+    val flat = Lopf.solve(network("investment-periods").copy(investmentPeriods = IndexedSeq.empty), params)
+    assertEquals(flat.status, SolveStatus.Optimal, s"${flat.solution}")
+    assert(
+      flat.objective < target - 1.0,
+      s"solving it flat gives ${flat.objective}, not below PyPSA's $target -- so the refusal " +
+        "blocks a network this port would have got right",
+    )
+  }
+
+  test("a delayed link is refused rather than delivered instantly") {
+    assume(available, "goldens missing")
+    // `delay` shifts a link's output by whole snapshots. Default 0, so inert
+    // unless set and no other fixture sets one -- the same shape as the four
+    // attributes the schema sweep found. The balance rows here pair both ends
+    // within one snapshot, which delivers the import in time when it cannot be.
+    val n       = network("link-delay")
+    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
+    assert(failure.getMessage.contains("delay"), failure.getMessage)
+    assert(failure.getMessage.contains("tie"), failure.getMessage)
+  }
+
+  test("the delay refusal is not gratuitous: the instantaneous answer is wrong") {
+    assume(available, "goldens missing")
+    // The same guard. With the delay cleared the link carries the load at the
+    // first snapshot for 500; PyPSA, honouring it, pays 9,000 for local
+    // generation because the import cannot arrive in time. Eighteen times.
+    val target = results("link-delay")("optimize")("objective").num
+    assertEqualsDouble(target, 9000.0, 1e-6)
+
+    val instant = Lopf.solve(mutate("link-delay", "links.csv", setColumn(_, "delay", "0")), params)
+    assertEquals(instant.status, SolveStatus.Optimal, s"${instant.solution}")
+    assert(
+      instant.objective < target - 1.0,
+      s"ignoring the delay gives ${instant.objective}, not below PyPSA's $target",
+    )
+  }

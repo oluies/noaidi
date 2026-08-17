@@ -1027,6 +1027,74 @@ and being wrong in the permissive direction returns a plausible number instead o
 an error. A spurious refusal is loud and has two ways out — `UnitCommitment`, or
 clearing a flag that was not doing anything. Being wrong quietly has none.
 
+## The two the sweep left, and what "known gap" was hiding
+
+Re-running the schema-minus-source sweep after the first four fixes produced a
+long list that was mostly noise — `Expansion` builds `p_nom_max` and
+`s_nom_extendable` by interpolation, so a literal search cannot see them — and
+`terrain_factor`, `v_ang_min`/`v_ang_max`, `p_nom_set`, `build_year`, `lifetime`
+and `Generator.weight` get **zero hits in PyPSA's own optimiser**, so they cannot
+change a LOPF answer at all. `Carrier.max_growth` is real but `define_growth_limit`
+returns immediately unless the network is multi-period.
+
+Two survived, and both were confirmed against PyPSA before a line was written.
+
+**Investment periods, which is the uncomfortable one.** Multi-investment periods
+had been on the list of known gaps all along. What nobody had checked is what
+happened when you gave the port one anyway: `investment_periods.csv` sat in the
+reader's set of non-component files and *no code read it*, so a multi-period
+network arrived at the builder indistinguishable from an ordinary one. On a
+two-period network whose cheap generator has `build_year = 2040`, PyPSA pays
+**17,000** — the expensive unit carries the whole of 2030, because the cheap one
+does not exist yet — and this port returned **2,000**, running it ten years
+before it was built, reporting `Optimal`.
+
+So "known gap" and "silently wrong" had been the same thing. **A gap is only
+honest if it is loud**, and this one had nothing to be loud at: the same
+"a refusal needs a code site" problem as `phase_shift`, one level up — an entire
+*file* nothing read rather than an attribute.
+
+The reader compounded it. With `period` and `timestep` columns and no `snapshot`
+column, the label came from the first column after the index, so four snapshots
+read back as `2030, 2030, 2040, 2040` — two pairs of duplicates — and `timestep`
+was parsed as a weighting.
+
+**`Link.delay`.** Energy entering a link at `t` leaves at `t + delay`, and
+`cyclic_delay` decides whether what is in flight at the end of the horizon wraps
+or is lost. Default 0, inert unless set, no fixture setting one: the same shape
+as the four the sweep found. With the only load at the first snapshot and the
+import delayed by one, PyPSA pays **9,000** for local generation where this port
+delivered the import instantly for **500**. Eighteen times.
+
+### Refused, and why not implemented
+
+Neither has a conservative reading. Ignoring periods drops the build-year
+restriction, which makes the answer cheaper, while the discounting and period
+weightings push the other way — the error does not even have a reliable sign.
+Multi-period is a feature with its own goldens, not a fix.
+
+`Network` now carries `investmentPeriods`, read from the file that was being
+skipped, and `Periods.reject` refuses on it from both `Lopf` and
+`UnitCommitment` — a single-bus multi-period network reaches the second entry
+point and not the first. Delayed links are refused in `Lopf`, which is the only
+model that builds a Link at all.
+
+Both fixtures keep PyPSA's own answer in the goldens, so the refusals are
+evidenced rather than asserted, and both refusals have a test that they are *not
+gratuitous*: solving each network the way the port used to gives an answer below
+PyPSA's, which is the benefit the refusal buys.
+
+### The model layer cannot hold a multi-period network, and now says so
+
+`investment-periods` is the first golden the model-level suites skip. Its
+snapshots are `(period, timestep)` pairs; `Network` holds a flat list of labels,
+so the CSV cannot round-trip and the netCDF export has no `snapshots_snapshot`
+dataset to read. The manifest carries a `multi_period` flag and `GoldenNetwork`,
+`RoundTrip` and `NetCdfReader` skip on it — by data, so a second such fixture is
+covered automatically, and with the reason stated in each rather than a name in a
+list. That skip is the model-layer half of the same limitation `Periods.reject`
+enforces at the solve layer.
+
 ## Standard types, and the 585-bus network they unblock
 
 `scigrid-de` runs. 585 buses, 852 lines, 96 transformers, 24 snapshots: angles to

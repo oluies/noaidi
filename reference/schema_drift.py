@@ -36,16 +36,34 @@ from pathlib import Path
 # is what separates an input from a computed output, which is the filter that
 # whole sweep starts from.
 MATERIAL = ("type", "default", "status", "varying", "unit")
-COSMETIC = ("description",)
+
+# There is deliberately no attribute-level cosmetic comparison. `component_schema()`
+# emits exactly `type`, `unit`, `default`, `status` and `varying` per attribute --
+# no `description` -- so a walk over one would be unreachable against any schema
+# this repository can produce, and a test for it would be validating a shape that
+# cannot occur. Components *do* carry a description, and that comparison is real.
 
 
 def load(path: Path) -> dict:
+    """Read a schema, or exit 2.
+
+    Two rather than one, and the difference matters more than it looks. 1 means
+    "something drifted", and the workflow acts on it: it opens an issue telling
+    maintainers that upstream changed. An unreadable file exiting 1 would produce
+    that issue with an empty diff in it and the actual reason on stderr, which is
+    a bug report about PyPSA for what is really a missing file.
+
+    `OSError` rather than `FileNotFoundError` so a directory, a permission
+    problem or a truncated read land here too instead of escaping as a traceback.
+    """
     try:
         return json.loads(path.read_text())
-    except FileNotFoundError:
-        sys.exit(f"schema_drift: no such file: {path}")
+    except OSError as e:
+        print(f"schema_drift: cannot read {path}: {e}", file=sys.stderr)
+        raise SystemExit(2)
     except json.JSONDecodeError as e:
-        sys.exit(f"schema_drift: {path} is not JSON: {e}")
+        print(f"schema_drift: {path} is not JSON: {e}", file=sys.stderr)
+        raise SystemExit(2)
 
 
 def is_input(row: dict) -> bool:
@@ -97,9 +115,6 @@ def diff(old: dict, new: dict) -> tuple[list[str], list[str], list[str]]:
                     material.append(
                         f"{name}.{attr}: {field} {oa[attr].get(field)!r} -> {na[attr].get(field)!r}"
                     )
-            for field in COSMETIC:
-                if oa[attr].get(field) != na[attr].get(field):
-                    cosmetic.append(f"{name}.{attr}: {field} reworded")
 
     return material, cosmetic, new_inputs
 

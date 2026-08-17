@@ -55,6 +55,19 @@ import SchemaSweepSuite.*
   * is modelled — and it is refused outright by `Lopf.rejectUnhandled`, which is
   * what makes that survivable.
   *
+  * Two further imprecisions follow from matching text rather than meaning, and
+  * both can decide a rule. [[quoted]] is '''every''' identifier-shaped string
+  * literal in the main sources — error-message fragments, JSON keys, HDF5 paths
+  * — not only literals in an accessor position, so an unrelated one can mask an
+  * attribute as named. Quoting `"v_ang"` anywhere would fail open on
+  * `Line.v_ang_min` and `v_ang_max` and fail their rulings as stale in the same
+  * run. [[interpolated]] compounds it by taking a full cross-product, so it
+  * manufactures names no code contains; that one can only ever mask, never
+  * report. Narrowing `quoted` to accessor call sites would remove most of the
+  * surface and is the obvious move if either misfires — neither has yet, and a
+  * narrower match trades this for spurious unaccounted attributes, which is
+  * noisier and no safer.
+  *
   * A ruling's *reason* is prose and nothing checks it. The rules above check that
   * a reason exists and still applies to a real attribute; whether it is true is a
   * review question, which is why the ledger is a diff rather than a suppression
@@ -132,9 +145,17 @@ class SchemaSweepSuite extends munit.FunSuite:
     // schema generated from a newer PyPSA, and if the override failed to take it
     // would read the pinned one and pass -- which is indistinguishable from
     // finding no drift. The workflow greps this line to tell those apart.
-    println(s"schema sweep: ${inputs.size} input attributes from ${goldens.resolve("schema.json")}")
+    //
+    // On its own line, and before anything that touches `schema`. Folding the
+    // path into a message that also reports `inputs.size` would force the parse
+    // first, and `AttributeType.parse` throws on a type it cannot classify --
+    // so a genuinely new upstream type would kill the suite before it printed,
+    // and the workflow would blame a failed sbt override for what is the loudest
+    // drift signal there is.
+    println(s"schema sweep: reading ${goldens.resolve("schema.json")}")
     println(s"schema sweep: ${sourceFiles.size} source files under $sources")
     assert(sourceFiles.sizeIs >= 20, s"only ${sourceFiles.size} source files under $sources")
+    println(s"schema sweep: ${inputs.size} input attributes")
     assert(inputs.sizeIs >= 300, s"only ${inputs.size} input attributes in the schema")
     assert(quoted.sizeIs >= 100, s"only ${quoted.size} quoted names in the sources")
     assertEquals(

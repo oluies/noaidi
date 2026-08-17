@@ -159,9 +159,24 @@ jobs:
           # The same guard ci.yml applies to `testFull`: a green sbt run is not
           # evidence that anything executed, and a sweep that ran zero tests
           # would report exactly the same "no unaccounted attributes" as one that
-          # ran five and found none.
-          if ! grep -qE 'Total 5' sweep.log; then
-            echo "::error::the sweep did not report its five cases -- it did not run"
+          # ran some and found none.
+          #
+          # The count is parsed rather than pinned. Asserting the literal `Total 5`
+          # would break this job every time a case is added to the suite, with an
+          # error saying the sweep did not run -- which is both wrong and the kind
+          # of false alarm that gets a weekly cron muted. `ignored` is checked too:
+          # every case begins `assume(available)`, so a schema that failed to
+          # appear would skip all of them and still report a total.
+          summary=$(grep -E '^Test run .* finished:' sweep.log | tail -1 || true)
+          total=$(sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p' <<<"$summary")
+          ignored=$(sed -nE 's/.*[^0-9]([0-9]+) ignored.*/\1/p' <<<"$summary")
+          echo "sweep: ${summary:-<no summary line>}"
+          if [ -z "${total:-}" ] || [ "$total" -lt 1 ]; then
+            echo "::error::the sweep reported no cases -- it did not run"
+            exit 1
+          fi
+          if [ "${ignored:-0}" -ne 0 ]; then
+            echo "::error::$ignored sweep case(s) were skipped; the schema was not readable"
             exit 1
           fi
           echo "clean=$([ "$status" -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
@@ -172,10 +187,22 @@ jobs:
           # a removed attribute orphans its ruling and is as much drift as an
           # added one. Stack frames are dropped -- the assertion messages name
           # the attributes, which is the whole content.
+          #
+          # These lines carry no `[error]` prefix because `Test / fork := true`
+          # sends the forked JVM's output straight through, so the range anchors
+          # and the stack-frame filter match as written. Dropping the fork would
+          # break both.
           if [ "$status" -ne 0 ]; then
             sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/^Test run .* finished/p' sweep.log \
-              | grep -vE '^\s+at |^[0-9]+:' \
-              | head -80 > sweep-report.txt
+              | grep -vE '^\s+at |^[0-9]+:' > sweep-full.txt
+            # Truncation is stated rather than silent. It matters most in exactly
+            # the case with the most new attributes, which is the one where a
+            # quietly clipped list reads as a complete one.
+            head -80 sweep-full.txt > sweep-report.txt
+            cut=$(( $(wc -l < sweep-full.txt) - 80 ))
+            if [ "$cut" -gt 0 ]; then
+              echo "... $cut more line(s); the full list is in the workflow run log" >> sweep-report.txt
+            fi
           fi
           exit 0
 

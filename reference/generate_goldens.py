@@ -1495,20 +1495,29 @@ def write_schema_only(target: Path) -> int:
     return 0
 
 
+USAGE = "usage: generate_goldens.py [--schema-only PATH]"
+
+
 def main() -> int:
     # Deliberately hand-rolled rather than argparse: there is exactly one flag,
     # and it exists to make the file usable by the drift workflow without giving
     # anyone a way to half-regenerate the goldens.
+    #
+    # PATH is required rather than defaulting into `goldens/`. A default there
+    # would be exactly the half-regeneration this comment claims to prevent:
+    # `schema.json` rewritten from whatever PyPSA the invoking venv happens to
+    # hold while `manifest.json` still records 1.2.4, so the pinned schema and
+    # the recorded pin disagree and every schema-driven suite reads an unpinned
+    # schema believing it is the golden. Regenerating the goldens is the no-flag
+    # path, which rewrites the manifest alongside them.
     argv = sys.argv[1:]
     if argv[:1] == ["--schema-only"]:
         if len(argv) == 2:
             return write_schema_only(Path(argv[1]))
-        if len(argv) == 1:
-            return write_schema_only(OUT / "schema.json")
-        print("usage: generate_goldens.py [--schema-only [PATH]]", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         return 2
     if argv:
-        print("usage: generate_goldens.py [--schema-only [PATH]]", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         return 2
 
     OUT.mkdir(parents=True, exist_ok=True)

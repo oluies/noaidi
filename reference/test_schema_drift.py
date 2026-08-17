@@ -20,7 +20,7 @@ import io
 import json
 import sys
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,8 +34,15 @@ def component(**attributes) -> dict:
 
 
 def attribute(**overrides) -> dict:
+    """An attribute row in exactly the shape `component_schema()` emits.
+
+    Five keys, and no `description` -- the generator does not write one at
+    attribute level. A fixture carrying fields the real thing never has would let
+    a test pass against a shape that cannot occur, which is how the comparator
+    grew a `description` walk that could never fire.
+    """
     row = {"type": "float", "unit": "MW", "default": 0.0, "status": "Input (optional)",
-           "varying": False, "description": "an attribute"}
+           "varying": False}
     row.update(overrides)
     return row
 
@@ -67,6 +74,13 @@ def added(name: str, **overrides) -> dict:
     return new
 
 
+def component_edited(**changes) -> dict:
+    """BASE with the component's own fields altered."""
+    new = json.loads(json.dumps(BASE))
+    new["Thing"].update(changes)
+    return new
+
+
 # (name, old, new, expected exit, text that must appear)
 CASES = [
     ("identical schemas are not drift", BASE, BASE, 0, "identical"),
@@ -82,9 +96,19 @@ CASES = [
     ("an input becoming an output fails", BASE, edited(status="Output"), 1, "status"),
 
     # A reworded description is the churn a version bump produces most of, and
-    # failing on it would train everyone to ignore the job.
-    ("a reworded description is reported but passes", BASE, edited(description="reworded"), 0,
-     "cosmetic"),
+    # failing on it would train everyone to ignore the job. Only components carry
+    # one -- attribute rows have no description field at all, which is why the
+    # comparator does not walk for one.
+    ("a reworded component description is reported but passes", BASE,
+     component_edited(description="reworded"), 0, "cosmetic"),
+
+    # The other two component-level fields, which decide what a component *is*:
+    # `list_name` is the CSV file it exports to and `category` is what topology
+    # is derived from, so either moving is a structural change to the model.
+    ("a changed list_name fails", BASE, component_edited(list_name="widgets"), 1,
+     "list_name 'things' -> 'widgets'"),
+    ("a changed category fails", BASE, component_edited(category="controllable_branch"), 1,
+     "category 'passive_one_port' -> 'controllable_branch'"),
 
     ("a removed attribute fails", BASE, {"Thing": component(name=attribute(type="string"))}, 1,
      "attribute removed"),
@@ -103,18 +127,52 @@ CASES = [
     ("a new component lists its inputs", BASE, {**BASE, "Widget": component(q=attribute())}, 1,
      "`Widget.q`"),
 
-    ("bad usage exits 2", None, None, 2, ""),
+    # Everything below is a *file-level* failure rather than a comparison, and
+    # every one of them must exit 2. Exiting 1 would mean "drift", which the
+    # workflow acts on by opening an issue telling maintainers upstream changed
+    # -- so an unreadable file would be reported as a PyPSA release, with an
+    # empty diff in the issue and the real reason on stderr where nobody looks.
+    ("bad usage exits 2", "usage", None, 2, ""),
+    ("a missing file exits 2, not 1", "missing", None, 2, ""),
+    ("a directory in place of a file exits 2, not 1", "directory", None, 2, ""),
+    ("malformed JSON exits 2, not 1", "badjson", None, 2, ""),
 ]
+
+
+def run_special(kind: str) -> tuple[int, str]:
+    """The file-level failures, which raise SystemExit rather than returning."""
+    with tempfile.TemporaryDirectory() as tmp:
+        good = Path(tmp) / "good.json"
+        good.write_text(json.dumps(BASE))
+        if kind == "usage":
+            argv = ["only-one-argument"]
+        elif kind == "missing":
+            argv = [str(good), str(Path(tmp) / "nope.json")]
+        elif kind == "directory":
+            argv = [str(good), tmp]
+        elif kind == "badjson":
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{not json,")
+            argv = [str(good), str(bad)]
+        else:
+            raise AssertionError(f"unknown case kind {kind!r}")
+
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = main(argv)
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        # stderr counts as output here: that is where these diagnostics go, and
+        # a case asserting on the message would otherwise be asserting on silence.
+        return code, out.getvalue() + err.getvalue()
 
 
 def main_() -> int:
     failures = 0
     for name, old, new, expected_code, expected_text in CASES:
-        if old is None:
-            out = io.StringIO()
-            with redirect_stdout(out):
-                code = main(["only-one-argument"])
-            text = out.getvalue()
+        if isinstance(old, str):
+            code, text = run_special(old)
         else:
             code, text = run(old, new)
 

@@ -132,10 +132,20 @@ CASES = [
     # workflow acts on by opening an issue telling maintainers upstream changed
     # -- so an unreadable file would be reported as a PyPSA release, with an
     # empty diff in the issue and the real reason on stderr where nobody looks.
-    ("bad usage exits 2", "usage", None, 2, ""),
-    ("a missing file exits 2, not 1", "missing", None, 2, ""),
-    ("a directory in place of a file exits 2, not 1", "directory", None, 2, ""),
-    ("malformed JSON exits 2, not 1", "badjson", None, 2, ""),
+    #
+    # Each asserts the diagnostic as well as the status. `run_special` goes out
+    # of its way to capture stderr precisely so these can, and while they all
+    # passed `""` they were not using it: deleting both `print(..., stderr)`
+    # calls in `load()` left the suite green, and a silent exit 2 reproduces half
+    # the failure it exists to prevent -- the operator is shown nothing about why.
+    ("bad usage exits 2", "usage", None, 2, "usage:"),
+    ("a missing file exits 2, not 1", "missing", None, 2, "cannot read"),
+    ("a directory in place of a file exits 2, not 1", "directory", None, 2, "cannot read"),
+    ("malformed JSON exits 2, not 1", "badjson", None, 2, "is not JSON"),
+    # Not valid UTF-8, which is a `ValueError` rather than an `OSError` and so
+    # escaped both branches as a traceback -- exit 1, read by the workflow as
+    # drift. The shape of a half-written download.
+    ("a non-UTF-8 file exits 2, not 1", "badbytes", None, 2, "cannot read"),
 ]
 
 
@@ -153,6 +163,12 @@ def run_special(kind: str) -> tuple[int, str]:
         elif kind == "badjson":
             bad = Path(tmp) / "bad.json"
             bad.write_text("{not json,")
+            argv = [str(good), str(bad)]
+        elif kind == "badbytes":
+            # Written as bytes: a UTF-16 BOM followed by `{`, which `read_text`
+            # rejects before `json.loads` ever sees it.
+            bad = Path(tmp) / "bad.json"
+            bad.write_bytes(b"\xff\xfe{")
             argv = [str(good), str(bad)]
         else:
             raise AssertionError(f"unknown case kind {kind!r}")

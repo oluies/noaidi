@@ -53,12 +53,21 @@ def load(path: Path) -> dict:
     that issue with an empty diff in it and the actual reason on stderr, which is
     a bug report about PyPSA for what is really a missing file.
 
-    `OSError` rather than `FileNotFoundError` so a directory, a permission
-    problem or a truncated read land here too instead of escaping as a traceback.
+    `OSError` rather than `FileNotFoundError` so a directory or a permission
+    problem lands here too instead of escaping as a traceback.
+
+    `UnicodeDecodeError` is caught alongside it because it is *not* an
+    `OSError` -- it is a `ValueError`, and `Path.read_text()` raises it for a
+    file that is not valid UTF-8 or that was truncated mid-multibyte. That is a
+    plausible shape for a half-written download, and uncaught it escaped as a
+    traceback and exited 1, which is the status reserved for drift: the workflow
+    would have opened an issue saying upstream changed, with an empty diff in it.
+    Truncation only lands in the `JSONDecodeError` branch when the cut happens to
+    fall on an ASCII boundary.
     """
     try:
         return json.loads(path.read_text())
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         print(f"schema_drift: cannot read {path}: {e}", file=sys.stderr)
         raise SystemExit(2)
     except json.JSONDecodeError as e:

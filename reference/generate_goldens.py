@@ -529,6 +529,78 @@ def energy_budget():
     return n
 
 
+def investment_periods():
+    """Two build years, which this port read as one period.
+
+    `investment_periods.csv` sat in the reader's set of non-component files and
+    nothing else read it, so a multi-period network arrived at the builder
+    indistinguishable from an ordinary one. `new` has `build_year = 2040` and is
+    inactive through 2030, which PyPSA enforces and this port did not: the
+    expensive unit carries the whole first period at 80/MWh, costing **17,000**,
+    against the **2,000** the port returned by running `new` ten years before it
+    was built. Reported `Optimal`.
+
+    Deliberately minimal. Nothing here is extendable and there is no discount
+    rate, so the fixture isolates the one thing that matters — that periods
+    change which assets exist — rather than mixing it with annuitised capital
+    costs the port also does not model. That keeps the refusal's evidence to a
+    single cause.
+
+    The export is also what showed the reader misreads such a network: with
+    `period` and `timestep` columns and no `snapshot` column, the label is taken
+    from the first column after the index, so the four snapshots come back as
+    `2030, 2030, 2040, 2040` — two pairs of duplicates — and `timestep` is parsed
+    as a weighting.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(2)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["objective"] = [1.0, 1.0]
+    n.investment_period_weightings["years"] = [10, 10]
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Generator", "new", bus="b", p_nom=200.0, marginal_cost=5.0,
+          build_year=2040, lifetime=30)
+    n.add("Generator", "old", bus="b", p_nom=200.0, marginal_cost=80.0)
+    n.add("Load", "d", bus="b", p_set=[100.0] * 4)
+    return n
+
+
+def link_delay():
+    """A link whose energy arrives later, which this port delivered instantly.
+
+    PyPSA's `delay` shifts a link's output by whole snapshots: power entering at
+    `t` leaves at `t + delay`. The default is 0, so the attribute is inert
+    unless set and no other fixture sets one — the same shape as the four
+    attributes the schema sweep turned up.
+
+    The load sits entirely at the first snapshot, and `tie` is the only route
+    from the cheap generator to it. Undelayed, the import serves the load for
+    **500**. With `delay = 1` the import cannot arrive in time at all, so the
+    expensive local unit carries it and PyPSA pays **9,000** — eighteen times
+    more. This port paired both ends of the link within one snapshot and
+    returned the 500 either way.
+
+    `cyclic_delay` is off, so energy still in flight at the end of the horizon
+    is lost rather than wrapping to the beginning. With it on, the model would
+    have a second thing to get right, and the refusal covers both.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+
+    n.add("Bus", "a", v_nom=110.0)
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Generator", "cheap", bus="a", p_nom=200.0, marginal_cost=5.0)
+    n.add("Generator", "local", bus="b", p_nom=200.0, marginal_cost=90.0)
+    n.add("Link", "tie", bus0="a", bus1="b", p_nom=150.0, efficiency=1.0,
+          delay=1, cyclic_delay=False)
+    n.add("Load", "d", bus="b", p_set=[100.0, 0.0, 0.0, 0.0])
+    return n
+
+
 def store_bank():
     """Stores, which are not StorageUnits with a different name.
 
@@ -809,6 +881,8 @@ NETWORKS = {
     "inactive-removed": inactive_removed,
     "ramp-limits": ramp_limits,
     "energy-budget": energy_budget,
+    "investment-periods": investment_periods,
+    "link-delay": link_delay,
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
@@ -857,6 +931,12 @@ def jsonable(value):
         return value.isoformat()
     if isinstance(value, str):
         return value
+    # A multi-period network's snapshot index is a MultiIndex, so each label
+    # arrives as a `(period, timestep)` tuple. Rendered as a list rather than
+    # joined into a string: the two halves mean different things, and flattening
+    # them would make a reader guess where the period ends.
+    if isinstance(value, tuple):
+        return [jsonable(v) for v in value]
     # Deliberately loud: a new dtype arriving with a version bump should stop the
     # run rather than land in the goldens as somebody's `str()`.
     raise TypeError(f"jsonable: unhandled {type(value).__name__}: {value!r}")
@@ -994,6 +1074,18 @@ def capture_network(name: str, build) -> dict:
         # in-memory index rather than the file it is supposed to be checked
         # against.
         "snapshots": [str(s) for s in n.snapshots],
+        # Multi-period networks are marked so the model-level suites can skip
+        # them by data rather than by name. Their snapshots are `(period,
+        # timestep)` pairs, which the port's `Network` does not represent: it
+        # carries a flat list of labels, so the CSV reader takes the `period`
+        # column and produces duplicates, the writer cannot reproduce the file,
+        # and the netCDF export has no `snapshots_snapshot` dataset to read.
+        #
+        # That is not an oversight the fixture should paper over. It is the
+        # reason `Periods.reject` refuses these networks, and the marker keeps
+        # the refusal's evidence -- PyPSA's own answer -- in the goldens without
+        # claiming the model layer can hold one.
+        "multi_period": len(getattr(n, "investment_periods", [])) > 0,
         "components": {},
     }
     for component in n.components:

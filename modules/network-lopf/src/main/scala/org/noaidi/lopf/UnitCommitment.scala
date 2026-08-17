@@ -336,6 +336,14 @@ object UnitCommitment:
     // vanishes -- a load disappears and the schedule comes out cheaper, with no
     // diagnostic. `Lopf` guards this through the same helper; leaving one entry
     // point loud and the other silently wrong is the thing to avoid.
+    // Multi-period networks, for the same reason `Lopf` refuses them: the
+    // commitment horizon here is a flat run of snapshots, and a network whose
+    // snapshots are `(period, timestep)` pairs would be committed across build
+    // years as though every unit existed throughout. Shared with `Lopf` so the
+    // two cannot drift apart -- a single-bus multi-period network reaches this
+    // entry point and not that one.
+    Periods.reject(network, m => throw new UnsupportedNetwork(m))
+
     Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
       throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")
     }

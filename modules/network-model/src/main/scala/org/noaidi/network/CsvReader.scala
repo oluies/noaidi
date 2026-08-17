@@ -72,10 +72,34 @@ object CsvReader:
       snapshots = snapshots,
       tables = ListMap.from(tables.map(t => t.spec.name -> t)),
       snapshotWeightings = weightings,
+      investmentPeriods = readInvestmentPeriods(directory.resolve("investment_periods.csv")),
     )
 
-  /** Files that are not component tables. */
+  /** Files that are not component tables.
+    *
+    * `investment_periods.csv` is not a component table, but it is no longer
+    * *ignored*: being in this set and read nowhere is what let a multi-period
+    * network arrive at the solvers looking like a single-period one. It is now
+    * read into `Network.investmentPeriods` by [[readInvestmentPeriods]].
+    */
   private val reserved = Set("snapshots.csv", "network.csv", "investment_periods.csv")
+
+  /** The investment periods, or empty where the file is absent.
+    *
+    * Only the period labels are taken. The `objective` and `years` weightings
+    * beside them matter only to a model that builds multi-period costs, and
+    * this port refuses those networks rather than pricing them — reading the
+    * numbers would suggest otherwise.
+    */
+  private def readInvestmentPeriods(path: Path): IndexedSeq[String] =
+    if !Files.exists(path) then IndexedSeq.empty
+    else
+      val rows = parse(path)
+      if rows.isEmpty then IndexedSeq.empty
+      else
+        val header = rows.head
+        val at     = math.max(0, header.indexOf("period"))
+        rows.tail.collect { case r if at < r.length && r(at).trim.nonEmpty => r(at).trim }
 
   /** Snapshot labels and their weightings.
     *

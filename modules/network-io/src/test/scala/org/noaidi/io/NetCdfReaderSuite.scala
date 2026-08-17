@@ -28,8 +28,19 @@ class NetCdfReaderSuite extends munit.FunSuite:
     * datasets and 1.7 MB against the 28 of a three-bus network, and the only one
     * exercising the reader at any scale.
     */
+  /** Every golden network except the multi-period ones. PyPSA writes their
+    * snapshot index as `period`/`timestep` variables rather than a
+    * `snapshots_snapshot` dataset, which this reader requires and `Network` has
+    * nowhere to put — the same limitation `Periods.reject` enforces at the solve
+    * layer. Skipped by the manifest's `multi_period` flag, not by name.
+    */
   private lazy val networks: List[String] =
-    ujson.read(Files.readString(goldens.resolve("manifest.json")))("networks").obj.keys.toList.sorted
+    ujson
+      .read(Files.readString(goldens.resolve("manifest.json")))("networks")
+      .obj
+      .collect { case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name }
+      .toList
+      .sorted
 
   private def fromCsv(name: String): Network =
     CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)

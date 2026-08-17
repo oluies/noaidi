@@ -69,8 +69,19 @@ class RoundTripSuite extends munit.FunSuite:
     * added to `generate_goldens.py` is round-tripped without anyone remembering
     * to add it here.
     */
+  /** Every golden network except the multi-period ones, which `Network` cannot
+    * represent — their snapshots are `(period, timestep)` pairs and it holds a
+    * flat list, so the file cannot round-trip. Skipped by the manifest's
+    * `multi_period` flag rather than by name; `Periods.reject` is the solve-layer
+    * half of the same limitation.
+    */
   private lazy val goldenNetworks: List[String] =
-    ujson.read(Files.readString(goldens.resolve("manifest.json")))("networks").obj.keys.toList.sorted
+    ujson
+      .read(Files.readString(goldens.resolve("manifest.json")))("networks")
+      .obj
+      .collect { case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name }
+      .toList
+      .sorted
 
   goldenNetworks.foreach { name =>
     test(s"$name round-trips to the same files PyPSA wrote") {

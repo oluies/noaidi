@@ -382,6 +382,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "ac-dc-co2",
    "snapshots": [
     "2015-01-01 00:00:00",
@@ -813,6 +814,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "ac-dc-dispatch",
    "snapshots": [
     "2015-01-01 00:00:00",
@@ -1155,6 +1157,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "ac-dc-meshed",
    "snapshots": [
     "2015-01-01 00:00:00",
@@ -1383,6 +1386,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "ac-pf-pv",
    "snapshots": [
     "0",
@@ -1526,6 +1530,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "energy-budget",
    "snapshots": [
     "0",
@@ -1768,6 +1773,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "inactive",
    "snapshots": [
     "0",
@@ -2011,6 +2017,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "inactive-removed",
    "snapshots": [
     "0",
@@ -2028,6 +2035,344 @@
      ],
      "carrier": "AC",
      "slack_bus": "hv1"
+    }
+   ]
+  },
+  "investment-periods": {
+   "components": {
+    "Bus": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "marginal_cost",
+      "build_year",
+      "lifetime"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt"
+     ],
+     "varying": {}
+    },
+    "Load": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "bus"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "d"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "multi_period": true,
+   "name": "investment-periods",
+   "snapshots": [
+    "(2030, 0)",
+    "(2030, 1)",
+    "(2040, 0)",
+    "(2040, 1)"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "b"
+     ],
+     "carrier": "AC",
+     "slack_bus": "b"
+    }
+   ]
+  },
+  "link-delay": {
+   "components": {
+    "Bus": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "marginal_cost"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt"
+     ],
+     "varying": {}
+    },
+    "Link": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "p_nom",
+      "delay",
+      "cyclic_delay"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "carrier",
+      "efficiency",
+      "active",
+      "build_year",
+      "lifetime",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_set",
+      "p_init",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "stand_by_cost",
+      "length",
+      "terrain_factor",
+      "committable",
+      "start_up_cost",
+      "shut_down_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "delay",
+      "cyclic_delay",
+      "p_nom_opt"
+     ],
+     "varying": {}
+    },
+    "Load": {
+     "count": 1,
+     "exported_columns": [
+      "name",
+      "bus"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "d"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "multi_period": false,
+   "name": "link-delay",
+   "snapshots": [
+    "0",
+    "1",
+    "2",
+    "3"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "a"
+     ],
+     "carrier": "AC",
+     "slack_bus": "a"
+    },
+    {
+     "buses": [
+      "b"
+     ],
+     "carrier": "AC",
+     "slack_bus": "b"
     }
    ]
   },
@@ -2199,6 +2544,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "lodf-mesh",
    "snapshots": [
     "0",
@@ -2439,6 +2785,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "phase-shift",
    "snapshots": [
     "0",
@@ -2646,6 +2993,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "ramp-limits",
    "snapshots": [
     "0",
@@ -4476,6 +4824,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "scigrid-de",
    "snapshots": [
     "2011-01-01 00:00:00",
@@ -5266,6 +5615,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "sclopf-triangle",
    "snapshots": [
     "0",
@@ -5508,6 +5858,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "standard-types",
    "snapshots": [
     "0",
@@ -5712,6 +6063,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "storage-cycle",
    "snapshots": [
     "0",
@@ -6079,6 +6431,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "storage-hvdc",
    "snapshots": [
     "2015-01-01 00:00:00",
@@ -6290,6 +6643,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "store-bank",
    "snapshots": [
     "0",
@@ -6530,6 +6884,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "transformer-levels",
    "snapshots": [
     "0",
@@ -6674,6 +7029,7 @@
      "varying": {}
     }
    },
+   "multi_period": false,
    "name": "unit-commitment",
    "snapshots": [
     "0",

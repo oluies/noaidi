@@ -155,6 +155,22 @@ final case class Network(
       * representative-period study is expressed.
       */
     snapshotWeightings: ListMap[String, IArray[Double]] = ListMap.empty,
+    /** Investment periods, if the network has any.
+      *
+      * Empty for an ordinary single-period network, which is every fixture in
+      * this repository. A non-empty list changes what the snapshots mean: they
+      * become `(period, timestep)` pairs, assets become active or inactive per
+      * period according to `build_year` and `lifetime`, and costs are weighted
+      * and discounted per period.
+      *
+      * Recorded rather than modelled. `investment_periods.csv` was previously
+      * skipped as a non-component file and nothing else read it, so a
+      * multi-period network was solved as though it were one period — on a
+      * two-period network whose cheap generator is built in the second, that is
+      * 2,000 against PyPSA's 17,000, because the generator ran ten years before
+      * it existed. The solve layers refuse it; this field is how they can tell.
+      */
+    investmentPeriods: IndexedSeq[String] = IndexedSeq.empty,
 ):
   def snapshotCount: Int = snapshots.length
 

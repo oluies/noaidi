@@ -73,6 +73,13 @@ object Lopf:
     val network = Active.only(StandardTypes.expand(input))
     rejectUnhandled(network)
     rejectDanglingBuses(network)
+    // Before everything else that reads a snapshot. A multi-period network's
+    // snapshots are `(period, timestep)` pairs, and the reader collapses them to
+    // the period alone -- so every later diagnostic would be phrased in terms of
+    // duplicated labels for a network whose real problem is that this model does
+    // not have periods at all.
+    Periods.reject(network, m => throw new UnsupportedNetwork(m))
+    rejectDelayedLinks(network)
     // Ahead of `Expansion.reject`, which used to carry the committable half of
     // this itself for the extendable case only. One refusal rather than three
     // partial ones: the narrower checks each described a different fragment of
@@ -632,6 +639,38 @@ object Lopf:
         s"network contains unmodelled component(s): " +
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
+
+  /** Reject a link that delivers its energy in a later snapshot.
+    *
+    * PyPSA's `delay` shifts a link's output by whole snapshots: power entering
+    * at `t` leaves at `t + delay`, and `cyclic_delay` decides whether what is
+    * still in flight at the end of the horizon wraps to the beginning or is
+    * lost. The balance rows built here pair `bus0` and `bus1` within a single
+    * snapshot, so a delayed link is modelled as instantaneous.
+    *
+    * The default is 0 and the attribute reads as inert, which is why nothing
+    * caught it: no fixture sets one. On a two-bus network whose only load sits
+    * at the first snapshot, a delay of 1 makes the cheap import useless and
+    * PyPSA pays 9,000 for local generation; this model delivered the import
+    * instantly and reported 500. An eighteen-fold under-price, `Optimal`.
+    *
+    * `delay` is an `Int` and `cyclic_delay` a boolean, both static, and both are
+    * checked: a zero delay with `cyclic_delay = false` is the default behaviour
+    * and passes, since there is nothing in flight to wrap.
+    */
+  private def rejectDelayedLinks(network: Network): Unit =
+    network.tables.values.foreach { table =>
+      if table.spec.attribute("delay").isDefined && table.static.contains("delay") then
+        table.ids.foreach { id =>
+          val delay = table.int("delay", id)
+          if delay != 0 then
+            throw new UnsupportedNetwork(
+              s"${table.spec.name} '$id' has delay = $delay, so its energy arrives $delay " +
+                "snapshot(s) after it enters; the balance rows here pair both ends within one " +
+                "snapshot, which would deliver it instantly"
+            )
+        }
+    }
 
   /** Reject a component whose bus does not exist.
     *

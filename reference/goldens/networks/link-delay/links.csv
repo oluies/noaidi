@@ -1,0 +1,2 @@
+name,bus0,bus1,p_nom,delay,cyclic_delay
+tie,a,b,150.0,1,False

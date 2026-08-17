@@ -163,10 +163,21 @@ jobs:
           # have opened nothing at all. A red cross on a weekly cron is exactly
           # what nobody is watching.
           #
+          # `harness`, not `clean=false`. Those mean different things and the
+          # first attempt at this conflated them: `clean=false` is the signal for
+          # "the newest schema has something this port does not account for",
+          # which is a statement about *upstream*. Reusing it for a local build
+          # failure opened an issue titled "PyPSA <latest>: schema drift" whose
+          # body asserted upstream had changed the registry, directly above a
+          # `drift.md` reading "No schema drift: the component registries are
+          # identical." Which is this harness reporting its own failure as the
+          # thing it watches for -- the defect three commits have now been spent
+          # removing from the Python side, reintroduced one layer up.
+          #
           # The report is written here too, so the issue carries a reason rather
           # than an empty fence.
           fail_hard() {
-            echo "clean=false" >> "$GITHUB_OUTPUT"
+            echo "harness=broken" >> "$GITHUB_OUTPUT"
             {
               echo "$1"
               echo
@@ -286,35 +297,90 @@ jobs:
       - name: Open or update the drift issue
         if: >-
           always() &&
-          (steps.drift.outputs.drifted == 'true' || steps.sweep.outputs.clean == 'false')
+          (steps.drift.outputs.drifted == 'true' ||
+           steps.sweep.outputs.clean == 'false' ||
+           steps.sweep.outputs.harness == 'broken')
         env:
           GH_TOKEN: ${{ github.token }}
-          TITLE: "PyPSA ${{ steps.install.outputs.latest }}: schema drift against the pinned ${{ steps.install.outputs.pinned }}"
+          DRIFTED: ${{ steps.drift.outputs.drifted }}
+          CLEAN: ${{ steps.sweep.outputs.clean }}
+          HARNESS: ${{ steps.sweep.outputs.harness }}
+          LATEST: ${{ steps.install.outputs.latest }}
+          PINNED: ${{ steps.install.outputs.pinned }}
         run: |
           set -euo pipefail
+
+          # Two different things reach this step and they must not wear the same
+          # title. Upstream moving is a statement about PyPSA; this job failing to
+          # build is a statement about this repository, and an issue that says the
+          # first when it means the second is worse than no issue -- it is a bug
+          # report filed against somebody else's project.
+          #
+          # Separate titles also keep the threads apart. `gh issue list --search`
+          # matches on the title, so a harness failure that borrowed the drift
+          # title would become the thread that real drift for that same version
+          # later comments into, burying it under an unrelated build error.
+          if [ "${DRIFTED:-}" = "true" ] || [ "${CLEAN:-}" = "false" ]; then
+            TITLE="PyPSA $LATEST: schema drift against the pinned $PINNED"
+            upstream=true
+          else
+            TITLE="PyPSA drift job broke before it could compare (PyPSA $LATEST)"
+            upstream=false
+          fi
+
           {
             echo "Found by \`.github/workflows/pypsa-drift.yml\` ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))."
             echo
-            echo "This repository is pinned to PyPSA \`${{ steps.install.outputs.pinned }}\`."
-            echo "PyPSA \`${{ steps.install.outputs.latest }}\` declares a different component registry."
-            echo
-            echo "Nothing is broken by this on its own — the port agrees with the version it is"
-            echo "pinned to, which is the whole contract. What it means is that bumping the pin"
-            echo "is no longer free, and the changes below are what it would cost."
-            echo
-            if [ -f drift.md ]; then cat drift.md; fi
+            if [ "$upstream" = true ]; then
+              echo "This repository is pinned to PyPSA \`$PINNED\`."
+              echo "PyPSA \`$LATEST\` declares a different component registry."
+              echo
+              echo "Nothing is broken by this on its own — the port agrees with the version it is"
+              echo "pinned to, which is the whole contract. What it means is that bumping the pin"
+              echo "is no longer free, and the changes below are what it would cost."
+              echo
+              if [ -f drift.md ]; then cat drift.md; fi
+            else
+              # Says exactly what is and is not known, which is the whole point
+              # of splitting this branch off. The registry comparison and the
+              # sweep are separate steps and only the second one broke, so
+              # claiming the job "did not compare the registries" would be a
+              # second overclaim in place of the first.
+              echo "**This is a failure of this repository's own harness, not a report about"
+              echo "PyPSA.** The sweep — which asks whether the newest schema declares any input"
+              echo "attribute nothing in this port reads — did not run, so there is no answer to"
+              echo "that question this week, either way."
+              echo
+              if [ -f drift.md ]; then
+                echo "The registry comparison is a separate step and it did complete:"
+                echo
+                cat drift.md
+              else
+                echo "The registry comparison produced no result either."
+              fi
+            fi
             if [ -f sweep-report.txt ]; then
-              echo "## The sweep failed against the newest schema"
+              echo
+              if [ "$upstream" = true ]; then
+                echo "## The sweep failed against the newest schema"
+              else
+                echo "## Why the sweep could not run"
+              fi
               echo
               echo '```'
               cat sweep-report.txt
               echo '```'
             fi
             echo
-            echo "To act on it: regenerate the goldens against the new pin as"
-            echo "\`reference/README.md\` describes, and review the diff — a change in the"
-            echo "goldens *is* the compatibility break. Any new input attribute needs the"
-            echo "sweep's question asked of it and a line in \`SchemaSweepSuite\`."
+            if [ "$upstream" = true ]; then
+              echo "To act on it: regenerate the goldens against the new pin as"
+              echo "\`reference/README.md\` describes, and review the diff — a change in the"
+              echo "goldens *is* the compatibility break. Any new input attribute needs the"
+              echo "sweep's question asked of it and a line in \`SchemaSweepSuite\`."
+            else
+              echo "To act on it: fix the build or the workflow, then re-run the job. Until it"
+              echo "runs, this repository has no weekly evidence either way about upstream."
+            fi
           } > issue.md
 
           existing=$(gh issue list --state open --search "$TITLE in:title" \
@@ -336,6 +402,10 @@ jobs:
           if [ "${{ steps.drift.outputs.drifted }}" = "true" ] \
             || [ "${{ steps.sweep.outputs.clean }}" = "false" ]; then
             echo "Drift found; see the job summary and the issue."
+          elif [ "${{ steps.sweep.outputs.harness }}" = "broken" ]; then
+            # Not "no drift", which would be a claim, and not "drift found",
+            # which would be the wrong one. The comparison did not happen.
+            echo "The sweep could not run, so this job has no verdict on PyPSA ${{ steps.install.outputs.latest }}; see the issue."
           else
             echo "No drift: PyPSA ${{ steps.install.outputs.latest }} declares the same registry as the pinned ${{ steps.install.outputs.pinned }}."
           fi

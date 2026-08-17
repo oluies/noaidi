@@ -65,13 +65,19 @@ def load(path: Path) -> dict:
     Truncation only lands in the `JSONDecodeError` branch when the cut happens to
     fall on an ASCII boundary.
 
-    `encoding="utf-8"` rather than the default, which is the *locale's* encoding
-    and makes both the classification and its test locale-dependent. Under a
-    latin-1 runner `b"\\xff\\xfe{"` decodes cleanly to `ÿþ{` and comes out of the
-    `JSONDecodeError` branch instead, so the fixture below would fail on a
-    difference in the environment rather than in the behaviour. The real path is
-    exposed too: a candidate schema from a newer PyPSA carrying a non-ASCII unit
-    or description would be classified differently depending on the runner.
+    `encoding="utf-8"` rather than the default, which is the *locale's* encoding.
+    What that was actually costing is the fixture: under a latin-1 runner
+    `b"\\xff\\xfe{"` decodes cleanly to `ÿþ{` and comes out of the
+    `JSONDecodeError` branch instead, so the non-UTF-8 case failed on a
+    difference in the environment rather than in the behaviour under test.
+
+    Not the real path, today. Both schemas this repository reads are written by
+    `generate_goldens.py` through `json.dumps`, which defaults to
+    `ensure_ascii=True` -- a non-ASCII unit or description is escaped to
+    `\\uXXXX`, so every schema it can produce is pure ASCII and decodes
+    identically under any ASCII-compatible locale. The pin is worth keeping
+    regardless, but as protection against a future generator passing
+    `ensure_ascii=False` rather than against an exposure that exists now.
     """
     try:
         return json.loads(path.read_text(encoding="utf-8"))

@@ -60,7 +60,30 @@ object NetCdfReader:
   private def readFrom(hdf: HdfFile, schema: Schema, name: String): Network =
     val datasets = hdf.getChildren.asScala.collect { case (n, d: Dataset) => n -> d }.toMap
 
-    val snapshots = readSnapshots(datasets)
+    // Two shapes of index. A multi-period file has `period` and `timestep` and
+    // no `snapshot`, so it is detected by what it carries rather than by a flag:
+    // the flag PyPSA writes into `network.csv` reads `_multi_invest = 0` even on
+    // `investment-periods`, so trusting it would refuse the file that has one.
+    val snapshotPeriods = readSnapshotPeriods(datasets)
+    val snapshots =
+      if snapshotPeriods.isEmpty then readSnapshots(datasets)
+      else readSnapshotTimesteps(datasets)
+
+    if snapshotPeriods.nonEmpty && snapshots.length != snapshotPeriods.length then
+      throw new MalformedNetwork(
+        s"snapshots_timestep has ${snapshots.length} entries against " +
+          s"${snapshotPeriods.length} in snapshots_period; they index the same axis"
+      )
+
+    val periods = datasets.get("investment_periods").map(labels).getOrElse(IndexedSeq.empty)
+    val periodWeightings = ListMap.from(
+      datasets.toIndexedSeq
+        .collect {
+          case (n, d) if n.startsWith("investment_periods_") =>
+            n.drop("investment_periods_".length) -> IArray.from(doubles(d))
+        }
+        .sortBy(_._1)
+    )
     // Discovered, not enumerated. `CsvReader` reads every non-label column of
     // snapshots.csv as a weighting, so hardcoding three names here would drop a
     // fourth that PyPSA adds -- and the two readers would then disagree about a
@@ -102,6 +125,9 @@ object NetCdfReader:
       snapshots = snapshots,
       tables = ListMap.from(tables.sortBy(_._1)),
       snapshotWeightings = weightings,
+      snapshotPeriods = snapshotPeriods,
+      investmentPeriods = periods,
+      investmentPeriodWeightings = periodWeightings,
     )
 
   private def readTable(
@@ -168,6 +194,29 @@ object NetCdfReader:
       "snapshots_snapshot",
       throw new MalformedNetwork("the file has no snapshots_snapshot dataset"),
     )
+    decodeSnapshots(d)
+
+  /** The period half of a multi-period index, or empty.
+    *
+    * A multi-period export carries `snapshots_period` and `snapshots_timestep`
+    * and '''no''' `snapshots_snapshot` at all, which is why the reader used to
+    * refuse these files outright rather than mis-read them. Both halves are
+    * plain values here -- no CF units -- since a period is a year and a timestep
+    * is whatever the caller indexed by.
+    */
+  private def readSnapshotPeriods(datasets: Map[String, Dataset]): IndexedSeq[String] =
+    datasets.get("snapshots_period").map(labels).getOrElse(IndexedSeq.empty)
+
+  private def readSnapshotTimesteps(datasets: Map[String, Dataset]): IndexedSeq[String] =
+    datasets.get("snapshots_timestep").map(decodeSnapshots).getOrElse(IndexedSeq.empty)
+
+  /** Values as text, without CF decoding — for an axis that is not time. */
+  private def labels(d: Dataset): IndexedSeq[String] =
+    d.getData match
+      case a: Array[String] => a.toIndexedSeq
+      case _                => longs(d).map(_.toString)
+
+  private def decodeSnapshots(d: Dataset): IndexedSeq[String] =
     val units = attribute(d, "units")
 
     units match

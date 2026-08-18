@@ -1388,38 +1388,107 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assert(free < budgeted - 1.0, s"stripping the budgets changed nothing: $free against $budgeted")
   }
 
-  test("a multi-period network is refused rather than solved as one period") {
+  test("a multi-period network matches PyPSA's, build years and all") {
     assume(available, "goldens missing")
     // `investment_periods.csv` was in the reader's set of non-component files
     // and nothing else read it, so a multi-period network reached the builder
     // looking like an ordinary one. `new` has build_year 2040 and does not
     // exist in 2030; solved flat it ran there anyway, for 2,000 against PyPSA's
     // 17,000. Found by asking what the reader skips, not what the code refuses.
+    val expected = results("investment-periods")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
     val n = network("investment-periods")
     assertEquals(n.investmentPeriods, IndexedSeq("2030", "2040"),
       "the reader no longer picks up the investment periods")
+    // The reader used to take the label from the first column after the index,
+    // which on a `,period,timestep,...` file is `period` -- so the four
+    // snapshots came back as two pairs of duplicates and `timestep` was parsed
+    // as a weighting. Both halves now land where they belong.
+    assertEquals(n.snapshotPeriods, IndexedSeq("2030", "2030", "2040", "2040"), "snapshot periods")
+    assertEquals(n.snapshots, IndexedSeq("0", "1", "0", "1"), "snapshot timesteps")
+    assert(!n.snapshotWeightings.contains("timestep"), "timestep is being read as a weighting")
 
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    assert(failure.getMessage.contains("investment period"), failure.getMessage)
-    assert(failure.getMessage.contains("2040"), failure.getMessage)
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val p      = expected("generator_p")
+    val prices = expected("bus_marginal_price")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      // The price is unique here -- one bus, one marginal unit per period -- so
+      // it is a target rather than one vertex of a dual face, unlike
+      // `ac-dc-dispatch`. It also carries the period weighting, which is 1.0 on
+      // this fixture and so cannot be checked by it; the mutation below does.
+      assertEqualsDouble(result.marginalPrice("b", t), frameValue(prices, t, "b"), 1e-4,
+        s"marginal price at snapshot $t")
+    }
   }
 
-  test("the multi-period refusal is not gratuitous: the flat answer is wrong") {
+  test("the build-year window is what makes it dear, and it is a window") {
     assume(available, "goldens missing")
-    // Guarding the refusal, as for `committable`. Stripping the periods is
-    // exactly what solving it flat amounted to, and the gap it leaves is the
-    // benefit the refusal buys: PyPSA's 17,000 against a flat 2,000, because
-    // the cheap unit runs a period before it is built.
+    // The discriminating half. The comparison above passes against an
+    // implementation that ignored `lifetime` entirely, since `new` is built in
+    // the last period and `old` never retires -- so each end of the window gets
+    // its own mutation.
     val target = results("investment-periods")("optimize")("objective").num
     assertEqualsDouble(target, 17000.0, 1e-6)
 
-    val flat = Lopf.solve(network("investment-periods").copy(investmentPeriods = IndexedSeq.empty), params)
-    assertEquals(flat.status, SolveStatus.Optimal, s"${flat.solution}")
-    assert(
-      flat.objective < target - 1.0,
-      s"solving it flat gives ${flat.objective}, not below PyPSA's $target -- so the refusal " +
-        "blocks a network this port would have got right",
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("investment-periods", "generators.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // Building the cheap unit a period earlier lets it run in 2030 too: the
+    // 2,000 this port used to return by ignoring the build year altogether.
+    assertEqualsDouble(
+      solved(setColumn(_, "build_year", (id, y) => if id == "new" then "2030" else y)),
+      2000.0, 1e-4, "the build year is not restricting anything")
+
+    // And retiring the expensive unit before the first period makes 2030
+    // infeasible -- nothing else can serve the load -- so a lifetime of 1 from
+    // build year 0 has to actually close the window. Reported as a failure to
+    // solve rather than as a number, which is the point: `lifetime` is read.
+    val retired = Lopf.solve(
+      mutate("investment-periods", "generators.csv",
+             setColumn(_, "lifetime", (id, l) => if id == "old" then "1.0" else l)),
+      params,
     )
+    assertNotEquals(retired.status, SolveStatus.Optimal,
+      s"retiring the only 2030 unit still solves, so lifetime is not read: ${retired.objective}")
+  }
+
+  test("a period's objective weighting discounts everything in it") {
+    assume(available, "goldens missing")
+    // `investment_periods.csv` carries `objective` beside the label and it is
+    // the discount factor for the period. Both are 1.0 on the fixture, which is
+    // exactly where reading it or not cannot be told apart -- so this halves the
+    // second period's and checks the objective moves by the second period's
+    // share alone.
+    //
+    // 16,000 of the 17,000 is 2030 and 1,000 is 2040, so halving 2040 gives
+    // 16,500 rather than 8,500.
+    val halved = Lopf.solve(
+      mutate("investment-periods", "investment_periods.csv",
+             setColumn(_, "objective", (p, w) => if p == "2040" then "0.5" else w)),
+      params,
+    )
+    assertEquals(halved.status, SolveStatus.Optimal, s"${halved.solution}")
+    assertEqualsDouble(halved.objective, 16500.0, 1e-4,
+      "the period objective weighting is not scaling that period's costs")
+
+    // And the price is divided by the same product, so it is unchanged by the
+    // discounting rather than halved with it. PyPSA divides its own prices by
+    // the snapshot weighting times the period weighting; dividing by only the
+    // snapshot half leaves a discounted price that looks entirely plausible.
+    assertEqualsDouble(halved.marginalPrice("b", 2), 5.0, 1e-4,
+      "the nodal price is not being divided by the period weighting")
   }
 
   test("a delayed link matches PyPSA's") {

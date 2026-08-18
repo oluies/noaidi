@@ -336,12 +336,24 @@ object UnitCommitment:
     // vanishes -- a load disappears and the schedule comes out cheaper, with no
     // diagnostic. `Lopf` guards this through the same helper; leaving one entry
     // point loud and the other silently wrong is the thing to avoid.
-    // Multi-period networks, for the same reason `Lopf` refuses them: the
-    // commitment horizon here is a flat run of snapshots, and a network whose
-    // snapshots are `(period, timestep)` pairs would be committed across build
-    // years as though every unit existed throughout. Shared with `Lopf` so the
-    // two cannot drift apart -- a single-bus multi-period network reaches this
-    // entry point and not that one.
+    // Multi-period networks. `Lopf` models them now; this does not, and the
+    // difference is deliberate rather than pending. The commitment horizon here
+    // is a flat run of snapshots -- minimum up and down times, start-up and
+    // shut-down costs and the `up_time_before` seed all chain across it -- and a
+    // unit that does not exist for part of that run has no defined status at
+    // those snapshots. Pinning its dispatch to zero, which is what `Lopf` does,
+    // leaves the *status* variable free to sit at 1 and collect a start-up cost
+    // for a unit that was never built.
+    //
+    // So the shared refusal is gone and this is its own, which is the honest
+    // shape: a network `Lopf` accepts and this one does not.
+    if network.isMultiPeriod then
+      throw new UnsupportedNetwork(
+        s"network declares investment period(s) ${network.investmentPeriods.mkString(", ")} and " +
+          "a committable unit; commitment chains minimum up and down times across a flat horizon, " +
+          "and a unit outside its build year has no status there. Lopf models multi-period " +
+          "dispatch, but not with commitment"
+      )
     Periods.reject(network, m => throw new UnsupportedNetwork(m))
 
     Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>

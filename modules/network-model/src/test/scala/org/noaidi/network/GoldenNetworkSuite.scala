@@ -84,9 +84,7 @@ class GoldenNetworkSuite extends munit.FunSuite:
     * such fixture is covered without anyone remembering to add it.
     */
   private lazy val goldenNetworks: List[String] =
-    manifest("networks").obj.collect {
-      case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name
-    }.toList.sorted
+    manifest("networks").obj.keys.toList.sorted
 
   goldenNetworks.foreach { name =>
     test(s"$name loads with the component counts PyPSA reported") {
@@ -105,7 +103,15 @@ class GoldenNetworkSuite extends munit.FunSuite:
       // because a snapshot label need not be a timestamp at all. `ac-pf-pv` uses
       // plain integers, and rendering those as JSON numbers described the
       // in-memory index rather than the file.
-      assertEquals(n.snapshots, expectedSnapshots, s"$name: snapshot labels")
+      // Through `snapshotLabel` rather than `snapshots` directly, because a
+      // multi-period index has two halves and the manifest records the pair as
+      // Python prints it. On a flat index this is the label unchanged, so the
+      // check is no weaker for the twenty-one networks that have one.
+      assertEquals(
+        n.snapshots.indices.map(n.snapshotLabel).toIndexedSeq,
+        expectedSnapshots,
+        s"$name: snapshot labels",
+      )
 
       expected("components").obj.foreach { (componentName, info) =>
         val table = n.table(componentName)

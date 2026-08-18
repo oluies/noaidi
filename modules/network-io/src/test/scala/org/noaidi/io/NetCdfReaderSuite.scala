@@ -38,7 +38,7 @@ class NetCdfReaderSuite extends munit.FunSuite:
     ujson
       .read(Files.readString(goldens.resolve("manifest.json")))("networks")
       .obj
-      .collect { case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name }
+      .keys
       .toList
       .sorted
 

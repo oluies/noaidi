@@ -1214,17 +1214,18 @@ def capture_network(name: str, build) -> dict:
         # in-memory index rather than the file it is supposed to be checked
         # against.
         "snapshots": [str(s) for s in n.snapshots],
-        # Multi-period networks are marked so the model-level suites can skip
-        # them by data rather than by name. Their snapshots are `(period,
-        # timestep)` pairs, which the port's `Network` does not represent: it
-        # carries a flat list of labels, so the CSV reader takes the `period`
-        # column and produces duplicates, the writer cannot reproduce the file,
-        # and the netCDF export has no `snapshots_snapshot` dataset to read.
+        # Multi-period networks are marked. This used to be a *skip* flag: their
+        # snapshots are `(period, timestep)` pairs and the port's `Network` held
+        # a flat list of labels, so the CSV reader took the `period` column and
+        # produced duplicates, the writer could not reproduce the file, and the
+        # netCDF export has no `snapshots_snapshot` dataset at all. Three suites
+        # excluded them on this flag.
         #
-        # That is not an oversight the fixture should paper over. It is the
-        # reason `Periods.reject` refuses these networks, and the marker keeps
-        # the refusal's evidence -- PyPSA's own answer -- in the goldens without
-        # claiming the model layer can hold one.
+        # `Network.snapshotPeriods` carries the other half now and all three
+        # suites cover these fixtures, so nothing skips on it. Kept because it is
+        # a true and useful description of the fixture, and because a reader of
+        # the manifest should be able to tell which networks have periods without
+        # parsing snapshots.csv.
         "multi_period": len(getattr(n, "investment_periods", [])) > 0,
         "components": {},
     }

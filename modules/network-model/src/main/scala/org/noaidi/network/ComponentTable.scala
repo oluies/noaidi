@@ -155,27 +155,94 @@ final case class Network(
       * representative-period study is expressed.
       */
     snapshotWeightings: ListMap[String, IArray[Double]] = ListMap.empty,
+    /** The investment period each snapshot belongs to, or empty.
+      *
+      * A multi-period network's snapshot index is a `(period, timestep)` pair.
+      * `snapshots` holds the timestep half and this holds the period half, one
+      * entry per snapshot — the same parallel-array shape `snapshotWeightings`
+      * already uses, with the same invariant checked below rather than assumed.
+      *
+      * Held beside the labels rather than folded into them because the timestep
+      * half is '''not unique''' across periods: `investment-periods` has
+      * timesteps `0, 1, 0, 1`. Every consumer indexes snapshots positionally, so
+      * that costs nothing — but a reader that took `snapshots` for a key would
+      * be wrong, which is why the two halves are separate fields instead of a
+      * joined string nobody can safely split.
+      */
+    snapshotPeriods: IndexedSeq[String] = IndexedSeq.empty,
     /** Investment periods, if the network has any.
       *
-      * Empty for an ordinary single-period network, which is every fixture in
-      * this repository. A non-empty list changes what the snapshots mean: they
-      * become `(period, timestep)` pairs, assets become active or inactive per
-      * period according to `build_year` and `lifetime`, and costs are weighted
-      * and discounted per period.
-      *
-      * Recorded rather than modelled. `investment_periods.csv` was previously
-      * skipped as a non-component file and nothing else read it, so a
-      * multi-period network was solved as though it were one period — on a
-      * two-period network whose cheap generator is built in the second, that is
-      * 2,000 against PyPSA's 17,000, because the generator ran ten years before
-      * it existed. The solve layers refuse it; this field is how they can tell.
+      * Empty for an ordinary single-period network. A non-empty list changes
+      * what the snapshots mean: they become `(period, timestep)` pairs, assets
+      * become active or inactive per period according to `build_year` and
+      * `lifetime`, and costs are weighted and discounted per period.
       */
     investmentPeriods: IndexedSeq[String] = IndexedSeq.empty,
+    /** Per-period weightings, keyed by the column name PyPSA uses.
+      *
+      * `investment_periods.csv` carries `objective` and `years` beside the
+      * period label and they are not decoration: `objective` is the discount
+      * factor every cost in that period is multiplied by, and `years` is how
+      * many years the period stands for, which is what a global constraint sums
+      * against. Reading only the labels and pricing every period alike is a
+      * silent mis-cost, so both are carried.
+      */
+    investmentPeriodWeightings: ListMap[String, IArray[Double]] = ListMap.empty,
 ):
+  // `Predef.require`, spelled out: this class defines its own `require(String)`
+  // for component lookup, which shadows it and turns the invariant into a
+  // component name nobody asked for.
+  Predef.require(
+    snapshotPeriods.isEmpty || snapshotPeriods.length == snapshots.length,
+    s"network '$name' has ${snapshotPeriods.length} snapshot period(s) for " +
+      s"${snapshots.length} snapshot(s); they index the same axis",
+  )
+
   def snapshotCount: Int = snapshots.length
 
   def weighting(kind: String, snapshot: Int): Double =
     snapshotWeightings.get(kind).map(_(snapshot)).getOrElse(1.0)
+
+  /** Whether the snapshot index is `(period, timestep)` rather than flat. */
+  def isMultiPeriod: Boolean = snapshotPeriods.nonEmpty
+
+  /** The investment period a snapshot belongs to, or `None` on a flat index. */
+  def periodOf(snapshot: Int): Option[String] =
+    if snapshotPeriods.isEmpty then None else Some(snapshotPeriods(snapshot))
+
+  /** One snapshot as a single label, the way PyPSA prints its index entry.
+    *
+    * `str()` on a `(period, timestep)` pair gives Python's tuple form, and that
+    * is what the goldens' manifest records, so this renders the same thing. It
+    * is for reporting and for comparison against that manifest — never for
+    * keying, since the two halves are separate fields precisely so nobody has to
+    * parse this back apart.
+    */
+  def snapshotLabel(snapshot: Int): String =
+    periodOf(snapshot) match
+      case Some(period) => s"($period, ${snapshots(snapshot)})"
+      case None         => snapshots(snapshot)
+
+  /** A period's weighting, defaulting to 1.0 exactly as the snapshot one does.
+    *
+    * Looked up by label rather than by position: the periods a network declares
+    * and the periods its snapshots use are two different lists, and PyPSA
+    * tolerates a declared period no snapshot belongs to.
+    */
+  def periodWeighting(kind: String, period: String): Double =
+    val at = investmentPeriods.indexOf(period)
+    if at < 0 then 1.0
+    else investmentPeriodWeightings.get(kind).map(_(at)).getOrElse(1.0)
+
+  /** The objective weighting of the period a snapshot sits in, or 1.0.
+    *
+    * PyPSA multiplies the snapshot's own objective weighting by this one, so
+    * every cost and every nodal price carries the product. Kept here rather
+    * than in the solver because both the LP build and the price recovery need
+    * it and they must not disagree.
+    */
+  def periodObjectiveWeighting(snapshot: Int): Double =
+    periodOf(snapshot).map(periodWeighting("objective", _)).getOrElse(1.0)
 
   /** Table for a component type, by name or by PyPSA's plural list name. */
   def table(component: String): Option[ComponentTable] =

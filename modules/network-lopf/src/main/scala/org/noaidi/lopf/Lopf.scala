@@ -76,7 +76,8 @@ object Lopf:
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
-    val network = Active.only(StandardTypes.expand(input))
+    val expanded = StandardTypes.expand(input)
+    val network  = Active.only(expanded)
     rejectUnhandled(network)
     rejectDanglingBuses(network)
     // Before everything else that reads a snapshot. A multi-period network's
@@ -87,7 +88,14 @@ object Lopf:
     Periods.reject(network, m => throw new UnsupportedNetwork(m))
     // Only the delays PyPSA's own consistency check refuses. The rest are
     // modelled -- see `Delays`, and the shift applied in the balance rows below.
-    Delays.reject(network, m => throw new UnsupportedNetwork(m))
+    //
+    // On `expanded`, before `Active.only`. `check_dispatch_delays` reads
+    // `component.static` with no activity filter, so PyPSA raises on an inactive
+    // link with a negative or over-long delay while this port, given the filtered
+    // network, dropped the row and returned `Optimal`. The point of reproducing
+    // the check is to agree about which networks *have* an answer, and that
+    // agreement has to hold for the rows PyPSA actually looks at.
+    Delays.reject(expanded, m => throw new UnsupportedNetwork(m))
     // Ahead of `Expansion.reject`, which used to carry the committable half of
     // this itself for the extendable case only. One refusal rather than three
     // partial ones: the narrower checks each described a different fragment of
@@ -168,11 +176,28 @@ object Lopf:
     /** Whether this entity's operational bounds come from a variable. */
     def extendable(table: ComponentTable, id: String): Boolean = Expansion.isExtendable(table, id)
 
+    /** Zero bounds for an asset that does not exist at this snapshot.
+      *
+      * A multi-period asset is present only between its `build_year` and the
+      * end of its `lifetime`. PyPSA masks its variables outside that window;
+      * pinning the column to `[0, 0]` is the same restriction without a second
+      * column layout, which matters because `Sclopf` copies this model's rows
+      * one for one. The bound replaces `p_min_pu` as well as `p_max_pu` -- a
+      * must-run unit that does not exist yet must be off, not at its floor.
+      */
+    def activeBounds(table: ComponentTable, id: String, t: Int, lo: Double, hi: Double)
+        : (Double, Double) =
+      if Periods.activeAt(network, table, id, t) then (math.min(lo, hi), math.max(lo, hi))
+      else (0.0, 0.0)
+
     snapshots.foreach { t =>
       // The objective weighting scales this snapshot's cost. It is not
       // decoration: a representative-period study expresses itself entirely
       // through these, and ignoring them silently rescales the objective.
-      val weight = network.weighting("objective", t)
+      //
+      // On a multi-period network it carries the period's discount factor too --
+      // see `Periods.objectiveWeight`, which the price recovery divides by.
+      val weight = Periods.objectiveWeight(network, t)
 
       // An extendable entity's limits move out of its column and into two rows
       // per snapshot, against the capacity variable. So the column itself is
@@ -185,10 +210,10 @@ object Lopf:
           if extendable(g, id) then
             declare(g.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
           else
-            val pNom = g.float("p_nom", id)
-            val lo   = pNom * g.valueAt("p_min_pu", id, t)
-            val hi   = pNom * g.valueAt("p_max_pu", id, t)
-            declare(g.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+            val pNom     = g.float("p_nom", id)
+            val (lo, hi) = activeBounds(g, id, t, pNom * g.valueAt("p_min_pu", id, t),
+                                  pNom * g.valueAt("p_max_pu", id, t))
+            declare(g.spec.name, id, t, lo, hi, cost): Unit
         }
       }
 
@@ -203,8 +228,9 @@ object Lopf:
           if extendable(branch, id) then
             declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, 0.0): Unit
           else
-            val limit = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
-            declare(branch.spec.name, id, t, -limit, limit, 0.0): Unit
+            val limit    = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
+            val (lo, hi) = activeBounds(branch, id, t, -limit, limit)
+            declare(branch.spec.name, id, t, lo, hi, 0.0): Unit
         }
       }
 
@@ -214,10 +240,10 @@ object Lopf:
           if extendable(branch, id) then
             declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
           else
-            val pNom = branch.float("p_nom", id)
-            val lo   = pNom * branch.valueAt("p_min_pu", id, t)
-            val hi   = pNom * branch.valueAt("p_max_pu", id, t)
-            declare(branch.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+            val pNom     = branch.float("p_nom", id)
+            val (lo, hi) = activeBounds(branch, id, t, pNom * branch.valueAt("p_min_pu", id, t),
+                                  pNom * branch.valueAt("p_max_pu", id, t))
+            declare(branch.spec.name, id, t, lo, hi, cost): Unit
         }
       }
 
@@ -622,7 +648,13 @@ object Lopf:
         // comparison here can see the difference -- which is exactly why it has to
         // be read rather than assumed.
         val terms = snapshots.flatMap { t =>
-          val weight = network.weighting("generators", t)
+          // `years`, not `objective`, on the period half. PyPSA scales an
+          // emissions sum by how many years the period stands for -- it is a
+          // quantity of gas, not a cost to discount -- while every other
+          // per-period factor in this builder is the objective weighting. Two
+          // columns of one small file that are easy to swap.
+          val weight = network.weighting("generators", t) *
+            network.periodOf(t).map(network.periodWeighting("years", _)).getOrElse(1.0)
           generators.flatMap { g =>
             g.ids.flatMap { gid =>
               val intensity  = carrierAttribute(network, g.string("carrier", gid), attribute)
@@ -795,4 +827,10 @@ final case class LopfResult(
     )
     // Recovered through the row translation, so the sign convention matches the
     // constraint as it was written rather than as the solver reordered it.
-    model.translation.originalDuals(solution.dual)(row) / network.weighting("objective", snapshot)
+    //
+    // Divided by the same weight the costs were multiplied by, period factor
+    // included -- PyPSA divides its own prices by `snapshot_weightings.objective`
+    // multiplied by the period weighting at level 0. Dividing by only the
+    // snapshot half would leave every price in a discounted period scaled by the
+    // discount factor, which looks like a plausible price.
+    model.translation.originalDuals(solution.dual)(row) / Periods.objectiveWeight(network, snapshot)

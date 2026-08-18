@@ -57,13 +57,18 @@ import org.noaidi.network.*
   * `p0` — so the constraint is the only convention that has to be matched, and
   * it is the one the objective and the dispatch come from.
   *
-  * ==One case this does not cover==
+  * ==Per investment period==
   *
-  * PyPSA applies a delay '''per investment period''', since periods are not
-  * temporally adjacent, and the horizon it measures against is a single period's
-  * rather than the whole index. That is not built here, and it does not need a
-  * guard of its own: `Periods.reject` runs ahead of [[reject]] in `Lopf.build`,
-  * so a multi-period network never reaches this.
+  * PyPSA applies a delay '''within''' each investment period, because periods
+  * are not temporally adjacent — energy leaving in the last snapshot of 2030
+  * does not arrive in the first snapshot of 2040, ten years later. Each period's
+  * snapshots form their own horizon: their own `tau`, their own wrap, their own
+  * validity mask, with the resulting indices offset back into the flat array.
+  *
+  * This was a documented non-case until multi-period stopped being refused. It
+  * is built now rather than re-refused, because the difference from the
+  * single-period path is which slice `tau` is computed over — the same walk, run
+  * once per period instead of once.
   */
 object Delays:
 
@@ -72,6 +77,10 @@ object Delays:
 
     /** The snapshot whose inflow arrives at `t`, or `None` if nothing does. */
     def sourceOf(t: Int): Option[Int] = if valid(t) then Some(source(t)) else None
+
+    /** Positions relative to the block this was computed over, for assembly. */
+    private[Delays] def rawSource(i: Int): Int      = source(i)
+    private[Delays] def rawValid(i: Int): Boolean   = valid(i)
 
   /** The shift for every delayed `(entity, port)` in a table.
     *
@@ -87,6 +96,7 @@ object Delays:
       // the walk is linear in the horizon, and a year-long network has 8760
       // snapshots.
       val durations = network.snapshots.indices.map(t => network.weighting("generators", t))
+      val blocks    = periodBlocks(network)
       ports.flatMap { port =>
         configured(table, port) match
           case None => IndexedSeq.empty
@@ -96,10 +106,31 @@ object Delays:
               .groupBy(id => (delayOf(id), cyclicOf(id)))
               .toIndexedSeq
               .flatMap { case ((delay, cyclic), ids) =>
-                val shift = positions(durations, delay, cyclic)
+                val shift = positions(durations, blocks, delay, cyclic)
                 ids.map(id => (id, port) -> shift)
               }
       }.toMap
+
+  /** The snapshot ranges each investment period occupies, in order.
+    *
+    * One block covering everything on a flat index, which is what makes the
+    * per-period path and the single-period path the same code. PyPSA reads the
+    * blocks off a sorted MultiIndex, so they are contiguous; this checks that
+    * rather than assuming it, since an interleaved index would silently give
+    * every period a horizon made of somebody else's snapshots.
+    */
+  private def periodBlocks(network: Network): IndexedSeq[Range] =
+    if !network.isMultiPeriod then IndexedSeq(network.snapshots.indices)
+    else
+      val periods = network.snapshotPeriods
+      val starts  = periods.indices.filter(i => i == 0 || periods(i) != periods(i - 1))
+      val blocks  = starts.zip(starts.tail :+ periods.length).map((from, to) => from until to)
+      if blocks.map(b => periods(b.head)).distinct.length != blocks.length then
+        throw new Lopf.UnsupportedNetwork(
+          "the snapshots of an investment period are not contiguous; a delay measures elapsed " +
+            "time within one period, and a period interleaved with another has no such horizon"
+        )
+      blocks
 
   /** Refuse a delay PyPSA's own consistency check refuses.
     *
@@ -116,7 +147,12 @@ object Delays:
     * inert.
     */
   def reject(network: Network, refuse: String => Nothing): Unit =
-    val horizon = network.snapshots.indices.map(t => network.weighting("generators", t)).sum
+    // The *shortest* period's horizon on a multi-period network, which is what
+    // `check_dispatch_delays` takes the min over -- a delay has to fit inside
+    // every period, since each is its own horizon, and one that fits only the
+    // longest would be inert in the others.
+    val durations = network.snapshots.indices.map(t => network.weighting("generators", t))
+    val horizon   = periodBlocks(network).map(b => b.map(durations).sum).min
     network.tables.values.foreach { table =>
       // Branches only, and by role rather than by name. `branchPorts` throws on
       // a table with no `bus0` column, which every one-port component is, so the
@@ -175,7 +211,27 @@ object Delays:
       // PyPSA's default, and the one flag here that defaults on.
       val cyclicOf: String => Boolean =
         if declares(table, cyclic) then id => table.bool(cyclic, id) else _ => true
-      Some((id => table.int(delay, id), cyclicOf))
+      Some((id => wholeNumber(table, delay, id), cyclicOf))
+
+  /** A delay as an integer, whichever column type it arrived in.
+    *
+    * `Link.delay` is a declared `int`, so the reader types it `Ints`. `delay2`
+    * and later are '''not schema attributes''' -- they are custom columns, the
+    * same as `efficiency2` -- and the reader infers every numeric custom column
+    * as `Floats`. So `table.int` threw `delay2 is Float, not an int` on a
+    * perfectly ordinary three-port link, which is a crash rather than an answer.
+    *
+    * Truncated toward zero on a fractional value rather than refused, because
+    * that is what PyPSA does: `_iter_balance_args` groups on the raw column and
+    * then calls `int(d)`.
+    */
+  private def wholeNumber(table: ComponentTable, attribute: String, id: String): Int =
+    table.static.get(attribute) match
+      case Some(Column.Ints(v))   => v(table.row(id))
+      case Some(Column.Floats(v)) =>
+        val value = v(table.row(id))
+        if value.isNaN then 0 else value.toInt
+      case _ => table.int(attribute, id)
 
   private def delayAttribute(port: String): String =
     if port == "bus1" then "delay" else s"delay${port.drop(3)}"
@@ -188,7 +244,31 @@ object Delays:
     * `tau` holds the elapsed time at which each snapshot begins, so `tau(0)` is
     * 0 and the last snapshot's own duration is never part of it.
     */
-  private def positions(durations: IndexedSeq[Double], delay: Int, cyclic: Boolean): Shift =
+  private def positions(
+      durations: IndexedSeq[Double],
+      blocks: IndexedSeq[Range],
+      delay: Int,
+      cyclic: Boolean,
+  ): Shift =
+    val source = new Array[Int](durations.length)
+    val valid  = new Array[Boolean](durations.length)
+    // Once per investment period, each its own horizon, with the resulting
+    // indices offset back into the flat array -- `p_src + offset` in PyPSA. One
+    // block on a flat index, so this is the ordinary path too.
+    blocks.foreach { block =>
+      val within = positionsWithin(block.map(durations), delay, cyclic)
+      block.zipWithIndex.foreach { (t, i) =>
+        source(t) = block.head + within.rawSource(i)
+        valid(t) = within.rawValid(i)
+      }
+    }
+    Shift(source, valid)
+
+  private def positionsWithin(
+      durations: IndexedSeq[Double],
+      delay: Int,
+      cyclic: Boolean,
+  ): Shift =
     val n     = durations.length
     val tau   = new Array[Double](n)
     var total = 0.0

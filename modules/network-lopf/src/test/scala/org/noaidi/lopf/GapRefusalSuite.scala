@@ -55,13 +55,24 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   /** A copy of a golden network with one file rewritten, read back through the
     * real parse path.
     */
-  private def mutate(name: String, file: String, edit: String => String): Network =
+  /** A copy of a golden network's directory, for the mutations below. */
+  private def copyOf(name: String): Path =
     val dir = Files.createTempDirectory("noaidi-gap-")
     temporaries += dir
     val source = goldens.resolve("networks").resolve(name)
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
     }
+    dir
+
+  /** A golden network with one file added, for a component it does not carry. */
+  private def withExtraFile(name: String, file: String, content: String): Network =
+    val dir = copyOf(name)
+    Files.writeString(dir.resolve(file), content)
+    CsvReader.read(dir, schema, name)
+
+  private def mutate(name: String, file: String, edit: String => String): Network =
+    val dir    = copyOf(name)
     val target = dir.resolve(file)
     val before = Files.readString(target)
     val after  = edit(before)
@@ -124,8 +135,30 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   }
 
   // Whole features, refused as networks rather than as attributes.
-  refuses("multi-investment periods", "investment period")(network("investment-periods"))
   refuses("committable units", "committable")(network("unit-commitment"))
+
+  // `multi-investment periods` was here as one blanket refusal. `Lopf` models
+  // multi-period dispatch now, so the case is gone and what replaces it is the
+  // narrower set: the parts whose *formulation* differs rather than merely their
+  // weighting. Each is a mutation of the one multi-period fixture, so none of
+  // them is unreachable-by-construction.
+  refuses("capacity expansion across investment periods", "extendable") {
+    mutate("investment-periods", "generators.csv", setColumn(_, "p_nom_extendable", "True"))
+  }
+  refuses("Carrier max_growth between periods", "max_growth") {
+    withExtraFile("investment-periods", "carriers.csv", "name,max_growth\nAC,100.0\n")
+  }
+  refuses("per-period storage cycling", "cyclic_state_of_charge_per_period") {
+    withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,cyclic_state_of_charge_per_period\ns,b,10.0,4.0,True\n",
+    )
+  }
+  refuses("a snapshot in an undeclared period", "does not declare") {
+    mutate("investment-periods", "snapshots.csv",
+           setColumn(_, "period", (i, p) => if i == "3" then "2050" else p))
+  }
   // `Link delay` was here. `Delays` implements it, so the case is gone rather
   // than reworded -- the same way three transformer cases went when the AC model
   // was written. What replaced it is a golden comparison on `link-delay` and

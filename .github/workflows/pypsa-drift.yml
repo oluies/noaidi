@@ -278,12 +278,26 @@ jobs:
             if [ -f drift.md ]; then cat drift.md; fi
             if [ -f sweep-report.txt ]; then
               echo
-              echo "## The sweep failed against the newest schema"
-              echo
-              echo "\`SchemaSweepSuite\` names what is unaccounted for. An added input"
-              echo "attribute is one a network may now set that nothing in this port reads —"
-              echo "the shape of every silent wrong answer the original sweep turned up. A"
-              echo "removed one orphans the ruling that explained why it was safe to ignore."
+              # The same two-way split the issue makes. This is the artefact a
+              # reader reaches *first*, and it was heading a local build failure
+              # with "The sweep failed against the newest schema" above a
+              # paragraph about added input attributes -- the exact conflation
+              # the issue step was fixed to stop making, left standing one step
+              # earlier.
+              if [ "${{ steps.sweep.outputs.harness }}" = "broken" ]; then
+                echo "## Why the sweep could not run"
+                echo
+                echo "This is a failure of this repository's own harness. The sweep did not run,"
+                echo "so nothing here says whether the newest schema declares anything unaccounted"
+                echo "for."
+              else
+                echo "## The sweep failed against the newest schema"
+                echo
+                echo "\`SchemaSweepSuite\` names what is unaccounted for. An added input"
+                echo "attribute is one a network may now set that nothing in this port reads —"
+                echo "the shape of every silent wrong answer the original sweep turned up. A"
+                echo "removed one orphans the ruling that explained why it was safe to ignore."
+              fi
               echo
               echo '```'
               cat sweep-report.txt
@@ -351,7 +365,14 @@ jobs:
               echo "attribute nothing in this port reads — did not run, so there is no answer to"
               echo "that question this week, either way."
               echo
-              if [ -f drift.md ]; then
+              # Gated on the *step's* own signal, not on the file existing.
+              # `drift.md` is created by the redirection at the top of the diff
+              # step, so it exists even when `schema_drift.py` exits 2 and writes
+              # its reason to stderr -- and the claim "it did complete" would then
+              # sit above an empty region. `drifted` is written only after the
+              # status is known to be 0 or 1, which is exactly the condition under
+              # which the comparison produced an answer.
+              if [ -s drift.md ] && { [ "${DRIFTED:-}" = "true" ] || [ "${DRIFTED:-}" = "false" ]; }; then
                 echo "The registry comparison is a separate step and it did complete:"
                 echo
                 cat drift.md
@@ -361,10 +382,16 @@ jobs:
             fi
             if [ -f sweep-report.txt ]; then
               echo
-              if [ "$upstream" = true ]; then
-                echo "## The sweep failed against the newest schema"
-              else
+              # On `HARNESS`, not on `upstream`. The two can hold at once -- and a
+              # new release is arguably the most likely week for the sweep to
+              # break, since it is what changes the inputs. Headed by `upstream`,
+              # a run that both drifted and broke printed the harness reason under
+              # "The sweep failed against the newest schema", which says the sweep
+              # answered when it never ran.
+              if [ "${HARNESS:-}" = "broken" ]; then
                 echo "## Why the sweep could not run"
+              else
+                echo "## The sweep failed against the newest schema"
               fi
               echo
               echo '```'
@@ -375,8 +402,19 @@ jobs:
             if [ "$upstream" = true ]; then
               echo "To act on it: regenerate the goldens against the new pin as"
               echo "\`reference/README.md\` describes, and review the diff — a change in the"
-              echo "goldens *is* the compatibility break. Any new input attribute needs the"
-              echo "sweep's question asked of it and a line in \`SchemaSweepSuite\`."
+              echo "goldens *is* the compatibility break."
+              # Only claim the sweep has something to act on when it ran. A run
+              # that drifted *and* broke would otherwise be told to go and read a
+              # sweep result that does not exist.
+              if [ "${HARNESS:-}" = "broken" ]; then
+                echo
+                echo "The sweep did not run on this attempt, so no new input attribute has been"
+                echo "checked against \`SchemaSweepSuite\` — fix the harness and re-run before"
+                echo "treating the list above as complete."
+              else
+                echo "Any new input attribute needs the sweep's question asked of it and a line"
+                echo "in \`SchemaSweepSuite\`."
+              fi
             else
               echo "To act on it: fix the build or the workflow, then re-run the job. Until it"
               echo "runs, this repository has no weekly evidence either way about upstream."

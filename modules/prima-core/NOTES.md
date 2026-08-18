@@ -1079,19 +1079,23 @@ evidenced rather than asserted, and both refusals have a test that they are *not
 gratuitous*: solving each network the way the port used to gives an answer below
 PyPSA's, which is the benefit the refusal buys.
 
-`Link.delay` has since been implemented — see *Delays, and the one refusal that
-was cheaper to lift than to keep* below. Multi-period still stands.
+Both have since been implemented — `Link.delay` in *Delays, and the one refusal
+that was cheaper to lift than to keep*, and multi-period in *Investment periods,
+and a ledger entry that became a gap* below.
 
-### The model layer cannot hold a multi-period network, and now says so
+### The model layer could not hold a multi-period network, and said so
 
-`investment-periods` is the first golden the model-level suites skip. Its
-snapshots are `(period, timestep)` pairs; `Network` holds a flat list of labels,
-so the CSV cannot round-trip and the netCDF export has no `snapshots_snapshot`
+`investment-periods` was the first golden the model-level suites skipped. Its
+snapshots are `(period, timestep)` pairs; `Network` held a flat list of labels,
+so the CSV could not round-trip and the netCDF export has no `snapshots_snapshot`
 dataset to read. The manifest carries a `multi_period` flag and `GoldenNetwork`,
-`RoundTrip` and `NetCdfReader` skip on it — by data, so a second such fixture is
-covered automatically, and with the reason stated in each rather than a name in a
-list. That skip is the model-layer half of the same limitation `Periods.reject`
-enforces at the solve layer.
+`RoundTrip` and `NetCdfReader` skipped on it — by data, so a second such fixture
+would be covered automatically, and with the reason stated in each rather than a
+name in a list. That skip was the model-layer half of the same limitation
+`Periods.reject` enforced at the solve layer.
+
+All three cover it now; see below. The flag stays in the manifest as a
+description of the fixture, but nothing skips on it.
 
 ## The sweep itself, made permanent
 
@@ -1259,14 +1263,177 @@ The horizon is measured in weighting units too. On `link-delay-wrap` it is 8, no
 4, so a delay of 5 solves and one of 8 is refused — backwards under a
 snapshot-counting reading, and asserted in `LopfSuite` for that reason.
 
-### The power flow deliberately does not shift
+### The power flow deliberately does not shift, and nothing guards that
 
 PyPSA's `lpf` and `pf` write `p{i} = -p0 * efficiency` within one snapshot and
 never read `delay`; only the optimiser shifts it. So `LinearPowerFlow` and
-`NewtonRaphson` go on ignoring it, and both now say so at the call site. Applying
-it there would agree with PyPSA's optimiser and disagree with PyPSA's power flow,
-and the contract is the latter — `link-delay` and `link-delay-wrap` each carry an
-`lpf` block that would start failing.
+`NewtonRaphson` go on ignoring it, and both say so at the call site. Applying it
+there would agree with PyPSA's optimiser and disagree with PyPSA's power flow,
+and the contract is the latter.
+
+The first version of that comment claimed the two delay fixtures' `lpf` blocks
+would fail if this changed. **They would not**, on two counts: neither fixture is
+in `LinearPowerFlowSuite`'s network list, and — the decisive one — neither carries
+a link `p_set`, so the injection is zero at every snapshot and shifting a zero
+somewhere else changes nothing. A comment asserting a check that does not exist
+is the same failure as a gap on a list with no code site, which this file already
+names as a failure mode two sections up.
+
+Guarding it needs a delayed link with a non-zero `p_set`, and that is **blocked
+behind a gap found while trying to build one** — see below. Recorded as unguarded
+rather than quietly left claiming otherwise.
+
+### `<attr>_set` fixes dispatch, and this port reads none of it
+
+Trying to give a delay fixture a link `p_set` turned the LOPF answer from 500
+into 3,900. `define_fixed_operation_constraints` fixes a component's dispatch
+variable to its `_set` attribute, and its docstring lists **Generator (p), Line
+(s), Transformer (s), Link (p), Store (e), StorageUnit** — not just the two this
+port refuses.
+
+So `Generator.p_set`, `Link.p_set`, `Line.s_set` and `Transformer.s_set` are read
+by PyPSA's optimiser and by nothing here: on the two-bus probe above PyPSA fixes
+the link at 60 and pays 3,900, where this port leaves it free and pays 500. Same
+shape as the six the schema sweep found, and the sweep cannot see it — `p_set` is
+quoted in these sources for `Load` and for the StorageUnit refusal, so the
+bare-name match reads it as handled everywhere. The documented masking limitation,
+hiding a live defect rather than a harmless one.
+
+Not fixed here. It wants its own fixture and its own golden, like every other one
+of these, rather than being folded into a review-fix commit.
+
+### A third port's delay crashed rather than being read
+
+`delay2` and later are custom columns, not schema attributes — the same as
+`efficiency2` — and `CsvReader` infers every numeric custom column as `Floats`.
+`table.int` therefore threw `delay2 is Float, not an int` on an ordinary
+three-port link. Loud rather than silent, but a crash where PyPSA has an answer.
+
+Found by `DelaysSuite`, which exists because the multi-port suffix rule was
+written against PyPSA's source and then exercised by nothing: both goldens are
+two-port links, so `delayAttribute` was only ever driven with `bus1`. The suite
+builds three-port networks through `CsvReader` and checks that `delay2` is read
+under its own name, that `cyclic_delay2` defaults to wrapping when absent, and
+that an unsuffixed `delay` still belongs to `bus1` alone.
+
+## Investment periods, and a ledger entry that became a gap
+
+Multi-period was the other half of what the schema sweep found, and the one that
+stayed refused when `Link.delay` was implemented. It is modelled now: the model
+layer holds a `(period, timestep)` index, and `Lopf` masks assets by build year
+and weights costs by period.
+
+### The index is two halves, kept as two fields
+
+`Network.snapshots` holds the timestep labels and `snapshotPeriods` holds the
+period each belongs to, one entry per snapshot, with the length invariant checked
+in the constructor rather than assumed. That is the shape `snapshotWeightings`
+already had, which is why it was chosen over a `Snapshot` case class: fifteen
+call sites index snapshots positionally through `.snapshots.indices` and none of
+them had to change.
+
+The timestep half is **not unique** — `investment-periods` has timesteps
+`0, 1, 0, 1` — so anything that treated `snapshots` as a key would now be wrong.
+Keeping the halves in separate fields is what makes that a non-question; a joined
+`"(2030, 0)"` string would invite parsing it back apart. `snapshotLabel` renders
+the joined form for the one consumer that needs it, the manifest comparison,
+because `str()` on a pandas MultiIndex entry is Python's tuple repr and that is
+what the goldens record.
+
+### The reader had two bugs, and the second hid behind the first
+
+`readSnapshots` looked for a `snapshot` column and fell back to *column 1* when
+there wasn't one. A multi-period file is `,period,timestep,objective,...` with no
+`snapshot` column at all, so column 1 is `period`: four snapshots read back as
+`2030, 2030, 2040, 2040`. And because the weighting scan took every other named
+column, `timestep` was picked up as a fourth weighting — a column of `0, 1, 0, 1`
+sitting alongside `objective`, `stores` and `generators`, ready to scale
+something.
+
+`investment_periods.csv` had the mirror problem: the labels were read and the
+`objective` and `years` columns beside them dropped, on the stated grounds that
+only a model pricing multi-period costs needs them. True while such a network was
+refused; false the moment it wasn't.
+
+### `objective` and `years` are not interchangeable
+
+Two columns in one small file, and they do different jobs. `objective` is the
+discount factor and multiplies the snapshot's own objective weighting — every
+cost, and the nodal price is divided by the same product. `years` is how many
+years the period stands for and scales a global constraint's emissions sum, which
+is a quantity of gas rather than a cost to discount.
+
+This repository has already been caught confusing `snapshots.csv`'s three
+weightings with each other, twice. `Periods.objectiveWeight` exists so the LP
+build and the price recovery cannot disagree about the first one: they were two
+multiplications in two files, and a mismatch between them is invisible in the
+objective and visible only in prices nobody was asserting.
+
+### An inactive asset is pinned, not dropped
+
+PyPSA masks an asset's variables outside `build_year <= period < build_year +
+lifetime`. Here the column is bounded to `[0, 0]` instead of being removed, which
+is the same restriction and keeps the column layout every other part of the model
+— and `Sclopf`'s row-by-row copy — already agrees on. The bound replaces
+`p_min_pu` as well as `p_max_pu`: a must-run unit that does not exist yet has to
+be off, not sitting at its floor.
+
+`lifetime` defaults to infinity and a `NaN` is handled explicitly, because every
+comparison against `NaN` is false and the window would close in every period —
+retiring an asset the file meant to keep.
+
+### What the fixture pins, and what it cannot
+
+`investment-periods` reproduces PyPSA's 17,000 exactly, with `old` carrying 2030
+and `new` — `build_year = 2040` — carrying 2040, and both nodal prices matching.
+Its period weightings are both 1.0, which is precisely where reading them or not
+cannot be told apart, so three mutations do the rest: building `new` a period
+early gives the 2,000 this port used to return; retiring `old` with a lifetime of
+1 makes 2030 infeasible, which is how `lifetime` is shown to be read at all; and
+halving 2040's `objective` weighting gives 16,500 rather than 8,500, with the
+price at that period still 5.0 rather than 2.5.
+
+### The ledger entry that turned into a gap
+
+`GlobalConstraint.investment_period` was **ruled safe** by `SchemaSweepSuite`, on
+the grounds that a multi-period network was refused outright. Narrowing that
+refusal turned the ruling into a live gap in the same change: a CO2 cap scoped to
+2040 alone would have been applied to the whole horizon, with no defensible sign
+to the error. It is refused now.
+
+That is the sweep doing the job it was built for, one step further along than
+before — not catching an attribute nobody had looked at, but catching a ruling
+whose *justification* expired. Eighteen `build_year`/`lifetime` entries left the
+ledger the same way, and `Carrier.max_growth` and `max_relative_growth` with
+them.
+
+`Process.build_year` and `Process.lifetime` had to leave too, for a different
+reason: the sweep matches bare names, and `Periods` quotes both for the
+components it does model. Masked exactly as `Bus.x` is by `Line.x`, and safe for
+the same reason — `Lopf.rejectUnhandled` refuses any network carrying a Process.
+
+### Delays became period-aware rather than re-refused
+
+`Delays` documented that a multi-period network never reached it, because
+`Periods.reject` ran first. That stopped being true here. PyPSA applies a delay
+*within* each period — energy leaving the last snapshot of 2030 does not arrive
+in the first of 2040, ten years later — so each period is its own horizon with its
+own `tau`, wrap and validity mask, and the indices are offset back into the flat
+array. The same walk, run once per period instead of once. `check_dispatch_delays`
+takes the horizon as the **shortest** period's, which the refusal now matches.
+
+### What is still refused, and why each is a formulation rather than a factor
+
+Capacity expansion across periods is a different model: PyPSA gives each build
+year its own asset, and *when* to build interacts with the activity window and the
+discounting. Growth limits between periods only bind on that. Per-period storage
+cycling closes the wrap at each period's last snapshot rather than the horizon's,
+which is a different set of energy-balance rows. And unit commitment is refused on
+a multi-period network specifically — `Lopf` accepts one and `UnitCommitment` does
+not — because commitment chains minimum up and down times across a flat horizon,
+and a unit outside its build year has no status there. Pinning its dispatch to
+zero, which is what `Lopf` does, would leave the status variable free to sit at 1
+and collect a start-up cost for a unit that was never built.
 
 ## The AC transformer model, and an assumption that was never made
 
@@ -1691,17 +1858,29 @@ things that are absent.
 
 What is actually missing is everything that makes a tree *fast*: no cutting
 planes, no pseudocost or strong branching, no best-first search, no node
-presolve. The search is depth-first on the most fractional variable, which is
-chosen for the warm start rather than for the node count. On top of that the
-pruning margin — necessary, see above, because the bound is inexact — deliberately
-explores nodes an exact solver would cut.
+presolve. The search is depth-first — chosen so a child warm-starts from its
+parent, which is the whole reason a first-order method is attractive inside
+branch-and-bound — branching on the most fractional variable, which is a separate
+choice with a separate reason: a variable at 0.5 splits the feasible set in two
+where one at 0.999 makes a child almost identical to its parent. On top of that
+the pruning margin — necessary, see above, because the bound is inexact —
+deliberately explores nodes an exact solver would cut.
 
 The consequence that bites is the interaction with the entry below. A node whose
-LP hits `maxIterations` is not a bound, so it is branched rather than pruned and
-counted in `unprovenNodes`, and an incumbent found while any exist is reported
-`Feasible` rather than `Optimal`. So a MILP large enough for the fixed iteration
-limit to bind comes back correct but unproven, and the fix for that is the
-adaptive limit, not the tree.
+LP hits `maxIterations` is not a bound, so it cannot be pruned on and is counted
+in `unprovenNodes`, and an incumbent found while any exist is reported `Feasible`
+rather than `Optimal`.
+
+**"Feasible" is weaker than "the optimum without a certificate", and the
+difference matters.** Two paths lose a subtree outright rather than merely leaving
+it unproven: a node whose relaxation is integral but never converged records no
+incumbent *and* branches nothing, since `mostFractional` returns `None`; and a
+node below the root reporting dual infeasibility drops its subtree with only an
+`unproven` increment, because a spurious Farkas certificate is a real possibility
+for a numerical method. So the answer returned can be genuinely suboptimal, which
+is precisely what the downgrade to `Feasible` is recording — a reader who takes it
+for "correct, pending proof" will trust it too far. The fix is the adaptive
+iteration limit below, not the tree.
 
 **Iteration limit is not adaptive.** `maxIterations` defaults to 100k, which the
 600-variable random instance nearly reaches. Anything larger needs the limit
@@ -1728,8 +1907,14 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are twenty-two golden networks and every module above this one is gated on
-them. The scoped claim is the one that still holds: this module has no
-power-system concepts in it, so the gate belongs to the layers above. The
-`economic-dispatch` fixture is shaped like a PyPSA LOPF and its congestion prices
-are asserted, but it was constructed here rather than exported from a PyPSA run.
+there are twenty-two golden networks and every *network* module, L1 onward, is
+gated on them. Not "every module above this one": the modules above `prima-core`
+in the build graph are the other Prima ones, and none of them reads
+`NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which
+are the right oracles for an LP solver and the wrong ones for a network model.
+`ARCHITECTURE.md` already had that distinction right.
+
+The scoped claim is the one that holds: this module has no power-system concepts
+in it, so the gate belongs to the network layer. The `economic-dispatch` fixture
+is shaped like a PyPSA LOPF and its congestion prices are asserted, but it was
+constructed here rather than exported from a PyPSA run.

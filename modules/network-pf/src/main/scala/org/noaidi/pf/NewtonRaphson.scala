@@ -319,9 +319,10 @@ object NewtonRaphson:
   /** A controllable branch's fixed flow at this bus.
     *
     * `delay` is deliberately not applied, for the reason
-    * [[LinearPowerFlow.injections]] gives: PyPSA's power flow sets
-    * `p{i} = -p0 * efficiency` within one snapshot and never reads the
-    * attribute. Only its optimiser shifts the output.
+    * [[LinearPowerFlow]] gives at its own link-injection site: PyPSA's power
+    * flow sets `p{i} = -p0 * efficiency` within one snapshot and never reads the
+    * attribute. Only its optimiser shifts the output. That decision is currently
+    * '''unguarded''' by any fixture, for the reason recorded there.
     */
   private def linkInjection(network: Network, sub: SubNetwork, bus: String, t: Int): Double =
     var total = 0.0

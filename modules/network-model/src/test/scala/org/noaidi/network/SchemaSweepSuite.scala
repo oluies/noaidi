@@ -259,13 +259,17 @@ object SchemaSweepSuite:
       ComponentRefused,
       "Process is not modelled; Lopf.rejectUnhandled refuses any network that carries one",
     )(
-      "Process.build_year",
+      // `Process.build_year` and `Process.lifetime` were here and cannot be:
+      // `Periods` quotes both bare names for the components it *does* model, and
+      // this sweep matches bare names, so a ruling on them would go stale the
+      // moment multi-period was implemented. Masked exactly as `Bus.x` is by
+      // `Line.x`, and safe for the same reason the rest of this group is --
+      // `Lopf.rejectUnhandled` refuses any network carrying a Process at all.
       "Process.cyclic_delay0",
       "Process.cyclic_delay1",
       "Process.delay0",
       "Process.delay1",
       "Process.discount_rate",
-      "Process.lifetime",
       "Process.p_nom_set",
       "Process.rate0",
       "Process.rate1",
@@ -273,44 +277,32 @@ object SchemaSweepSuite:
     ) ++
       // ---- Multi-period only ---------------------------------------------------
       //
-      // An asset is active only between its build year and the end of its
-      // lifetime, and costs are discounted per period. On a single-period network
-      // PyPSA builds none of that, so these three are read by nothing; on a
-      // multi-period one the whole network is refused. The refusal is what makes
-      // the ruling safe -- before `Periods.reject` existed, a build year of 2040
-      // was silently ignored and the answer came out at 2,000 against PyPSA's
-      // 17,000.
+      // `build_year` and `lifetime` used to be ruled here, on the grounds that a
+      // multi-period network was refused outright. `Periods` reads both now, so
+      // those eighteen entries are gone rather than reworded -- and
+      // `Carrier.max_growth`, `max_relative_growth` and
+      // `GlobalConstraint.investment_period` with them, each now named by the
+      // refusal that replaced the blanket one.
+      //
+      // `investment_period` is the one worth recording. It was ruled *safe*
+      // because the whole network was refused; narrowing that refusal turned a
+      // ledger entry into a live gap -- a cap meant for one period applied to the
+      // whole horizon -- and the sweep is what surfaced it, which is the job.
+      //
+      // `discount_rate` stays. It is only read when an `overnight_cost` is
+      // annuitised, and `Expansion.reject` refuses that on every network,
+      // single- or multi-period.
       ruled(
         MultiPeriodOnly,
-        "read only when the network declares investment periods, which Periods.reject refuses",
+        "annuitises overnight_cost, which Expansion.reject refuses on every network",
       )(
-        "Generator.build_year",
         "Generator.discount_rate",
-        "Generator.lifetime",
-        "Line.build_year",
         "Line.discount_rate",
-        "Line.lifetime",
-        "Link.build_year",
         "Link.discount_rate",
-        "Link.lifetime",
-        "StorageUnit.build_year",
         "StorageUnit.discount_rate",
-        "StorageUnit.lifetime",
-        "Store.build_year",
         "Store.discount_rate",
-        "Store.lifetime",
-        "Transformer.build_year",
         "Transformer.discount_rate",
-        "Transformer.lifetime",
       ) ++
-      ruled(
-        MultiPeriodOnly,
-        "PyPSA's define_growth_limit returns immediately unless the network is multi-period",
-      )("Carrier.max_growth", "Carrier.max_relative_growth") ++
-      ruled(
-        MultiPeriodOnly,
-        "scopes a global constraint to one investment period; single-period builds ignore it",
-      )("GlobalConstraint.investment_period") ++
       // ---- Inert in PyPSA itself -----------------------------------------------
       //
       // The strongest form of ruling available: the attribute gets zero hits in

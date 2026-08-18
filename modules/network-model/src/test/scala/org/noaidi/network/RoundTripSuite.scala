@@ -69,17 +69,20 @@ class RoundTripSuite extends munit.FunSuite:
     * added to `generate_goldens.py` is round-tripped without anyone remembering
     * to add it here.
     */
-  /** Every golden network except the multi-period ones, which `Network` cannot
-    * represent — their snapshots are `(period, timestep)` pairs and it holds a
-    * flat list, so the file cannot round-trip. Skipped by the manifest's
-    * `multi_period` flag rather than by name; `Periods.reject` is the solve-layer
-    * half of the same limitation.
+  /** Every golden network, multi-period ones included.
+    *
+    * They used to be skipped on the `multi_period` flag, because `Network` held
+    * a flat list of snapshot labels and a `(period, timestep)` index cannot
+    * survive that: `investment-periods` came back as `2030, 2030, 2040, 2040`.
+    * `snapshotPeriods` carries the other half now, and `CsvWriter` emits the two
+    * index columns and `investment_periods.csv`, so the round trip is a real
+    * check on the multi-period path rather than an exemption from it.
     */
   private lazy val goldenNetworks: List[String] =
     ujson
       .read(Files.readString(goldens.resolve("manifest.json")))("networks")
       .obj
-      .collect { case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name }
+      .keys
       .toList
       .sorted
 

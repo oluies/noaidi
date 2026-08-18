@@ -286,8 +286,20 @@ object LinearPowerFlow:
           // attribute — only the optimiser shifts it, which is where [[Delays]]
           // in `network-lopf` reproduces it. Honouring it here would agree with
           // PyPSA's optimiser and disagree with PyPSA's `lpf`, and the contract
-          // is the latter. `link-delay` and `link-delay-wrap` both carry an `lpf`
-          // block that would fail the moment this changed.
+          // is the latter.
+          //
+          // '''Unguarded, and not by oversight.''' An earlier version of this
+          // comment claimed the two delay fixtures' `lpf` blocks would fail if
+          // this changed. They would not: neither is in this suite's network
+          // list, and — decisively — neither carries a link `p_set`, so the
+          // injection here is zero at every snapshot and shifting a zero to
+          // another snapshot changes nothing. A fixture that could tell the
+          // difference needs a delayed link with a non-zero `p_set`, and
+          // `Link.p_set` is itself unmodelled in `Lopf`: PyPSA's
+          // `define_fixed_operation_constraints` fixes the link's dispatch to it,
+          // so such a fixture's `optimize` block would fail until that gap is
+          // closed. Guarding this is blocked behind that, deliberately recorded
+          // rather than asserted.
           val ports = Topology.branchPorts(table)
           table.ids.foreach { id =>
             val p = rawSetpoint(table, id, snapshot)

@@ -272,18 +272,29 @@ object Lopf:
           def upper(perUnit: => Double): Double =
             if extendableUnit then Double.PositiveInfinity else pNom * perUnit
 
-          declare(Storage.Dispatch, id, t, 0.0, upper(s.valueAt("p_max_pu", id, t)),
-                  s.valueAt("marginal_cost", id, t) * weight): Unit
+          // Through `activeBounds` like every other column. PyPSA masks *all*
+          // four by `c.da.active` -- `define_operational_variables` and
+          // `define_spillage_variables` both pass the mask -- and `StorageUnit`
+          // declares `build_year` and `lifetime` the same as a generator does.
+          // Left unmasked, a unit with `build_year = 2040` discharged freely in
+          // 2030 and the objective came out *below* PyPSA's, reporting
+          // `Optimal`: the silent-under-price shape this module exists against.
+          def bounded(component: String, hi: Double, cost: Double): Unit =
+            val (lo, up) = activeBounds(s, id, t, 0.0, hi)
+            declare(component, id, t, lo, up, cost): Unit
+
+          bounded(Storage.Dispatch, upper(s.valueAt("p_max_pu", id, t)),
+                  s.valueAt("marginal_cost", id, t) * weight)
           // `p_min_pu` is negative for a storage unit -- it is how far the unit
           // may run *backwards* -- so the charging bound is its negation.
-          declare(Storage.Store, id, t, 0.0, upper(-s.valueAt("p_min_pu", id, t)), 0.0): Unit
-          declare(Storage.SoC, id, t, 0.0, upper(s.float("max_hours", id)),
-                  s.valueAt("marginal_cost_storage", id, t) * weight): Unit
+          bounded(Storage.Store, upper(-s.valueAt("p_min_pu", id, t)), 0.0)
+          bounded(Storage.SoC, upper(s.float("max_hours", id)),
+                  s.valueAt("marginal_cost_storage", id, t) * weight)
           // Bounded by the inflow itself, so a snapshot with none gets [0, 0] --
           // which is what PyPSA's masking amounts to, without a second shape of
           // variable map to carry it.
-          declare(Storage.Spill, id, t, 0.0, math.max(0.0, s.valueAt("inflow", id, t)),
-                  s.valueAt("spill_cost", id, t) * weight): Unit
+          bounded(Storage.Spill, math.max(0.0, s.valueAt("inflow", id, t)),
+                  s.valueAt("spill_cost", id, t) * weight)
         }
       }
 
@@ -306,9 +317,17 @@ object Lopf:
                      else eNom * store.valueAt("e_min_pu", id, t)
           val hi   = if extendable(store, id) then Double.PositiveInfinity
                      else eNom * store.valueAt("e_max_pu", id, t)
-          declare(Stores.Energy, id, t, math.min(lo, hi), math.max(lo, hi),
+          // Both through `activeBounds`, for the reason given for the storage
+          // unit above: `Store` declares `build_year` and `lifetime` too, and
+          // PyPSA masks `Store-e` and `Store-p` by the activity window. The
+          // energy column is the one that matters -- an unmasked store carries
+          // charge across a boundary it does not exist over.
+          val (eLo, eHi) = activeBounds(store, id, t, math.min(lo, hi), math.max(lo, hi))
+          declare(Stores.Energy, id, t, eLo, eHi,
                   store.valueAt("marginal_cost_storage", id, t) * weight): Unit
-          declare(Stores.Power, id, t, Double.NegativeInfinity, Double.PositiveInfinity,
+          val (pLo, pHi) =
+            activeBounds(store, id, t, Double.NegativeInfinity, Double.PositiveInfinity)
+          declare(Stores.Power, id, t, pLo, pHi,
                   store.valueAt("marginal_cost", id, t) * weight): Unit
         }
       }

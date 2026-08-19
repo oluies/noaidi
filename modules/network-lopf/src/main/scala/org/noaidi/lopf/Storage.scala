@@ -73,16 +73,21 @@ object Storage:
         )
     }
 
-    // Multi-period wrapping. Both flags subdivide the horizon into investment
-    // periods, which this model has no notion of; treating them as the
-    // whole-horizon flags would cycle across period boundaries PyPSA does not.
+    // Multi-period wrapping. Both flags close the state at each period's last
+    // snapshot rather than the horizon's, which is a different set of
+    // energy-balance rows -- not a weighting on the ones built here. `Lopf`
+    // models multi-period dispatch now, so the old wording ("this model has a
+    // single horizon") stopped being true; what remains true is that only the
+    // horizon-wide cycle is built. Both flags are listed because PyPSA treats an
+    // asset as per-period when *either* is set.
     Seq("cyclic_state_of_charge_per_period", "state_of_charge_initial_per_period").foreach {
       attribute =>
         val set = table.ids.filter(id => table.static.contains(attribute) && table.bool(attribute, id))
         if set.nonEmpty then
           refuse(
-            s"StorageUnit '${set.head}' sets $attribute, which is a multi-investment-period " +
-              "concept; this model has a single horizon"
+            s"StorageUnit '${set.head}' sets $attribute, so its state wraps within each " +
+              "investment period rather than across the horizon; only the horizon-wide cycle " +
+              "is modelled"
           )
     }
 

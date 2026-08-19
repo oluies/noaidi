@@ -52,9 +52,6 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
       Files.deleteIfExists(dir)
     }
 
-  /** A copy of a golden network with one file rewritten, read back through the
-    * real parse path.
-    */
   /** A copy of a golden network's directory, for the mutations below. */
   private def copyOf(name: String): Path =
     val dir = Files.createTempDirectory("noaidi-gap-")
@@ -71,6 +68,21 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     Files.writeString(dir.resolve(file), content)
     CsvReader.read(dir, schema, name)
 
+  /** A golden network with several files added or rewritten at once.
+    *
+    * [[withExtraFile]] takes one, which is enough for a component the fixture
+    * does not carry and not enough for a branch: `investment-periods` is a
+    * single bus, so a line needs both a second bus and the line itself before it
+    * is anything but a dangling reference.
+    */
+  private def withFiles(name: String, files: (String, String)*): Network =
+    val dir = copyOf(name)
+    files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
+    CsvReader.read(dir, schema, name)
+
+  /** A copy of a golden network with one file rewritten, read back through the
+    * real parse path.
+    */
   private def mutate(name: String, file: String, edit: String => String): Network =
     val dir    = copyOf(name)
     val target = dir.resolve(file)
@@ -159,6 +171,58 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     mutate("investment-periods", "snapshots.csv",
            setColumn(_, "period", (i, p) => if i == "3" then "2050" else p))
   }
+  // The whole-horizon row families. `Lopf` masks a partly-built asset's columns
+  // by pinning them to zero, which is enough for a bound and not enough for a
+  // row whose shape or right-hand side depends on which assets exist.
+  refuses("a line built partway through the horizon", "cycle basis") {
+    withFiles(
+      "investment-periods",
+      "buses.csv" ->
+        "name,v_nom,control,generator,sub_network\nb,110.0,Slack,new,0\nb2,110.0,PQ,,0\n",
+      "lines.csv" ->
+        ("name,bus0,bus1,x,r,s_nom,build_year,lifetime\n" +
+          "l0,b,b2,0.1,0.01,100.0,0,inf\n" +
+          "l1,b,b2,0.2,0.02,100.0,2040,30.0\n"),
+    )
+  }
+  refuses("a ramp-limited unit built partway through the horizon", "ramp-limited") {
+    withFiles(
+      "investment-periods",
+      "generators.csv" ->
+        ("name,bus,control,p_nom,marginal_cost,build_year,lifetime,ramp_limit_up\n" +
+          "new,b,Slack,200.0,5.0,2040,30.0,0.5\n" +
+          "old,b,PQ,200.0,80.0,0,inf,1.0\n"),
+    )
+  }
+  refuses("a partly-built storage unit that wraps across the horizon", "wraps its state") {
+    withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,build_year,lifetime,cyclic_state_of_charge\n" +
+        "s,b,10.0,4.0,2040,30.0,True\n",
+    )
+  }
+  refuses("a partly-built storage unit carrying an initial state", "state_of_charge_initial") {
+    withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,build_year,lifetime,state_of_charge_initial\n" +
+        "s,b,10.0,4.0,2040,30.0,20.0\n",
+    )
+  }
+  refuses("a period label that is not a year", "is not a year") {
+    withFiles(
+      "investment-periods",
+      "investment_periods.csv" -> "period,objective,years\n2030,1.0,10\n2040-Q1,1.0,10\n",
+      "snapshots.csv" ->
+        (",period,timestep,objective,stores,generators\n" +
+          "0,2030,0,1.0,1.0,1.0\n" +
+          "1,2030,1,1.0,1.0,1.0\n" +
+          "2,2040-Q1,0,1.0,1.0,1.0\n" +
+          "3,2040-Q1,1,1.0,1.0,1.0\n"),
+    )
+  }
+
   // `Link delay` was here. `Delays` implements it, so the case is gone rather
   // than reworded -- the same way three transformer cases went when the AC model
   // was written. What replaced it is a golden comparison on `link-delay` and

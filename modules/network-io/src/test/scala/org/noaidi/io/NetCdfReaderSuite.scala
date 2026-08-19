@@ -27,12 +27,12 @@ class NetCdfReaderSuite extends munit.FunSuite:
     * Stale by four fixtures when this replaced it, including `scigrid-de` — 71
     * datasets and 1.7 MB against the 28 of a three-bus network, and the only one
     * exercising the reader at any scale.
-    */
-  /** Every golden network except the multi-period ones. PyPSA writes their
-    * snapshot index as `period`/`timestep` variables rather than a
-    * `snapshots_snapshot` dataset, which this reader requires and `Network` has
-    * nowhere to put — the same limitation `Periods.reject` enforces at the solve
-    * layer. Skipped by the manifest's `multi_period` flag, not by name.
+    *
+    * The multi-period ones are no longer excluded: the reader decodes PyPSA's
+    * `period`/`timestep` index and `Network` carries it, so `investment-periods`
+    * runs through the whole sweep like any other. The paragraph that used to sit
+    * here still described a `multi_period` skip that the `.keys` below never
+    * performed.
     */
   private lazy val networks: List[String] =
     ujson
@@ -147,6 +147,44 @@ class NetCdfReaderSuite extends munit.FunSuite:
         assertEquals(binary.snapshotWeightings(column).toSeq, values.toSeq, s"$name: $column")
       }
     }
+
+    test(s"netCDF and CSV agree on the investment periods of $name") {
+      assume(available, "goldens missing")
+      // The three fields the reader gained when multi-period networks entered
+      // this sweep, and the only ones the comparisons above do not reach. Left
+      // uncompared, a wrong dataset prefix returns an empty weighting map and
+      // `periodWeighting("years", …)` falls back to 1.0 -- which mis-scales
+      // every global constraint by the period length, ten-fold on this fixture,
+      // with nothing here failing. The fallback is right for a network that
+      // declares no weighting and silent for one whose weighting was not found.
+      val binary = fromNetCdf(name)
+      val text   = fromCsv(name)
+      assertEquals(binary.snapshotPeriods, text.snapshotPeriods, s"$name: snapshot periods")
+      assertEquals(binary.investmentPeriods, text.investmentPeriods, s"$name: investment periods")
+      assertEquals(
+        binary.investmentPeriodWeightings.keySet,
+        text.investmentPeriodWeightings.keySet,
+        s"$name: period weighting columns",
+      )
+      text.investmentPeriodWeightings.foreach { (column, values) =>
+        assertEquals(
+          binary.investmentPeriodWeightings(column).toSeq,
+          values.toSeq,
+          s"$name: period weighting $column",
+        )
+      }
+    }
+  }
+
+  test("the period weightings are read, not defaulted") {
+    assume(available, "goldens missing")
+    // `objective` is 1.0 in both periods of the fixture, so only `years`
+    // discriminates a real read from the 1.0 fallback. Pinned here rather than
+    // left to the sweep above, which would pass on two empty maps.
+    val n = fromNetCdf("investment-periods")
+    assertEquals(n.investmentPeriods, IndexedSeq("2030", "2040"))
+    assertEqualsDouble(n.periodWeighting("years", "2030"), 10.0, 0.0)
+    assertEqualsDouble(n.periodWeighting("years", "2040"), 10.0, 0.0)
   }
 
   test("a boolean column stays boolean rather than becoming an integer") {

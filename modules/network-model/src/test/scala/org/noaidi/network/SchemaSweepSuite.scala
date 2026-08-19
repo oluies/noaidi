@@ -214,8 +214,15 @@ object SchemaSweepSuite:
       */
     case ComponentRefused
 
-    /** PyPSA reads it only on a multi-investment-period network, and
-      * `Periods.reject` refuses those from both entry points.
+    /** PyPSA reads it only on a multi-investment-period network, and something
+      * refuses that reading before it can matter.
+      *
+      * Not `Periods.reject` refusing every multi-period network, which is what
+      * this used to say: `Lopf` models multi-period dispatch, and `Periods`
+      * refuses only the parts whose formulation differs. The one entry left here
+      * rests on `Expansion.reject` instead, which refuses annuitised capital
+      * cost on every network, single- or multi-period. Each entry states its own
+      * grounds; this verdict only records that the reading is multi-period.
       */
     case MultiPeriodOnly
 

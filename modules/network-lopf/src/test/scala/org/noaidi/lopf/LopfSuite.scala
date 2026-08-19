@@ -1491,6 +1491,55 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       "the nodal price is not being divided by the period weighting")
   }
 
+  test("an ordinary carriers.csv is not read as a growth limit") {
+    assume(available, "goldens missing")
+    // `max_relative_growth` defaults to *0.0*, which is finite -- so a refusal
+    // that tested it the same way as `max_growth` (default +inf) fired on every
+    // multi-period network carrying a `carriers.csv` at all, calling "no
+    // relative limit" a limit of nothing. PyPSA gates on `max_growth != inf`
+    // alone and reads the relative one only for the carriers that selects.
+    //
+    // Nothing caught it because the only multi-period fixture has no
+    // `carriers.csv`, so the loop never ran, and the gap case above passes on
+    // `max_growth` before the relative one is reached.
+    val n = withExtraFile("investment-periods", "carriers.csv", "name,co2_emissions\nAC,0.0\n")
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.objective, 17000.0, 1e-4,
+      "adding a carrier with no growth limit changed the answer")
+  }
+
+  test("a storage unit outside its build year contributes nothing") {
+    assume(available, "goldens missing")
+    // `StorageUnit` declares `build_year` and `lifetime` like a generator does,
+    // and PyPSA masks all four of its variables by `c.da.active` --
+    // `define_operational_variables` and `define_spillage_variables` both pass
+    // the mask. This model bounded only generators and branches by the window,
+    // so a unit built in 2040 charged and discharged freely in 2030 and the
+    // objective came out *below* PyPSA's, reporting `Optimal`.
+    //
+    // `marginal_cost` is negative so that running the unit is worth something on
+    // its own account: at the default zero an idle unit and a masked one produce
+    // the same number and the test could not tell them apart.
+    val n = withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,build_year,lifetime,marginal_cost\n" +
+        "s,b,100.0,4.0,2040,30.0,-10.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+
+    Seq(0, 1).foreach { t =>
+      assertEqualsDouble(r.discharging("s", t), 0.0, 1e-6, s"discharging in 2030 at snapshot $t")
+      assertEqualsDouble(r.charging("s", t), 0.0, 1e-6, s"charging in 2030 at snapshot $t")
+      assertEqualsDouble(r.stateOfCharge("s", t), 0.0, 1e-6, s"state of charge in 2030 at $t")
+    }
+    // And it does run in its own period, so the zeros above are the window
+    // rather than a unit that was never worth using.
+    assert(r.discharging("s", 3) > 1e-6, s"the unit is idle in 2040 too: ${r.solution}")
+  }
+
   test("a delayed link matches PyPSA's") {
     assume(available, "goldens missing")
     // `delay` shifts a link's output into a later snapshot. Default 0, so inert

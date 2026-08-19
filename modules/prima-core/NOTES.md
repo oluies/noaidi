@@ -1068,11 +1068,13 @@ restriction, which makes the answer cheaper, while the discounting and period
 weightings push the other way — the error does not even have a reliable sign.
 Multi-period is a feature with its own goldens, not a fix.
 
-`Network` now carries `investmentPeriods`, read from the file that was being
-skipped, and `Periods.reject` refuses on it from both `Lopf` and
-`UnitCommitment` — a single-bus multi-period network reaches the second entry
-point and not the first. Delayed links were refused in `Lopf`, which is the only
-model that builds a Link at all.
+`Network` gained `investmentPeriods`, read from the file that was being skipped,
+and `Periods.reject` refused on it from both `Lopf` and `UnitCommitment` — a
+single-bus multi-period network reaches the second entry point and not the first.
+Delayed links were refused in `Lopf`, which is the only model that builds a Link
+at all. Both refusals have since narrowed: `Lopf` models multi-period dispatch,
+and `UnitCommitment` carries its own refusal rather than sharing that one, since
+what it refuses is now a network `Lopf` accepts.
 
 Both fixtures keep PyPSA's own answer in the goldens, so the refusals are
 evidenced rather than asserted, and both refusals have a test that they are *not
@@ -1119,21 +1121,27 @@ looked at* is the shape of all six.
 
 ### The residue is committed, with reasons
 
-323 of the 422 attributes are inputs. 236 are named outright and another 24 are
+323 of the 422 attributes are inputs. 253 are named outright and another 24 are
 built by interpolation — `Expansion` reads capacity bounds as
 `s"${attribute}_max"`, so `p_nom_max` is read by code that never writes it down.
 Resolving those in the sweep rather than the ledger matters: filing the
 mechanism's blind spot as a human judgement is how a check starts lying.
 
-That leaves **63**, each with a line saying why it cannot change an answer.
-Eleven belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
+That leaves **46**, each with a line saying why it cannot change an answer.
+Nine belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
 attributes are unreachable rather than ignored — the distinction that made
-`investment_periods.csv` a bug and makes this not one. Eighteen are `build_year`,
-`lifetime` and `discount_rate`, read only on a multi-period network, which
-`Periods.reject` refuses. The rest are inert in PyPSA's own optimiser, reached
+`investment_periods.csv` a bug and makes this not one. Seven are `discount_rate`,
+read only when an annuitised `overnight_cost` is, which `Expansion.reject`
+refuses on every network. The rest are inert in PyPSA's own optimiser, reached
 under a name that arrives in the data — `Carrier.co2_emissions` is read through
 `GlobalConstraint.carrier_attribute` and appears nowhere in this port — or
 descriptive.
+
+The counts move when the port does: implementing multi-period took seventeen
+entries out of the ledger and into the named set, because `Periods` now reads
+`build_year` and `lifetime` rather than the refusal covering them. A count in
+prose beside a check that computes it is a claim with a short shelf life, which
+is the reason this paragraph names the numbers and the suite prints them.
 
 ### What it does not do, and one attribute it misses
 
@@ -1378,6 +1386,24 @@ is the same restriction and keeps the column layout every other part of the mode
 `p_min_pu` as well as `p_max_pu`: a must-run unit that does not exist yet has to
 be off, not sitting at its floor.
 
+Storage units and stores are masked the same way, and this had to be said out
+loud because they were not: `activeBounds` reached generators and branches only,
+so a `StorageUnit` with `build_year = 2040` charged and discharged freely in
+2030 and the objective came out *below* PyPSA's, reporting `Optimal`. PyPSA
+masks all four storage variables and both store variables by `c.da.active` —
+`define_operational_variables` and `define_spillage_variables` both pass the
+mask — and the schema declares `build_year` and `lifetime` on seven components,
+not two.
+
+Pinning is equivalent to dropping only where the row reads zero anyway. The
+storage energy balance is a chain of equalities across the horizon, and three
+cases make the difference visible rather than harmless: a cyclic unit, whose wrap
+closes at a snapshot it may not exist at; a non-zero `state_of_charge_initial`
+or `e_initial`, which lands on the right-hand side at snapshot 0 against pinned
+columns; and inflow at a snapshot the unit is absent from. Each is refused, and
+each would otherwise be infeasible rather than merely different — loud, but
+loud about the wrong thing.
+
 `lifetime` defaults to infinity and a `NaN` is handled explicitly, because every
 comparison against `NaN` is false and the window would close in every period —
 retiring an asset the file meant to keep.
@@ -1434,6 +1460,24 @@ not — because commitment chains minimum up and down times across a flat horizo
 and a unit outside its build year has no status there. Pinning its dispatch to
 zero, which is what `Lopf` does, would leave the status variable free to sit at 1
 and collect a start-up cost for a unit that was never built.
+
+Three row families are built once over the whole horizon rather than once per
+period, and an asset whose activity window is not the whole horizon changes rows
+this model does not rebuild — which is where pinning a column stops being enough.
+The **cycle basis** is computed on the whole-horizon topology, while PyPSA calls
+`n.cycle_matrix(investment_period=period)` per period: a line built in 2040 has
+its flow correctly pinned to zero in 2030 and its 2040 cycle row still imposed
+there, collapsing to `x_A·f_A + x_B·f_B = 0` over what is really a radial path.
+**Ramp rows** are masked by `c.da.active` in PyPSA and not here, so a unit would
+enter the period it is built in at a ramp from zero. And the **storage energy
+balance** is the chain described above. A partly-built asset in any of those
+three is refused; a partly-built passive branch in *no* cycle is not, because
+then the pinned column is the whole of its masking.
+
+The staged line build is the canonical multi-investment case, so this is not a
+corner. `investment-periods` is single-bus because it is the one fixture, not
+because branches are unusual — which is exactly why the gap cases are mutations
+of it that add the second bus rather than a note that nothing exercises it.
 
 ## The AC transformer model, and an assumption that was never made
 

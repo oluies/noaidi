@@ -54,9 +54,11 @@ object Periods:
     if !declares(table, "build_year") || !declares(table, "lifetime") then true
     else
       period.trim.toDoubleOption match
-        // A period label PyPSA would not accept as a year. Rather than guess,
-        // treat the asset as present: refusing here would reject a network on
-        // the strength of a label this module failed to parse.
+        // A period label PyPSA would not accept as a year. `reject` refuses such
+        // a network before any build reaches here -- reading every asset as
+        // present is the "cheaper than the truth" direction, so it is not a
+        // safety net, only what a direct caller gets for a network that would
+        // never have been solved.
         case None => true
         case Some(year) =>
           val built    = table.int("build_year", id).toDouble
@@ -90,6 +92,20 @@ object Periods:
   def reject(network: Network, refuse: String => Nothing): Unit =
     if !network.isMultiPeriod then return
 
+    // A period label that is not a year. `activeIn` compares `build_year <=
+    // period < build_year + lifetime`, which needs a number; with none it reads
+    // every asset as present, so a network declaring e.g. `2030-01` would be
+    // solved with every build year ignored -- the "cheaper than the truth"
+    // direction refused everywhere else here. PyPSA evaluates that expression
+    // through `static.eval` and raises rather than admit a non-numeric label.
+    network.investmentPeriods.foreach { period =>
+      if period.trim.toDoubleOption.isEmpty then
+        refuse(
+          s"investment_periods.csv declares period '$period', which is not a year; no build year " +
+            "can be compared against it and every asset would read as built"
+        )
+    }
+
     // A snapshot in no declared period has no weighting and no activity window,
     // so every asset would read as present and the costs would be unscaled.
     network.snapshots.indices.foreach { t =>
@@ -117,23 +133,35 @@ object Periods:
       }
     }
 
-    // `max_growth` and `max_relative_growth` limit how fast a carrier's capacity
-    // may grow between periods. They only bind on an extendable network, which
-    // is refused just above -- but the refusal is written here rather than left
-    // implicit, since "unreachable because something else refuses it" is exactly
-    // the reasoning the schema sweep was built to stop trusting.
+    // `max_growth` limits how much of a carrier a period may add, and
+    // `max_relative_growth` scales that limit by what the carrier already had.
+    // The gate is `max_growth` alone: PyPSA selects `carrier_i = max_growth[
+    // max_growth != inf]` and reads `max_relative_growth` only for the carriers
+    // that filter picked, clipped at zero (`optimization/global_constraints.py`,
+    // `define_growth_limit`). Testing the two independently refused *every*
+    // multi-period network carrying an ordinary `carriers.csv`, because
+    // `max_relative_growth` defaults to 0.0 -- which is finite, so "no relative
+    // limit" read as a limit of nothing, and the refusal said so.
+    //
+    // They only bind on an extendable network, which is refused just above --
+    // but the refusal is written here rather than left implicit, since
+    // "unreachable because something else refuses it" is exactly the reasoning
+    // the schema sweep was built to stop trusting.
     network.table("Carrier").foreach { carriers =>
-      Seq("max_growth", "max_relative_growth").foreach { attribute =>
+      if declares(carriers, "max_growth") then
         carriers.ids.foreach { id =>
-          if declares(carriers, attribute) then
-            val growth = carriers.float(attribute, id)
-            if growth.isFinite then
-              refuse(
-                s"Carrier '$id' sets $attribute = $growth, which limits capacity added between " +
-                  "investment periods; that is an expansion constraint and expansion is refused here"
-              )
+          val growth = carriers.float("max_growth", id)
+          if growth.isFinite then
+            val relative =
+              if declares(carriers, "max_relative_growth") then
+                carriers.float("max_relative_growth", id)
+              else 0.0
+            refuse(
+              s"Carrier '$id' sets max_growth = $growth, with max_relative_growth = $relative, " +
+                "which limits capacity added between investment periods; that is an expansion " +
+                "constraint and expansion is refused here"
+            )
         }
-      }
     }
 
     // A global constraint scoped to one period. This one was *ruled safe* in the
@@ -158,22 +186,110 @@ object Periods:
       }
     }
 
-    // Storage that cycles *per period* rather than over the whole horizon is a
-    // different set of energy-balance rows -- the wrap closes at each period's
-    // last snapshot instead of the horizon's. PyPSA defaults both flags to
-    // false, so an ordinary multi-period network does not set them.
-    Seq("StorageUnit" -> "cyclic_state_of_charge_per_period", "Store" -> "e_cyclic_per_period")
-      .foreach { (component, attribute) =>
-        network.table(component).foreach { table =>
-          table.ids.foreach { id =>
-            if declares(table, attribute) && table.bool(attribute, id) then
+    // Three row families are built once over the whole horizon rather than once
+    // per period, so an asset whose activity window is not the whole horizon
+    // changes rows this model does not rebuild. Pinning the asset's columns to
+    // zero is enough for a *bound*; it is not enough for a row whose shape or
+    // right-hand side depends on which assets exist.
+    //
+    //   - Kirchhoff's voltage law. `Cycles.basis` is computed on the
+    //     whole-horizon topology and the same rows are emitted at every
+    //     snapshot. PyPSA rebuilds the cycle matrix per period --
+    //     `define_kirchhoff_voltage_constraints` loops `sns.unique("period")`
+    //     and calls `n.cycle_matrix(investment_period=period)`, "reflecting the
+    //     changing network topology over time". A line built in 2040 has its
+    //     flow correctly pinned to zero in 2030, but its 2040 cycle row is still
+    //     emitted there, collapsing to `x_A*f_A + x_B*f_B = 0` over what is
+    //     really a radial path: zero flow forced along it, or 2030 infeasible.
+    //   - Ramp limits. PyPSA masks every ramp row by `c.da.active`. Here a row
+    //     spanning a period boundary ties the first snapshot after an asset is
+    //     built to the zero it was pinned to before, so a unit may not start at
+    //     more than one period's worth of ramp.
+    //   - The storage and store energy balance, which is a chain of equalities
+    //     across the horizon. The columns are masked; the rows are not, and the
+    //     cases where that difference shows are enumerated below.
+    //
+    // Refused rather than approximated, until the basis is rebuilt per period.
+    // The staged line build is the canonical multi-investment case, so this is
+    // not a corner: `investment-periods` is single-bus only because it is the
+    // one fixture, not because branches are unusual.
+    val horizon = network.snapshots.indices
+
+    // Membership rather than role: a passive branch in no cycle contributes no
+    // Kirchhoff row, so pinning its flow to zero is the whole of its masking and
+    // there is nothing to refuse. Computed lazily -- a network with no
+    // partly-built asset never asks, and the basis is the expensive part of the
+    // build.
+    lazy val cycled: Set[(String, String)] =
+      Cycles.basis(network).flatMap(_.terms.map((component, id, _) => (component, id))).toSet
+
+    network.tables.values.foreach { table =>
+      table.ids.foreach { id =>
+        val absent = network.investmentPeriods.filterNot(activeIn(table, id, _))
+        if absent.nonEmpty then
+          val window = s"is not active in investment period(s) ${absent.mkString(", ")}"
+          if Role.of(table.spec) == Role.PassiveBranch && cycled.contains((table.spec.name, id)) then
+            refuse(
+              s"${table.spec.name} '$id' $window; the cycle basis is built once over the whole " +
+                "horizon, so its cycle rows would still be imposed in the periods it does not exist"
+            )
+          else if Ramps.limited(table, id, horizon) then
+            refuse(
+              s"${table.spec.name} '$id' is ramp-limited and $window; the ramp rows are not masked " +
+                "by the activity window, so the period it is built in would be entered at a ramp " +
+                "from zero rather than freely"
+            )
+          else if table.spec.name == "StorageUnit" || table.spec.name == "Store" then
+            // The columns *are* masked -- see `Lopf.build` -- but the energy
+            // balance is a chain of equality rows, and masking a column by
+            // pinning it to zero is only equivalent to PyPSA dropping the row
+            // where the row reads zero anyway. Three cases where it does not,
+            // and each is infeasible rather than merely different, which is at
+            // least loud:
+            //
+            //   - a cyclic unit, whose wrap closes at the horizon's last
+            //     snapshot -- one the unit may not exist at;
+            //   - a non-zero initial state, which lands on the right-hand side
+            //     at snapshot 0, outside the window, against pinned columns;
+            //   - inflow at a snapshot the unit is absent from, which is the
+            //     same row with a non-zero right-hand side.
+            val cyclic =
+              if table.spec.name == "StorageUnit" then Storage.isCyclic(table, id)
+              else Stores.isCyclic(table, id)
+            val initialAttribute =
+              if table.spec.name == "StorageUnit" then "state_of_charge_initial" else "e_initial"
+            val initial =
+              if declares(table, initialAttribute) then table.float(initialAttribute, id) else 0.0
+            val inflow =
+              table.spec.attribute("inflow").isDefined &&
+                horizon.exists(t => !activeAt(network, table, id, t) &&
+                  table.valueAt("inflow", id, t) != 0.0)
+
+            if cyclic then
               refuse(
-                s"$component '$id' sets $attribute, so its state wraps within each investment " +
-                  "period rather than across the horizon; only the horizon-wide cycle is modelled"
+                s"${table.spec.name} '$id' $window and wraps its state across the whole horizon; " +
+                  "the wrap closes at a snapshot it does not exist at"
               )
-          }
-        }
+            else if initial != 0.0 && !initial.isNaN then
+              refuse(
+                s"${table.spec.name} '$id' $window and sets $initialAttribute = $initial; that " +
+                  "state is carried at the first snapshot, which is outside its window"
+              )
+            else if inflow then
+              refuse(
+                s"${table.spec.name} '$id' $window and has inflow at a snapshot it is absent " +
+                  "from; the energy balance there has nowhere to put it"
+              )
       }
+    }
+
+    // Storage that cycles *per period* is refused by `Storage.reject` and
+    // `Stores.reject`, on every network rather than only a multi-period one.
+    // This carried its own copy of that check and covered two of the four flags,
+    // which reads as if the other two were handled: PyPSA treats an asset as
+    // per-period when *either* the cyclic or the initial flag is set (`CP | IP`
+    // in `define_storage_unit_constraints`), so a copy listing only the cyclic
+    // half is a shorter list of the same gap, not a narrower gap.
 
   private def declares(table: ComponentTable, attribute: String): Boolean =
     table.spec.attribute(attribute).isDefined || table.static.contains(attribute)

@@ -347,6 +347,10 @@ object UnitCommitment:
     //
     // So the shared refusal is gone and this is its own, which is the honest
     // shape: a network `Lopf` accepts and this one does not.
+    //
+    // `Periods.reject` is *not* also called here. It returns immediately unless
+    // `isMultiPeriod`, which the throw below has already excluded, so the call
+    // did nothing but read as a second layer of protection.
     if network.isMultiPeriod then
       throw new UnsupportedNetwork(
         s"network declares investment period(s) ${network.investmentPeriods.mkString(", ")} and " +
@@ -354,7 +358,6 @@ object UnitCommitment:
           "and a unit outside its build year has no status there. Lopf models multi-period " +
           "dispatch, but not with commitment"
       )
-    Periods.reject(network, m => throw new UnsupportedNetwork(m))
 
     Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
       throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")

@@ -194,22 +194,11 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
           "old,b,PQ,200.0,80.0,0,inf,1.0\n"),
     )
   }
-  refuses("a partly-built storage unit that wraps across the horizon", "wraps its state") {
-    withExtraFile(
-      "investment-periods",
-      "storage_units.csv",
-      "name,bus,p_nom,max_hours,build_year,lifetime,cyclic_state_of_charge\n" +
-        "s,b,10.0,4.0,2040,30.0,True\n",
-    )
-  }
-  refuses("a partly-built storage unit carrying an initial state", "state_of_charge_initial") {
-    withExtraFile(
-      "investment-periods",
-      "storage_units.csv",
-      "name,bus,p_nom,max_hours,build_year,lifetime,state_of_charge_initial\n" +
-        "s,b,10.0,4.0,2040,30.0,20.0\n",
-    )
-  }
+  // A partly-built storage unit or store is *not* here. Three cases were, on the
+  // grounds that pinning its columns to zero left the energy-balance rows saying
+  // something PyPSA does not say -- which was true, and the answer was to emit
+  // the rows over the asset's active snapshots rather than to refuse the network
+  // that exposes it. `LopfSuite` carries what replaced them.
   refuses("a period label that is not a year", "is not a year") {
     withFiles(
       "investment-periods",

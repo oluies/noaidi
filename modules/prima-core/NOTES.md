@@ -1130,10 +1130,12 @@ mechanism's blind spot as a human judgement is how a check starts lying.
 That leaves **46**, each with a line saying why it cannot change an answer.
 Nine belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
 attributes are unreachable rather than ignored — the distinction that made
-`investment_periods.csv` a bug and makes this not one. Seven are `discount_rate`,
-read only when an annuitised `overnight_cost` is, which `Expansion.reject`
-refuses on every network. The rest are inert in PyPSA's own optimiser, reached
-under a name that arrives in the data — `Carrier.co2_emissions` is read through
+`investment_periods.csv` a bug and makes this not one. `Process.discount_rate` is
+one of those nine, ruled on the group's grounds; the other **six**
+`discount_rate` entries are ruled separately, read only when an annuitised
+`overnight_cost` is, which `Expansion.reject` refuses on every network. The
+remaining thirty-one are inert in PyPSA's own optimiser, reached under a name
+that arrives in the data — `Carrier.co2_emissions` is read through
 `GlobalConstraint.carrier_attribute` and appears nowhere in this port — or
 descriptive.
 
@@ -1395,14 +1397,26 @@ masks all four storage variables and both store variables by `c.da.active` —
 mask — and the schema declares `build_year` and `lifetime` on seven components,
 not two.
 
-Pinning is equivalent to dropping only where the row reads zero anyway. The
-storage energy balance is a chain of equalities across the horizon, and three
-cases make the difference visible rather than harmless: a cyclic unit, whose wrap
-closes at a snapshot it may not exist at; a non-zero `state_of_charge_initial`
-or `e_initial`, which lands on the right-hand side at snapshot 0 against pinned
-columns; and inflow at a snapshot the unit is absent from. Each is refused, and
-each would otherwise be infeasible rather than merely different — loud, but
-loud about the wrong thing.
+Pinning a column to zero is equivalent to PyPSA dropping a row only where the
+row reads zero anyway, and the storage energy balance does not. It is a chain of
+equalities across the horizon, and emitting one at every snapshot while masking
+only the columns says two things PyPSA never says. At the first snapshot after a
+unit *retires*, every column in the row is pinned, so it collapses to
+`eff_stand · soc(t-1) = 0` — the unit is forced empty at its last active
+snapshot, which is dearer or infeasible with nothing to say why. At the *start*
+of a window the same row carries `state_of_charge_initial` and `inflow` on a
+right-hand side whose left is all zeros.
+
+So the rows are emitted over each asset's active snapshots, with the previous
+state taken from the previous *active* one. That is
+`m.add_constraints(..., mask=active)` and
+`soc.where(active).ffill.roll(1).ffill` written out, and it is why the first
+attempt at this — refusing the three cases where the collapse is visible — was
+the wrong shape: two of the three are start-of-window, so a retiring unit went
+unrefused *and* unmasked, and the third refused a network this port answers
+correctly. `state_of_charge_set` moved inside the same loop, because
+`define_fixed_operation_constraints` masks it by `active & ~isnull` and an
+unmasked row against a pinned column reads `0 = target`.
 
 `lifetime` defaults to infinity and a `NaN` is handled explicitly, because every
 comparison against `NaN` is false and the window would close in every period —
@@ -1461,7 +1475,7 @@ and a unit outside its build year has no status there. Pinning its dispatch to
 zero, which is what `Lopf` does, would leave the status variable free to sit at 1
 and collect a start-up cost for a unit that was never built.
 
-Three row families are built once over the whole horizon rather than once per
+Two row families are built once over the whole horizon rather than once per
 period, and an asset whose activity window is not the whole horizon changes rows
 this model does not rebuild — which is where pinning a column stops being enough.
 The **cycle basis** is computed on the whole-horizon topology, while PyPSA calls
@@ -1469,10 +1483,15 @@ The **cycle basis** is computed on the whole-horizon topology, while PyPSA calls
 its flow correctly pinned to zero in 2030 and its 2040 cycle row still imposed
 there, collapsing to `x_A·f_A + x_B·f_B = 0` over what is really a radial path.
 **Ramp rows** are masked by `c.da.active` in PyPSA and not here, so a unit would
-enter the period it is built in at a ramp from zero. And the **storage energy
-balance** is the chain described above. A partly-built asset in any of those
-three is refused; a partly-built passive branch in *no* cycle is not, because
+enter the period it is built in at a ramp from zero. A partly-built asset in
+either is refused; a partly-built passive branch in *no* cycle is not, because
 then the pinned column is the whole of its masking.
+
+The storage energy balance is the third family of this kind and is **not**
+refused — its rows are emitted over the active snapshots instead, as described
+above. That distinction is the whole of the judgement here: refuse where the
+faithful version is a different model, implement where it is the same model with
+its rows in the right places.
 
 The staged line build is the canonical multi-investment case, so this is not a
 corner. `investment-periods` is single-bus because it is the one fixture, not

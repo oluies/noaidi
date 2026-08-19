@@ -186,11 +186,11 @@ object Periods:
       }
     }
 
-    // Three row families are built once over the whole horizon rather than once
+    // Two row families are built once over the whole horizon rather than once
     // per period, so an asset whose activity window is not the whole horizon
     // changes rows this model does not rebuild. Pinning the asset's columns to
-    // zero is enough for a *bound*; it is not enough for a row whose shape or
-    // right-hand side depends on which assets exist.
+    // zero is enough for a *bound*; it is not enough for a row whose shape
+    // depends on which assets exist.
     //
     //   - Kirchhoff's voltage law. `Cycles.basis` is computed on the
     //     whole-horizon topology and the same rows are emitted at every
@@ -205,9 +205,14 @@ object Periods:
     //     spanning a period boundary ties the first snapshot after an asset is
     //     built to the zero it was pinned to before, so a unit may not start at
     //     more than one period's worth of ramp.
-    //   - The storage and store energy balance, which is a chain of equalities
-    //     across the horizon. The columns are masked; the rows are not, and the
-    //     cases where that difference shows are enumerated below.
+    //
+    // The storage and store energy balance is the third such family and is *not*
+    // refused: its rows are emitted over each asset's active snapshots, which is
+    // PyPSA's `mask=active` exactly. That was worth doing rather than refusing
+    // because the alternative -- pinned columns and a row everywhere -- reads as
+    // masking and is not: at the first snapshot after a unit retires the row
+    // collapses to `eff_stand · soc(t-1) = 0`, forcing it empty at its last
+    // active snapshot. See `Lopf.build`.
     //
     // Refused rather than approximated, until the basis is rebuilt per period.
     // The staged line build is the canonical multi-investment case, so this is
@@ -239,47 +244,6 @@ object Periods:
                 "by the activity window, so the period it is built in would be entered at a ramp " +
                 "from zero rather than freely"
             )
-          else if table.spec.name == "StorageUnit" || table.spec.name == "Store" then
-            // The columns *are* masked -- see `Lopf.build` -- but the energy
-            // balance is a chain of equality rows, and masking a column by
-            // pinning it to zero is only equivalent to PyPSA dropping the row
-            // where the row reads zero anyway. Three cases where it does not,
-            // and each is infeasible rather than merely different, which is at
-            // least loud:
-            //
-            //   - a cyclic unit, whose wrap closes at the horizon's last
-            //     snapshot -- one the unit may not exist at;
-            //   - a non-zero initial state, which lands on the right-hand side
-            //     at snapshot 0, outside the window, against pinned columns;
-            //   - inflow at a snapshot the unit is absent from, which is the
-            //     same row with a non-zero right-hand side.
-            val cyclic =
-              if table.spec.name == "StorageUnit" then Storage.isCyclic(table, id)
-              else Stores.isCyclic(table, id)
-            val initialAttribute =
-              if table.spec.name == "StorageUnit" then "state_of_charge_initial" else "e_initial"
-            val initial =
-              if declares(table, initialAttribute) then table.float(initialAttribute, id) else 0.0
-            val inflow =
-              table.spec.attribute("inflow").isDefined &&
-                horizon.exists(t => !activeAt(network, table, id, t) &&
-                  table.valueAt("inflow", id, t) != 0.0)
-
-            if cyclic then
-              refuse(
-                s"${table.spec.name} '$id' $window and wraps its state across the whole horizon; " +
-                  "the wrap closes at a snapshot it does not exist at"
-              )
-            else if initial != 0.0 && !initial.isNaN then
-              refuse(
-                s"${table.spec.name} '$id' $window and sets $initialAttribute = $initial; that " +
-                  "state is carried at the first snapshot, which is outside its window"
-              )
-            else if inflow then
-              refuse(
-                s"${table.spec.name} '$id' $window and has inflow at a snapshot it is absent " +
-                  "from; the energy balance there has nowhere to put it"
-              )
       }
     }
 

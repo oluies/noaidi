@@ -91,8 +91,17 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     CsvReader.read(dir, schema, name)
 
   private def withExtraFile(name: String, file: String, content: String): Network =
+    withFiles(name, file -> content)
+
+  /** A golden network with several files added or rewritten at once.
+    *
+    * A component and its series are two files, and a component the fixture does
+    * not carry needs both written before the network is anything but a static
+    * table with nowhere for its values to come from.
+    */
+  private def withFiles(name: String, files: (String, String)*): Network =
     val dir = copyOf(name)
-    Files.writeString(dir.resolve(file), content)
+    files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
     CsvReader.read(dir, schema, name)
 
   override def afterAll(): Unit =
@@ -1538,6 +1547,55 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     // And it does run in its own period, so the zeros above are the window
     // rather than a unit that was never worth using.
     assert(r.discharging("s", 3) > 1e-6, s"the unit is idle in 2040 too: ${r.solution}")
+  }
+
+  test("a retiring storage unit is not forced empty at its last active snapshot") {
+    assume(available, "goldens missing")
+    // The other end of the activity window, and the one masking the columns does
+    // not reach. PyPSA adds the energy balance with `mask=active` and takes the
+    // previous state from `soc.where(active).ffill.roll(1).ffill`, so an
+    // inactive snapshot gets no row. Emitting a row everywhere and leaning on
+    // the pinned columns is not the same: at the first snapshot after the unit
+    // retires, `soc`, `p_dispatch`, `p_store` and `spill` are all `[0, 0]`, so
+    // the row collapses to `eff_stand · soc(t-1) = 0` and empties the unit at
+    // its last active snapshot -- a constraint PyPSA never imposes.
+    //
+    // The unit here is active in 2030 and gone in 2040, cannot discharge
+    // (`p_max_pu = 0`) and receives 5 of inflow at the second 2030 snapshot. Its
+    // only choices are to hold that energy or to spill it at a cost of 10. PyPSA
+    // lets it hold; a row at snapshot 2 forces the spill and adds 50.
+    val n = withFiles(
+      "investment-periods",
+      "storage_units.csv" ->
+        ("name,bus,p_nom,max_hours,build_year,lifetime,p_max_pu,spill_cost\n" +
+          "s,b,10.0,4.0,2020,15.0,0.0,10.0\n"),
+      "storage_units-inflow.csv" -> ",s\n0,0.0\n1,5.0\n2,0.0\n3,0.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.stateOfCharge("s", 1), 5.0, 1e-6,
+      "the unit was emptied at its last active snapshot")
+    assertEqualsDouble(r.spill("s", 1), 0.0, 1e-6, "the inflow was spilled rather than held")
+    assertEqualsDouble(r.objective, 17000.0, 1e-4, "the forced spill is being paid for")
+  }
+
+  test("a state-of-charge set point outside the window is ignored, not made infeasible") {
+    assume(available, "goldens missing")
+    // `define_fixed_operation_constraints` masks the set point by
+    // `active & ~isnull`. Against a column pinned to `[0, 0]` an unmasked row
+    // reads `0 = target`, so a file written once for the whole horizon -- the
+    // ordinary way to write one -- would make the LP infeasible and the failure
+    // would be reported as the network's.
+    val n = withFiles(
+      "investment-periods",
+      "storage_units.csv" ->
+        "name,bus,p_nom,max_hours,build_year,lifetime\ns,b,10.0,4.0,2040,30.0\n",
+      "storage_units-state_of_charge_set.csv" -> ",s\n0,20.0\n1,\n2,\n3,\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.stateOfCharge("s", 0), 0.0, 1e-6,
+      "the 2030 set point was applied to a unit that does not exist yet")
   }
 
   test("a delayed link matches PyPSA's") {

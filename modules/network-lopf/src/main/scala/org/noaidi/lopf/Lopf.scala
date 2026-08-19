@@ -438,18 +438,36 @@ object Lopf:
     // with `eff_stand = (1 - standing_loss)^eh`. Written with every variable on
     // the left and the constants on the right, as an equality.
     //
-    // `soc(t-1)` is the previous snapshot's variable; at t = 0 it is either the
-    // *last* snapshot's variable (cyclic) or absent, with `state_of_charge_initial`
-    // moving to the right-hand side. Those are different constraint matrices, not
-    // different numbers, which is why `storage-cycle` carries one unit of each.
+    // `soc(t-1)` is the previous *active* snapshot's variable; at the first one
+    // it is either the last active snapshot's (cyclic) or absent, with
+    // `state_of_charge_initial` moving to the right-hand side. Those are
+    // different constraint matrices, not different numbers, which is why
+    // `storage-cycle` carries one unit of each.
+    //
+    // ==Rows over the active snapshots, not all of them==
+    //
+    // PyPSA adds this constraint with `mask=active` and takes the previous state
+    // from `soc.where(active).ffill.roll(1).ffill`, so an inactive snapshot gets
+    // no row at all and an active one reaches back past any gap. Emitting a row
+    // everywhere and relying on the pinned columns is *not* the same thing: at
+    // the first snapshot after a unit retires every column in the row is pinned
+    // to zero, so the row collapses to `eff_stand · soc(t-1) = 0` and forces the
+    // unit empty at its last active snapshot -- a constraint PyPSA does not
+    // impose, making the answer dearer or infeasible with nothing to say why.
+    // The same row at the *start* of a window carried `state_of_charge_initial`
+    // and `inflow` on a right-hand side whose left was all zeros.
+    def activeSnapshots(table: ComponentTable, id: String): IndexedSeq[Int] =
+      snapshots.filter(t => Periods.activeAt(network, table, id, t))
+
     storage.foreach { s =>
       s.ids.foreach { id =>
         val effDispatch = (t: Int) => s.valueAt("efficiency_dispatch", id, t)
         val effStore    = (t: Int) => s.valueAt("efficiency_store", id, t)
         val cyclic      = Storage.isCyclic(s, id)
         val initial     = s.float("state_of_charge_initial", id)
+        val active      = activeSnapshots(s, id)
 
-        snapshots.foreach { t =>
+        active.zipWithIndex.foreach { (t, i) =>
           val eh = elapsedHours(t)
           if !(effDispatch(t) > 0.0) then
             throw new UnsupportedNetwork(
@@ -466,7 +484,7 @@ object Lopf:
           terms += ((columns((Storage.Store, id, t)), -eh * effStore(t)))
           terms += ((columns((Storage.Spill, id, t)), eh))
 
-          val previous = if t > 0 then Some(t - 1) else if cyclic then Some(snapshots.last) else None
+          val previous = if i > 0 then Some(active(i - 1)) else if cyclic then Some(active.last) else None
           previous.foreach(p => terms += ((columns((Storage.SoC, id, p)), -effStand)))
 
           // Inflow is a rate, so it is energy only after multiplying by the
@@ -478,6 +496,13 @@ object Lopf:
           // by construction -- `storage-hvdc` sets two values across 6 units and
           // 12 snapshots -- and the absent entries are NaN rather than zero,
           // which is what distinguishes "not set" from "set to empty".
+          //
+          // Inside the active loop for the same reason as the balance:
+          // `define_fixed_operation_constraints` masks it by `active & ~isnull`,
+          // so a set point at a snapshot the unit does not exist at is dropped.
+          // Emitted against a column pinned to zero it would read `0 = target`
+          // and make the LP infeasible -- reported as the network's problem
+          // rather than as this model's.
           val target = s.valueAt("state_of_charge_set", id, t)
           if target.isFinite then
             builder.equalityConstraint(Seq(columns((Storage.SoC, id, t)) -> 1.0), target)
@@ -539,8 +564,12 @@ object Lopf:
       store.ids.foreach { id =>
         val cyclic  = Stores.isCyclic(store, id)
         val initial = store.float("e_initial", id)
+        // Over the active snapshots, for the reason the storage balance gives:
+        // `define_store_constraints` carries the identical `mask=active` and
+        // `e.where(active).ffill.roll(1).ffill` treatment.
+        val active  = activeSnapshots(store, id)
 
-        snapshots.foreach { t =>
+        active.zipWithIndex.foreach { (t, i) =>
           val eh       = elapsedHours(t)
           val effStand = math.pow(1.0 - store.valueAt("standing_loss", id, t), eh)
           val terms    = mutable.ArrayBuffer.empty[(Int, Double)]
@@ -548,7 +577,7 @@ object Lopf:
           terms += ((columns((Stores.Energy, id, t)), 1.0))
           terms += ((columns((Stores.Power, id, t)), eh))
 
-          val previous = if t > 0 then Some(t - 1) else if cyclic then Some(snapshots.last) else None
+          val previous = if i > 0 then Some(active(i - 1)) else if cyclic then Some(active.last) else None
           previous.foreach(p => terms += ((columns((Stores.Energy, id, p)), -effStand)))
 
           builder.equalityConstraint(terms.toSeq, if previous.isEmpty then initial else 0.0)

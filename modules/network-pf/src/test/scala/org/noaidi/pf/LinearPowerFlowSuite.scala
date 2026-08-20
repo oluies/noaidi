@@ -467,28 +467,59 @@ class LinearPowerFlowSuite extends munit.FunSuite:
     assertEqualsDouble(result(network("phase-shift")).flow("Transformer", "t1", 0), shiftedFlow, 1e-6)
   }
 
-  test("PyPSA's optimisation ignores the phase shift its power flow applies") {
+  test("PyPSA's two L2 models agree about a phase shift") {
     assume(available, "goldens missing")
-    // Not a defect in this port, and worth pinning because it looks like one.
-    // `n.lpf()` builds `p_branch_shift = -b * phi` and carries it through, while
-    // the Kirchhoff row in `n.optimize()` is `sum(x_l s_l) == 0` with no shift
-    // term -- so PyPSA's own two L2 models disagree about the same network. The
-    // optimised flows are identical to the unshifted fixture's; the linear ones
-    // are not.
-    val optimised = ujson.read(
+    // This asserted the opposite until PyPSA 1.3.0, and the reversal is the
+    // reason to keep asserting something. Through 1.2.4 `n.lpf()` built
+    // `p_branch_shift = -b * phi` and carried it through while the Kirchhoff row
+    // in `n.optimize()` was `sum(x_l s_l) == 0` with no shift term, so upstream's
+    // own two L2 models disagreed about the same network -- which looks like a
+    // defect in whichever is read second and was worth pinning as not one.
+    //
+    // 1.3.0 put the shift in the Kirchhoff row, so they no longer disagree *about
+    // the shift*. They still differ where a rating binds, which is an ordinary
+    // difference between an optimisation and a flow calculation rather than
+    // anything to do with phase shifters: at 9 degrees the linear answer puts
+    // 402.4 and 403.8 MW through `t2`, rated 400, and the LOPF redispatches onto
+    // the 60/MWh generator at `lv2` instead of overloading it.
+    //
+    // Both halves are pinned rather than just the agreement: that the shifted
+    // answer is *not* the unshifted one is what says the shift is being applied
+    // at all, and two models that both ignored it would agree just as exactly.
+    //
+    // Golden against golden, invoking no port code -- deliberately, because this
+    // is a statement about upstream. `LopfSuite` holds this module's own solver to
+    // the same fixture.
+    val shifted = ujson.read(
       Files.readString(goldens.resolve("results").resolve("phase-shift.json"))
-    )("optimize")("transformer_p0")
+    )
     val unshifted = ujson.read(
       Files.readString(goldens.resolve("results").resolve("transformer-levels.json"))
     )("optimize")("transformer_p0")
 
-    val stamps = network("phase-shift").snapshots
+    val shiftedNetwork = network("phase-shift")
+    val rating         = shiftedNetwork.require("Transformer").float("s_nom", "t2")
+    val stamps         = shiftedNetwork.snapshots
     stamps.indices.foreach { t =>
-      assertEqualsDouble(
-        frameValue(optimised, t, "t1", stamps(t)),
-        frameValue(unshifted, t, "t1", stamps(t)),
-        1e-6,
-        s"PyPSA's LOPF now differs under a phase shift at snapshot $t",
+      val optimised = frameValue(shifted("optimize")("transformer_p0"), t, "t1", stamps(t))
+      val linear    = frameValue(shifted("lpf")("transformer_p0"), t, "t1", stamps(t))
+      val linearT2  = frameValue(shifted("lpf")("transformer_p0"), t, "t2", stamps(t))
+      // Split on whether the linear answer is one the optimiser could have
+      // chosen. Where it stays inside t2's rating the two agree exactly, which is
+      // the claim that the shift reaches both. Where it does not, they must
+      // differ -- a LOPF that reproduced an overloaded flow would be ignoring the
+      // rating, not honouring the shift.
+      if math.abs(linearT2) <= rating + 1e-6 then
+        assertEqualsDouble(optimised, linear, 1e-6,
+          s"LOPF and LPF disagree at snapshot $t, where no rating binds")
+      else
+        assert(
+          math.abs(optimised - linear) > 1e-6,
+          s"the LOPF reproduced a linear flow that overloads t2 at snapshot $t",
+        )
+      assert(
+        math.abs(optimised - frameValue(unshifted, t, "t1", stamps(t))) > 1.0,
+        s"the shifted and unshifted optima agree at snapshot $t, so the shift is inert",
       )
     }
   }

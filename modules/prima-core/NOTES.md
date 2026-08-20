@@ -887,20 +887,33 @@ gap here was found at the moment some code had to decide what to do with a value
 this one had no such moment. Searching for attributes the schema declares and the
 port never mentions would have found it, and nothing else in the process would.
 
-### PyPSA's own two models disagree
+### PyPSA's own two models disagreed, until 1.3.0
 
-Worth knowing before concluding either is broken. `n.lpf()` applies the shift.
-`n.optimize()` does not: its Kirchhoff row is `Σ x_l s_l = 0` with no shift term,
-so the optimised flows are **identical** at 0° and 30°.
+Worth knowing before concluding either is broken. Through 1.2.4 `n.lpf()` applied
+the shift and `n.optimize()` did not: its Kirchhoff row was `Σ x_l s_l = 0` with
+no shift term, so the optimised flows were **identical** at 0° and 30°.
 
-So the LOPF here was never wrong — it matches PyPSA including this omission — and
-`phase-shift` pins both halves: that the linear flow honours the shift, and that
-the optimisation does not.
+So the LOPF here was never wrong — it matched PyPSA including this omission — and
+`phase-shift` pinned both halves: that the linear flow honours the shift, and
+that the optimisation does not.
 
-The AC path refused it for a long time — `Y` needs `exp(jφ)` on one off-diagonal
-and its conjugate on the other, which is asymmetry rather than scaling — and the
-golden recorded an answer the port declined to compute. It is now modelled; see
-*The AC transformer model* below for what that turned out to cost.
+**PyPSA 1.3.0 closed it**, and the pin bump is where this port had to follow.
+`define_kirchhoff_voltage_constraints` now builds
+
+```
+Σ_l C_lk (x_l s_l + φ_l) = 0        (φ in radians, transformers only)
+```
+
+so the shift moved from being absent to being a constant on the right-hand side,
+and a port that kept the old row would have gone on returning the unshifted
+dispatch against a golden that no longer holds it. That is the whole compatibility
+break of the release for this repository — see *PyPSA 1.3.0* below.
+
+The AC path refused the shift for a long time — `Y` needs `exp(jφ)` on one
+off-diagonal and its conjugate on the other, which is asymmetry rather than
+scaling — and the golden recorded an answer the port declined to compute. It is
+now modelled; see *The AC transformer model* below for what that turned out to
+cost.
 
 ## Ramp limits and energy budgets: the same shape, twice more
 
@@ -1822,6 +1835,89 @@ phase shift is not modelled anywhere in this port. The fixture uses
 `160 MVA 380/110 kV`, which has none. So: a transformer standard type works
 today if it is a transmission-level unit declared `pi`. The T model and phase
 shift are the next two pieces, and both need goldens of their own.
+
+## PyPSA 1.3.0, and a pin that stopped being free
+
+The goldens are pinned, so they cannot drift; upstream can, and
+`.github/workflows/pypsa-drift.yml` exists to notice. PyPSA 1.3.0 landed on
+2026-08-19, a day before this bump, so the weekly cron had not yet run — the
+release was found by running the drift process by hand against it.
+
+`schema_drift.py` reported **43 changes that can move an answer**, all of them
+from three upstream features, and the sweep reported **14 new input attributes**.
+The attribute count went 422 → 454; the component set did not change.
+
+### Only two networks moved, and both for the same reason
+
+Solving all 22 golden networks under 1.3.0 before changing anything is what made
+this a small change rather than a guess. Twenty of them returned the pinned
+objective to 1e-6. The two that did not — `phase-shift` and `transformer-taps` —
+were the two carrying a phase shift, and both came back **Infeasible**.
+
+That is the release's one real compatibility break for this port, and it is
+described under *Phase shift, and a bug with nowhere to live* above: the shift is
+now a constant in the Kirchhoff row rather than absent from it. This port's row
+gained the same term.
+
+Both fixtures also had to have their shifts reduced, which is worth stating
+because it is a fixture change rather than a code one. A shift forces a
+circulating flow around the cycle, and past **10.044°** on `phase-shift` and
+**10.007°** on `transformer-taps` that flow exceeds a transformer rating with
+nowhere else to go. The old 30° and 12° are simply not solvable networks any
+more.
+
+`phase-shift` went to **9°** rather than the 10° that is also feasible, because
+10° sits 0.04° from the edge and a fixture that close to infeasibility is one
+solver tolerance away from failing for no reason. 9° is also a better fixture
+than 30° was even setting feasibility aside: `t2` binds at its 400 MW rating, so the shift can no longer be
+absorbed by re-routing alone and the **objective** moves with it — 8,524.43
+against 7,800 unshifted. Every smaller shift is pure re-routing at constant cost,
+which an objective-only comparison cannot see. `transformer-taps` went to **8°**,
+where nothing binds and the flows still reverse; no shift moves that network's
+objective before it becomes infeasible.
+
+### The other two features are refused, not modelled
+
+Both are inert at their defaults, which is exactly why nothing existing caught
+them and why they need a refusal rather than a ruling alone.
+
+**Maintenance scheduling.** `maintainable` turns an entity's availability into a
+binary schedule — `maintenance_events` outages of `maintenance_duration`
+snapshots, capped at `maintenance_pu`. Placing them is an integer decision, so it
+is the same shape as commitment one attribute over, and `Commitment.reject`
+refuses it on every component declaring the flag. Ignoring it errs **cheap**: the
+entity stays available at every snapshot.
+
+**Piecewise costs.** `marginal_cost`, `capital_cost` and `efficiency` may now be
+piecewise-linear, which the schema records by widening their type to `static or
+piecewise or series`. The breakpoints are not in that column — they are a file
+beside the component, `<list>-<attr>_piecewise.csv` — and `CsvReader` takes any
+such file for a time series. So the curve loads, nothing reads it, and the
+objective is built from the static column it was meant to replace.
+
+**Optimisable phase shifts** are refused for the same class of reason: when
+`phase_shift_min < phase_shift_max` the shift is a per-snapshot *variable* in the
+row, not the constant this model puts there.
+
+### Two things the release broke quietly
+
+Neither is upstream's fault and both were found by the bump rather than by
+review.
+
+The sweep was **manufacturing** `Transformer.phase_shift_min` and
+`phase_shift_max` and reporting them accounted for. `interpolated` was the
+cross-product of every quoted identifier with `{_extendable, _max, _min, _mod}`,
+the port quotes `"phase_shift"` for the linear flow, and the two new attributes
+fell straight out of it. Its own scaladoc had recorded that this can only ever
+mask, never report — invisible until the week upstream ships a name the
+cross-product happens to have invented. The stems now come from
+`Expansion.nominalAttribute`, which is the map that actually binds them.
+
+`Variability.parse` tested `startsWith("static or series")`, which
+`static or piecewise or series` does not satisfy. All nine widened attributes
+carry `varying = true` so the fallback kept them right — but the fallback is the
+weaker signal, and a piecewise attribute that did not vary by snapshot would have
+been read as `Static` with its overrides silently dropped.
 
 ## Known gaps
 

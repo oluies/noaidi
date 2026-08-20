@@ -2,8 +2,10 @@ name: PyPSA drift
 
 # The goldens are pinned, so they cannot drift. Upstream can.
 #
-# Everything in CI reads `reference/goldens`, which was generated from PyPSA
-# 1.2.4 and will keep saying the port is correct long after PyPSA has moved. The
+# Everything in CI reads `reference/goldens`, which was generated from a pinned
+# PyPSA and will keep saying the port is correct long after PyPSA has moved. The
+# pinned version is read from `manifest.json` at run time rather than written
+# here, so this comment does not go stale on a bump. The
 # only way to see that is to go and look at a version this repository is not
 # pinned to, which is what this does: install the newest PyPSA, ask it for its
 # component registry, and diff.
@@ -202,20 +204,28 @@ jobs:
           # The count is parsed rather than pinned. Asserting the literal `Total 5`
           # would break this job every time a case is added to the suite, with an
           # error saying the sweep did not run -- which is both wrong and the kind
-          # of false alarm that gets a weekly cron muted. `ignored` is checked too:
-          # every case begins `assume(available)`, so a schema that failed to
-          # appear would skip all of them and still report a total.
+          # of false alarm that gets a weekly cron muted.
+          #
+          # `ignored` is checked too, and on its own it does not do what its
+          # comment claimed. Every case begins `assume(available)`, and munit
+          # reports a failed assume as **skipped**, not ignored -- a suite that
+          # skipped all five prints `0 failed, 0 ignored, 5 total` and exits 0,
+          # which is byte-identical to a clean run. The path grep above is what
+          # actually catches that case, because `assume` fires before the println
+          # it greps for; `skipped` is parsed here as well so the two guards do
+          # not both depend on that one ordering.
           summary=$(grep -E '^Test run .* finished:' sweep.log | tail -1 || true)
           total=$(sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p' <<<"$summary")
           ignored=$(sed -nE 's/.*[^0-9]([0-9]+) ignored.*/\1/p' <<<"$summary")
+          skipped=$(grep -cE '^==> s ' sweep.log || true)
           echo "sweep: ${summary:-<no summary line>}"
           if [ -z "${total:-}" ] || [ "$total" -lt 1 ]; then
             echo "::error::the sweep reported no cases -- it did not run"
             fail_hard "The sweep emitted no munit summary line, so it never ran its cases."
           fi
-          if [ "${ignored:-0}" -ne 0 ]; then
-            echo "::error::$ignored sweep case(s) were skipped; the schema was not readable"
-            fail_hard "$ignored sweep case(s) were skipped, so the generated schema was not readable."
+          if [ "${ignored:-0}" -ne 0 ] || [ "${skipped:-0}" -ne 0 ]; then
+            echo "::error::$((${ignored:-0} + ${skipped:-0})) sweep case(s) did not run; the schema was not readable"
+            fail_hard "$((${ignored:-0} + ${skipped:-0})) sweep case(s) did not run, so the generated schema was not readable."
           fi
           echo "clean=$([ "$status" -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 

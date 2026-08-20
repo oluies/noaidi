@@ -222,6 +222,13 @@
     "unit": "currency/MW",
     "varying": false
    },
+   "capital_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
@@ -280,7 +287,7 @@
    "efficiency": {
     "default": 1.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
     "unit": "per unit",
     "varying": true
    },
@@ -300,10 +307,59 @@
     "unit": "years",
     "varying": false
    },
+   "maintainable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": null,
+    "varying": false
+   },
+   "maintenance": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": null,
+    "varying": true
+   },
+   "maintenance_duration": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "hours",
+    "varying": false
+   },
+   "maintenance_events": {
+    "default": 1,
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": null,
+    "varying": false
+   },
+   "maintenance_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "maintenance_start": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": null,
+    "varying": true
+   },
    "marginal_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
     "unit": "currency/MWh",
     "varying": true
    },
@@ -722,6 +778,13 @@
     "unit": "currency/MVA",
     "varying": false
    },
+   "capital_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/MVA",
+    "varying": false
+   },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
@@ -1093,6 +1156,13 @@
     "unit": "currency/MW",
     "varying": false
    },
+   "capital_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
@@ -1140,7 +1210,7 @@
    "efficiency": {
     "default": 1.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
     "unit": "per unit",
     "varying": true
    },
@@ -1167,10 +1237,59 @@
     "unit": "years",
     "varying": false
    },
+   "maintainable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": null,
+    "varying": false
+   },
+   "maintenance": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": null,
+    "varying": true
+   },
+   "maintenance_duration": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "hours",
+    "varying": false
+   },
+   "maintenance_events": {
+    "default": 1,
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": null,
+    "varying": false
+   },
+   "maintenance_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "maintenance_start": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": null,
+    "varying": true
+   },
    "marginal_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
     "unit": "currency/MWh",
     "varying": true
    },
@@ -1580,6 +1699,13 @@
     "unit": "currency/MW",
     "varying": false
    },
+   "capital_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
@@ -1661,10 +1787,59 @@
     "unit": "years",
     "varying": false
    },
+   "maintainable": {
+    "default": false,
+    "status": "Input (optional)",
+    "type": "boolean",
+    "unit": null,
+    "varying": false
+   },
+   "maintenance": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": null,
+    "varying": true
+   },
+   "maintenance_duration": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "hours",
+    "varying": false
+   },
+   "maintenance_events": {
+    "default": 1,
+    "status": "Input (optional)",
+    "type": "int",
+    "unit": null,
+    "varying": false
+   },
+   "maintenance_pu": {
+    "default": 1.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "per unit",
+    "varying": false
+   },
+   "maintenance_start": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": null,
+    "varying": true
+   },
    "marginal_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
     "unit": "currency/MWh",
     "varying": true
    },
@@ -1895,14 +2070,14 @@
    "rate0": {
     "default": -1.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
     "unit": "per unit",
     "varying": true
    },
    "rate1": {
     "default": 1.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
     "unit": "per unit",
     "varying": true
    },
@@ -2125,6 +2300,13 @@
     "unit": "currency/MW",
     "varying": false
    },
+   "capital_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/MW",
+    "varying": false
+   },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
@@ -2202,7 +2384,14 @@
    "marginal_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
     "unit": "currency/MWh",
     "varying": true
    },
@@ -2510,6 +2699,13 @@
     "unit": "currency/MWh",
     "varying": false
    },
+   "capital_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "float",
+    "unit": "currency/MWh",
+    "varying": false
+   },
    "carrier": {
     "default": "",
     "status": "Input (optional)",
@@ -2656,7 +2852,14 @@
    "marginal_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "static or series",
+    "type": "static or piecewise or series",
+    "unit": "currency/MWh",
+    "varying": true
+   },
+   "marginal_cost_piecewise_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
     "unit": "currency/MWh",
     "varying": true
    },
@@ -2952,9 +3155,30 @@
    "phase_shift": {
     "default": 0.0,
     "status": "Input (optional)",
+    "type": "static or series",
+    "unit": "Degrees",
+    "varying": true
+   },
+   "phase_shift_max": {
+    "default": 0.0,
+    "status": "Input (optional)",
     "type": "float",
     "unit": "Degrees",
     "varying": false
+   },
+   "phase_shift_min": {
+    "default": 0.0,
+    "status": "Input (optional)",
+    "type": "float",
+    "unit": "Degrees",
+    "varying": false
+   },
+   "phase_shift_opt": {
+    "default": 0.0,
+    "status": "Output",
+    "type": "series",
+    "unit": "Degrees",
+    "varying": true
    },
    "q0": {
     "default": 0.0,

@@ -192,5 +192,40 @@ object Cycles:
           s"$other '$id' is a passive branch whose per-unit base is not known here"
         )
 
+  /** Refuse a transformer whose phase shift is a decision rather than a given.
+    *
+    * PyPSA 1.3.0 makes the shift a per-snapshot variable when
+    * `phase_shift_min < phase_shift_max`: `define_phase_shift_variables` bounds
+    * `Transformer-phase_shift` by the two, and
+    * `define_kirchhoff_voltage_constraints` puts that variable into the cycle sum
+    * where the constant would otherwise go. The row built in [[Lopf]] takes the
+    * shift as given, so on such a network it would hold every shifter at its
+    * static `phase_shift` and return the cost of a tap position the optimiser was
+    * free to move -- dearer than the truth, or infeasible and reported as the
+    * network's problem rather than as this model's.
+    *
+    * `min < max` exactly as PyPSA tests it. A pair left at the default `0.0` and
+    * `0.0` is not a range and does not refuse, which is what keeps every network
+    * that has never heard of the feature working. Nor is an inverted pair:
+    * `check_phase_shift_bounds` flags `min > max` as a likely mistake and PyPSA
+    * then holds the shift fixed at `phase_shift`, which is what this model does
+    * with it anyway -- so refusing there would turn an agreement into an error.
+    */
+  def rejectOptimisableShift(network: Network, refuse: String => Nothing): Unit =
+    network.table("Transformer").foreach { table =>
+      if table.spec.attribute("phase_shift_min").isDefined then
+        table.ids.foreach { id =>
+          val low  = Branches.optional(table, "phase_shift_min", id)
+          val high = Branches.optional(table, "phase_shift_max", id)
+          if low < high then
+            refuse(
+              s"Transformer '$id' has phase_shift_min = $low below phase_shift_max = $high, so its " +
+                "phase shift is a per-snapshot decision variable in the Kirchhoff row rather than " +
+                "the constant this model puts there; the shift would be held at its static value " +
+                "and the tap left unoptimised"
+            )
+        }
+    }
+
   private def busVoltage(network: Network, bus: String): Double =
     network.table("Bus").map(_.float("v_nom", bus)).getOrElse(0.0)

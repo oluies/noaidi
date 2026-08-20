@@ -1049,18 +1049,24 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assert(failure.getMessage.contains("hydro"), failure.getMessage)
   }
 
-  test("a phase shift changes the linear flow but not the optimised dispatch") {
+  test("a phase shift moves the optimised dispatch, not only the linear flow") {
     assume(available, "goldens missing")
-    // The half of the claim that was missing. `LinearPowerFlowSuite` asserted
-    // "PyPSA's LOPF ignores the shift" by comparing two goldens to each other,
-    // which invokes no port code at all -- so if someone added a shift term to
-    // `Cycles`, every test would still pass while this module silently diverged
-    // from the golden it is supposed to match.
+    // This test used to assert the opposite, and PyPSA 1.3.0 is why.
     //
-    // PyPSA's Kirchhoff row is `sum(x_l s_l) == 0` with no shift term, so the
-    // optimised flows on `phase-shift` are identical to `transformer-levels`,
-    // which differs from it only by 30 degrees on t1. The linear flow is not: t1
-    // carries -840.53 MW there against +150.66 here.
+    // Through 1.2.4 the Kirchhoff row was `sum(x_l s_l) == 0` with no shift term,
+    // so PyPSA's own optimisation ignored a shift its power flow applied and the
+    // optimised flows on `phase-shift` were identical to `transformer-levels`.
+    // 1.3.0's `define_kirchhoff_voltage_constraints` builds
+    // `sum_l C_lk (x_l s_l + phase_shift_l) = 0` instead, so the optimisation
+    // honours it too. The two models still part company where a rating binds --
+    // `LinearPowerFlowSuite` pins which snapshots those are and why -- but they
+    // no longer disagree about the shift itself.
+    //
+    // The shift is worth an objective here and not only a re-routing: at 9
+    // degrees `t2` runs into its 400 MW rating, so the shifted answer costs
+    // 8,524.43 against the unshifted 7,800. Every smaller shift is free, which
+    // is what makes this fixture stronger than the 30-degree one it replaces --
+    // that one was infeasible under 1.3.0 anyway.
     val expected = results("phase-shift")("optimize")
     assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
 
@@ -1085,17 +1091,25 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       n.require("Transformer").float("phase_shift", "t1") != 0.0,
       "the fixture no longer has a phase shift, so it cannot distinguish anything",
     )
-    // And the unshifted sibling optimises to the same flows, which is the
-    // property being pinned.
+    // And the unshifted sibling optimises to *different* flows, which is the
+    // property being pinned. Dropping the shift term from the Kirchhoff row
+    // leaves a model that balances every bus, satisfies every rating and returns
+    // `Optimal` on this dispatch -- so without this comparison the term could go
+    // missing and only the objective assertion above would notice.
     val plain = Lopf.solve(network("transformer-levels"), params)
-    n.snapshots.indices.foreach { t =>
-      assertEqualsDouble(
-        result.dispatch("Transformer", "t1", t),
-        plain.dispatch("Transformer", "t1", t),
-        1e-3,
-        s"the optimised flows differ under a shift at snapshot $t",
-      )
+    assertEquals(plain.status, SolveStatus.Optimal, s"${plain.solution}")
+    val moved = n.snapshots.indices.count { t =>
+      math.abs(result.dispatch("Transformer", "t1", t) - plain.dispatch("Transformer", "t1", t)) > 1.0
     }
+    assertEquals(moved, n.snapshots.size,
+      "the shift left some snapshot's flow where the unshifted network puts it")
+    // t1 reverses outright rather than merely moving: +150.66 MW unshifted
+    // against -146.70 here.
+    assert(
+      plain.dispatch("Transformer", "t1", 0) > 0.0 && result.dispatch("Transformer", "t1", 0) < 0.0,
+      s"t1 does not reverse: ${plain.dispatch("Transformer", "t1", 0)} -> " +
+        s"${result.dispatch("Transformer", "t1", 0)}",
+    )
   }
 
   test("an inactive component is excluded from the model, not dispatched at zero") {

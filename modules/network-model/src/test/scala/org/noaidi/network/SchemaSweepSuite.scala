@@ -259,6 +259,18 @@ object SchemaSweepSuite:
       */
     case MultiPeriodOnly
 
+    /** PyPSA reads it only under a flag this port refuses, so the refusal is
+      * reached before the attribute can be.
+      *
+      * Narrower than [[ComponentRefused]], which rests on a whole table being
+      * unhandled, and a different kind of claim from [[Inert]], which is about
+      * PyPSA rather than about this port. This one has a moving part: it holds
+      * exactly as long as the refusal does, so a line under this verdict names
+      * the refusal carrying it and must go when that refusal goes -- the same
+      * deliberate deletion `GapRefusalSuite` asks for when a gap closes.
+      */
+    case GatedByRefusal
+
     /** PyPSA's own optimiser and power flow never read it, so no value of it can
       * move an answer this port is checked against.
       */
@@ -291,6 +303,26 @@ object SchemaSweepSuite:
     * thing to delete.
     */
   val ledger: Vector[Ruling] =
+    // ---- Read only behind a refusal ------------------------------------------
+    //
+    // Maintenance scheduling, new in PyPSA 1.3.0. `Commitment.reject` refuses any
+    // entity with `maintainable` set, on any component declaring it, so the three
+    // attributes that describe the outages -- how many, how long, and what the
+    // entity can still do during one -- are unreachable rather than ignored.
+    //
+    // `maintainable` itself is not here: the refusal names it, and a ruling on an
+    // attribute the port names fails as stale.
+    ruled(
+      GatedByRefusal,
+      "read only when maintainable is set, which Commitment.reject refuses",
+    )(
+      "Generator.maintenance_duration",
+      "Generator.maintenance_events",
+      "Generator.maintenance_pu",
+      "Link.maintenance_duration",
+      "Link.maintenance_events",
+      "Link.maintenance_pu",
+    ) ++
     // ---- Whole components this port refuses -----------------------------------
     //
     // `Lopf.rejectUnhandled` throws on any table outside its handled set, so a
@@ -312,6 +344,9 @@ object SchemaSweepSuite:
       "Process.delay0",
       "Process.delay1",
       "Process.discount_rate",
+      "Process.maintenance_duration",
+      "Process.maintenance_events",
+      "Process.maintenance_pu",
       "Process.p_nom_set",
       "Process.rate0",
       "Process.rate1",

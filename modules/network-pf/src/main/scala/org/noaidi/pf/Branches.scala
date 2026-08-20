@@ -135,3 +135,20 @@ object Branches:
     else
       val value = table.float(attribute, id)
       if value.isFinite then value else 0.0
+
+  /** The same, at one snapshot.
+    *
+    * PyPSA 1.3.0 made `Transformer.phase_shift` `static or series`, so the
+    * optimisation reads it per snapshot -- `define_kirchhoff_voltage_constraints`
+    * selects `tr.da["phase_shift"]` by snapshot. The *power flow* does not:
+    * `calculate_B_H` reads `c.static[..., "phase_shift"]`, the static column
+    * alone. That split is upstream's, so the two callers here keep it: the linear
+    * and AC flows stay on [[optional]] and only the LOPF reads through this.
+    *
+    * A series with no static counterpart is possible -- it is how `ramp_limits`
+    * writes `ramp_limit_up` -- so the series is consulted even when the schema
+    * does not declare the attribute at all.
+    */
+  def optionalAt(table: ComponentTable, attribute: String, id: String, snapshot: Int): Double =
+    val fromSeries = table.series.get(attribute).flatMap(_.get(id, snapshot))
+    fromSeries.filter(_.isFinite).getOrElse(optional(table, attribute, id))

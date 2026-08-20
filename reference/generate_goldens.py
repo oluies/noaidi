@@ -290,8 +290,15 @@ def transformer_taps():
           s_nom=400.0, model="pi", tap_ratio=0.94, tap_side=1)
     n.add("Transformer", "tt", bus0="hv1", bus1="lv2", x=0.15, r=0.006,
           s_nom=300.0, model="t", g=0.004, b=0.02)
+    # 8 degrees, not the 12 this carried until PyPSA 1.3.0. The shift entered the
+    # LOPF's Kirchhoff row in that release, and 12 forces a circulating flow the
+    # network cannot carry -- the linear flow puts -431 MW through `tshift`,
+    # which is rated 350, and the optimisation has nowhere else to put it. The
+    # network is infeasible from 10.007 degrees up, so the fixture stopped having
+    # a dispatch to compare at all. At 8 the shift still reverses `tshift` --
+    # +57 MW at zero against -268 here -- with 82 MW of headroom on the rating.
     n.add("Transformer", "tshift", bus0="hv2", bus1="lv1", x=0.11, r=0.005,
-          s_nom=350.0, model="pi", tap_ratio=1.03, tap_side=0, phase_shift=12.0)
+          s_nom=350.0, model="pi", tap_ratio=1.03, tap_side=0, phase_shift=8.0)
 
     n.add("Generator", "g", bus="hv1", control="Slack", p_nom=900.0, marginal_cost=10.0)
     n.add("Generator", "gl", bus="lv2", p_nom=300.0, marginal_cost=60.0)
@@ -428,32 +435,57 @@ def inactive_removed():
 
 
 def phase_shift():
-    """A phase-shifting transformer, which the linear flow and the LOPF disagree about.
+    """A phase-shifting transformer, which both L2 models honour.
 
-    `transformer-levels` with 30 degrees on one of its two transformers, and the
+    `transformer-levels` with 9 degrees on one of its two transformers, and the
     cycle that fixture was built around is what makes the shift observable: it
     enters the flow as a constant injection, so a radial network would absorb it
     into the slack and show nothing.
 
-    ==The two L2 models genuinely differ, in PyPSA==
+    ==This fixture used to pin a disagreement, and no longer can==
 
-    Worth stating because it looks like a bug in whichever one is read second.
-    `n.lpf()` applies the shift -- `calculate_B_H` builds
+    Until PyPSA 1.3.0 the two L2 models differed, and the difference was the
+    point of the fixture. `n.lpf()` applied the shift -- `calculate_B_H` builds
     `p_branch_shift = -b * phase_shift` in radians and solves
-    `B theta = p - K p_branch_shift` -- so t1 goes from +150.66 MW to
-    **-840.53 MW**, reversing direction and carrying 5.6 times the power.
-
-    `n.optimize()` does not. Its Kirchhoff row is `sum(x_l s_l) == 0` with no
-    shift term at all, so the optimised flows are **identical** at 0 and 30
-    degrees. That is PyPSA's own inconsistency, not an approximation this port
-    chose, and reproducing it means the LOPF golden here must match the
+    `B theta = p - K p_branch_shift`. `n.optimize()` did not: its Kirchhoff row
+    was `sum(x_l s_l) == 0` with no shift term, so the optimised flows were
+    *identical* at 0 and 30 degrees, and the LOPF golden here matched the
     unshifted one exactly.
 
-    So this fixture pins two different things at once: that the linear flow
-    honours the shift, and that the optimisation does not.
+    1.3.0 closed that gap. `define_kirchhoff_voltage_constraints` now builds
+    `sum_l C_lk (x_l s_l + phase_shift_l) = 0` with the shift in radians, so the
+    optimisation honours it too. What this fixture pins is that the shift is in
+    the row at all: dropping the term leaves a model that balances every bus and
+    returns `Optimal` on a dispatch that no phase shifter would produce.
+
+    The two models are still not interchangeable, and at 9 degrees this fixture
+    shows why. They agree exactly at the first snapshot. At the other two the
+    linear flow puts 402.4 and 403.8 MW through `t2`, which is rated 400, and the
+    LOPF -- which has the rating and a choice -- turns on the 60/MWh generator at
+    `lv2` rather than overload it. That is the difference between an optimisation
+    and a flow calculation, not a disagreement about phase shifters.
+
+    ==Why 9 degrees and not 30==
+
+    30 is now infeasible. The shift forces a circulating flow around the cycle,
+    and past 10.044 degrees that flow exceeds `t2`'s 400 MW rating with nowhere
+    else for it to go -- so the fixture would have had no dispatch to compare,
+    only a status.
+
+    10 is feasible and 9 is used anyway: 10 sits 0.04 degrees from the edge,
+    which is a fixture that a change in nothing more than solver tolerance could
+    turn into an `Infeasible` nobody asked for. 9 leaves a whole degree.
+
+    It is a better fixture than 30 was even setting feasibility aside. At 9 the
+    rating on `t2` binds, so the shift can no longer be absorbed by re-routing
+    alone and the *objective* moves with it -- 8,524.43 against 7,800 unshifted.
+    At 8 degrees and below nothing binds and the shift is pure re-routing at
+    constant cost -- 7,800 at 0, 2, 4, 6, 7 and 8 alike -- which an
+    objective-only comparison cannot see. `t1` reverses
+    as well, +150.66 MW at zero against -146.70 here.
     """
     n = transformer_levels()
-    n.transformers.loc["t1", "phase_shift"] = 30.0
+    n.transformers.loc["t1", "phase_shift"] = 9.0
     return n
 
 

@@ -109,6 +109,30 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
       )
     }
 
+  // The three PyPSA 1.3.0 arrived with. Each is inert at its default, which is
+  // what let the pin move without any existing fixture noticing, and each errs
+  // cheap when ignored -- the direction this port refuses on sight.
+  refuses("a maintainable generator", "maintainable") {
+    mutate("ac-dc-meshed", "generators.csv", setColumn(_, "maintainable", "True"))
+  }
+  refuses("a maintainable link", "maintainable") {
+    mutate("ac-dc-meshed", "links.csv", setColumn(_, "maintainable", "True"))
+  }
+  // `min < max` is the range, exactly as `define_phase_shift_variables` tests it.
+  refuses("an optimisable phase shift range", "phase_shift_min") {
+    mutate("transformer-taps", "transformers.csv", setColumn(_, "phase_shift_min", "-15.0"))
+  }
+  // The breakpoints arrive as a file beside the component, not as a column, so
+  // this is the one refusal keyed off what the reader produced rather than off a
+  // value in the static table.
+  refuses("a piecewise marginal cost", "piecewise") {
+    withExtraFile(
+      "ac-dc-meshed",
+      "generators-marginal_cost_piecewise.csv",
+      ",Manchester Wind\n0,0.0\n1,50.0\n2,200.0\n3,400.0\n4,900.0\n5,1600.0\n6,2500.0\n7,3600.0\n8,4900.0\n9,6400.0\n",
+    )
+  }
+
   // Capacity expansion: the two forms of capital cost this model does not price.
   refuses("annuitised overnight_cost", "overnight_cost") {
     mutate("ac-dc-meshed", "generators.csv", setColumn(_, "overnight_cost", "1000.0"))

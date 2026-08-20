@@ -29,7 +29,32 @@ class GoldenNetworkSuite extends munit.FunSuite:
     // Both numbers come from the pinned install's registry. If a version bump
     // changes them, this failing is the signal to look at the diff.
     assertEquals(schema.components.size, 16)
-    assertEquals(schema.attributeCount, 422)
+    // 422 until PyPSA 1.3.0, which added 32: maintenance scheduling on Generator,
+    // Link and Process, piecewise cost breakpoints, and an optimisable phase
+    // shift range on Transformer.
+    assertEquals(schema.attributeCount, 454)
+  }
+
+  test("a piecewise-capable attribute is still read as static-or-series") {
+    assume(available, "goldens missing")
+    // PyPSA 1.3.0 widened nine attributes to `static or piecewise or series`, and
+    // the shape they carry is unchanged: a static value with per-entity snapshot
+    // overrides. Reading the new word as a third shape -- or failing to match the
+    // string at all and falling back to `varying` -- is how the overrides would
+    // go missing on a network that sets them.
+    val generator = schema("Generator")
+    assertEquals(generator.require("marginal_cost").variability, Variability.StaticOrSeries)
+    assertEquals(generator.require("efficiency").variability, Variability.StaticOrSeries)
+    assertEquals(generator.require("marginal_cost").valueType, AttributeType.Float)
+    // And the type string really is the new one, read from the file rather than
+    // through `AttributeSpec`, which keeps the parsed shape and not the words.
+    // Without this the assertions above would keep passing against a schema whose
+    // `marginal_cost` had gone back to plain `static or series`, and the parse
+    // they are checking would no longer be exercised by anything.
+    val declared = ujson
+      .read(Files.readString(goldens.resolve("schema.json")))("Generator")("attributes")
+    assertEquals(declared("marginal_cost")("type").str, "static or piecewise or series")
+    assertEquals(declared("efficiency")("type").str, "static or piecewise or series")
   }
 
   test("attribute variability is read as three distinct cases") {

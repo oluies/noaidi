@@ -23,7 +23,9 @@ object AttributeType:
     case "string"           => Str
     case "boolean" | "bool" => Bool
     case "geometry"         => Geometry
-    // Shape rather than element type; always numeric.
+    // Shape rather than element type; always numeric. `static or piecewise or
+    // series` is PyPSA 1.3.0's, and falls through to the `startsWith("static")`
+    // case below rather than being spelled out here.
     case "series" | "static or series" | "static" => Float
     // PyPSA occasionally qualifies a type ("float or None"); the leading word
     // is the storage class and the rest is documentation.
@@ -53,10 +55,24 @@ enum Variability:
   def mayVary: Boolean = this != Static
 
 object Variability:
+  /** The shape, from PyPSA's `type` field and its `varying` flag.
+    *
+    * `startsWith`, not equality, and PyPSA 1.3.0 is why: piecewise costs widened
+    * nine attributes from `static or series` to `static or piecewise or series`,
+    * which an equality test reads as neither series nor static-or-series. Every
+    * one of the nine also carries `varying = true`, so the fallback below
+    * happened to keep them right -- but the fallback is the *weaker* signal, and
+    * a piecewise attribute that did not vary by snapshot would have been read as
+    * [[Static]] and its overrides silently dropped.
+    *
+    * So the string is matched on the two words that carry the shape rather than
+    * on the whole of it, and `varying` stays as the backstop it was.
+    */
   def parse(pypsaType: String, varying: Boolean): Variability =
     val t = pypsaType.trim.toLowerCase
     if t == "series" then Series
-    else if t.startsWith("static or series") || varying then StaticOrSeries
+    else if t.startsWith("static or") && t.endsWith("series") then StaticOrSeries
+    else if varying then StaticOrSeries
     else Static
 
 /** One attribute of one component type. */

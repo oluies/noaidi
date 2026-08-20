@@ -121,9 +121,32 @@ class SchemaSweepSuite extends munit.FunSuite:
   private lazy val suffixes: Set[String] =
     """\$\{[A-Za-z][A-Za-z0-9_]*\}(_[A-Za-z0-9_]+)""".r.findAllMatchIn(text).map(_.group(1)).toSet
 
-  /** Names the sources build by appending a known suffix to a name they quote. */
+  /** The stems those suffixes get appended to.
+    *
+    * Read out of the map that binds them rather than guessed at from shape:
+    * `Expansion.nominalAttribute` maps every expandable component to `p_nom`,
+    * `s_nom` or `e_nom`, and its values are the only things the `${attribute}` in
+    * the interpolations above is ever bound to. Matching quoted names ending
+    * `_nom` instead would readmit `v_nom` and `f_nom`, which the sources quote
+    * and no code ever interpolates.
+    *
+    * Restricted, where this used to be every quoted name. A full cross-product
+    * manufactures names no code contains, and unlike [[quoted]]'s imprecision it
+    * can only ever mask an attribute, never report a spurious one -- so it is
+    * invisible until the week upstream adds a name it happens to manufacture.
+    * PyPSA 1.3.0 was that week: it added `Transformer.phase_shift_min` and
+    * `phase_shift_max`, the port quotes `"phase_shift"` because the linear flow
+    * reads it, and the sweep called both accounted for while nothing in the tree
+    * named either. They belong to the one 1.3.0 feature that moves an answer this
+    * port already computes, which is the sweep failing in exactly the case it
+    * exists for.
+    */
+  private lazy val stems: Set[String] =
+    """->\s*"([A-Za-z][A-Za-z0-9_]*_nom)"""".r.findAllMatchIn(text).map(_.group(1)).toSet
+
+  /** Names the sources build by appending a known suffix to a stem they quote. */
   private lazy val interpolated: Set[String] =
-    for stem <- quoted; suffix <- suffixes yield stem + suffix
+    for stem <- stems; suffix <- suffixes yield stem + suffix
 
   private def named(attribute: String): Boolean =
     quoted.contains(attribute) || interpolated.contains(attribute)
@@ -162,6 +185,16 @@ class SchemaSweepSuite extends munit.FunSuite:
       suffixes,
       Set("_extendable", "_max", "_min", "_mod"),
       "the set of interpolated attribute suffixes moved; the resolution above needs rechecking",
+    )
+    // The other half of the same resolution, and the half that was missing.
+    // Suffixes were pinned here from the start while the stems were left as
+    // every quoted name, so the cross-product could grow without this test
+    // noticing -- which is how `phase_shift_min` and `phase_shift_max` came to
+    // be manufactured.
+    assertEquals(
+      stems,
+      Set("e_nom", "p_nom", "s_nom"),
+      "the set of interpolated attribute stems moved; the resolution above needs rechecking",
     )
   }
 

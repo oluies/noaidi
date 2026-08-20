@@ -250,10 +250,12 @@ object SchemaSweepSuite:
 
   /** The sweep's residue, one line per attribute.
     *
-    * Sixty-four entries, and the reason each is here matters more than the count.
-    * A ruling is a claim that the attribute cannot change an answer — not that it
-    * is unimportant, and not that nobody got round to it. When that stops being
-    * true the line is the thing to delete.
+    * The reason each entry is here matters more than how many there are, and a
+    * count written down beside the entries is a second place for it to go stale
+    * — `NOTES` recounts it when the sweep moves. A ruling is a claim that the
+    * attribute cannot change an answer — not that it is unimportant, and not
+    * that nobody got round to it. When that stops being true the line is the
+    * thing to delete.
     */
   val ledger: Vector[Ruling] =
     // ---- Whole components this port refuses -----------------------------------

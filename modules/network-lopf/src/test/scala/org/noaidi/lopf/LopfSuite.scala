@@ -95,9 +95,10 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
 
   /** A golden network with several files added or rewritten at once.
     *
-    * A component and its series are two files, and a component the fixture does
-    * not carry needs both written before the network is anything but a static
-    * table with nowhere for its values to come from.
+    * For the component-plus-series case: the component is one file and pinning
+    * one of its attributes per snapshot is a second, so a case that needs both
+    * cannot be written with [[withExtraFile]]. A component on its own is a
+    * perfectly good network — `withExtraFile` is this with a single pair.
     */
   private def withFiles(name: String, files: (String, String)*): Network =
     val dir = copyOf(name)
@@ -1596,6 +1597,127 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
     assertEqualsDouble(r.stateOfCharge("s", 0), 0.0, 1e-6,
       "the 2030 set point was applied to a unit that does not exist yet")
+  }
+
+  test("a cyclic storage unit wraps to its last active snapshot, not the horizon's") {
+    assume(available, "goldens missing")
+    // The cyclic branch of the same masking, and the one the two cases above do
+    // not reach. PyPSA takes the previous state from
+    // `soc.where(active).ffill.roll(1).ffill`, which at the *first* active
+    // snapshot resolves to the last active one -- not `snapshots.last`, whose
+    // column is pinned to `[0, 0]` for a unit that has retired by then. Closing
+    // the wrap there instead turns a cyclic unit into a non-cyclic one starting
+    // empty, which is a dearer answer reporting `Optimal`.
+    //
+    // The unit is active in 2030 and gone in 2040, and its inflow of 10 arrives
+    // at the *second* 2030 snapshot, so the only route to the first snapshot is
+    // around the wrap. Demand is zero at the second, so discharging there is
+    // worth nothing and the energy is only worth having a snapshot earlier.
+    // `efficiency_store` is below one so that charging and discharging together
+    // is strictly worse than doing neither, which pins the trajectory instead of
+    // leaving a cost-neutral round trip free.
+    val n = withFiles(
+      "investment-periods",
+      "storage_units.csv" ->
+        ("name,bus,p_nom,max_hours,build_year,lifetime,efficiency_store,cyclic_state_of_charge\n" +
+          "s,b,10.0,4.0,2020,15.0,0.9,True\n"),
+      "storage_units-inflow.csv" -> ",s\n0,0.0\n1,10.0\n2,0.0\n3,0.0\n",
+      "loads-p_set.csv"          -> ",d\n0,100.0\n1,0.0\n2,100.0\n3,100.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.discharging("s", 0), 10.0, 1e-6,
+      "the wrap is not carrying the second snapshot's inflow back to the first")
+    assertEqualsDouble(r.charging("s", 0), 0.0, 1e-6,
+      "the discharge is being covered by charging at the same snapshot")
+    // 90 rather than 100 out of the 80/MWh unit at the first snapshot, and 2040
+    // unchanged at 2 x 100 x 5. Wrapping to `snapshots.last` gives 9,000.
+    assertEqualsDouble(r.objective, 8200.0, 1e-4,
+      "the cyclic wrap is closing at the horizon's last snapshot rather than the unit's")
+  }
+
+  test("a storage unit built partway through the horizon starts its window at its initial state") {
+    assume(available, "goldens missing")
+    // The other half of the first active snapshot: with no previous state to
+    // reach back to, `state_of_charge_initial` enters the right-hand side there
+    // -- at the start of the unit's *window*, not at snapshot 0, where its
+    // column is pinned and the row would read `0 = initial` and take the whole
+    // LP infeasible with it.
+    //
+    // The unit is built in 2040 with 20 already stored and no inflow, so every
+    // MWh it discharges is the initial state and nothing else. Dropping the
+    // term leaves it empty and the 2040 demand entirely on the 5/MWh unit.
+    val n = withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,build_year,lifetime,efficiency_store,state_of_charge_initial\n" +
+        "s,b,10.0,4.0,2040,30.0,0.9,20.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.stateOfCharge("s", 2), 10.0, 1e-6,
+      "the first 2040 snapshot did not open at the initial state")
+    Seq(2, 3).foreach { t =>
+      assertEqualsDouble(r.discharging("s", t), 10.0, 1e-6, s"discharging at snapshot $t")
+    }
+    // 16,000 across 2030 plus 5 x (200 - 20) across 2040. Without the initial
+    // state the unit never runs and the answer is 17,000.
+    assertEqualsDouble(r.objective, 16900.0, 1e-4,
+      "the initial state is not reaching the first snapshot of the unit's window")
+  }
+
+  test("a store built partway through the horizon starts its window at its initial energy") {
+    assume(available, "goldens missing")
+    // `Store` gets the identical treatment in `define_store_constraints` and the
+    // identical code here, and no fixture puts a store on a multi-period network
+    // at all -- so the store loop's copy of the change was carried entirely by
+    // the storage unit's tests. This is the same case one component over.
+    //
+    // Only the objective is asserted on the 2040 trajectory: a store has no
+    // power rating, so with a flat 2040 price the 20 can leave over either
+    // snapshot or both and every split costs the same. The total that leaves is
+    // what the initial energy decides, and that is what the objective reads.
+    val n = withExtraFile(
+      "investment-periods",
+      "stores.csv",
+      "name,bus,e_nom,e_initial,build_year,lifetime\nst,b,20.0,20.0,2040,30.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    Seq(0, 1).foreach { t =>
+      assertEqualsDouble(r.energy("st", t), 0.0, 1e-6, s"the store holds energy in 2030 at $t")
+    }
+    assertEqualsDouble(r.objective, 16900.0, 1e-4,
+      "the store's initial energy is not reaching the first snapshot of its window")
+  }
+
+  test("a cyclic store wraps to its last active snapshot, not the horizon's") {
+    assume(available, "goldens missing")
+    // And the store's copy of the cyclic wrap. A cyclic asset moves energy
+    // between snapshots without creating any, so it is worth something only
+    // where the price differs across its window -- hence the marginal cost
+    // series, which makes the second 2030 snapshot the cheap one.
+    //
+    // The store is active in 2030 and gone in 2040. Discharging 10 into the
+    // 80/MWh snapshot and buying it back at 10/MWh saves 700, and the only way
+    // to be full at the first snapshot is around the wrap. Closing that wrap at
+    // `snapshots.last` pins the opening energy to zero, the arbitrage runs the
+    // wrong way round and is not worth taking, and the answer is the undisturbed
+    // 10,000.
+    val n = withFiles(
+      "investment-periods",
+      "stores.csv" -> "name,bus,e_nom,e_cyclic,build_year,lifetime\nst,b,10.0,True,2020,15.0\n",
+      "generators-marginal_cost.csv" ->
+        ",old,new\n0,80.0,5.0\n1,10.0,5.0\n2,80.0,5.0\n3,80.0,5.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.dispatch("Store", "st", 0), 10.0, 1e-6,
+      "the store is not full at the first snapshot of its window")
+    assertEqualsDouble(r.dispatch("Store", "st", 1), -10.0, 1e-6,
+      "the store did not refill at the cheap snapshot it wraps to")
+    assertEqualsDouble(r.objective, 9300.0, 1e-4,
+      "the cyclic wrap is closing at the horizon's last snapshot rather than the store's")
   }
 
   test("a delayed link matches PyPSA's") {

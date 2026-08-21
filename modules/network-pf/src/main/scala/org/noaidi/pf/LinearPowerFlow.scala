@@ -139,10 +139,14 @@ object LinearPowerFlow:
       //   B θ = p − K · p_branch_shift        flow = b (θ₀ − θ₁) + p_branch_shift
       //
       // Dropping it is not a small error. On `phase-shift` -- `transformer-levels`
-      // with 30° on one transformer -- t1 carries −840.53 MW against the +150.66
-      // it carries unshifted: reversed, and 5.6 times the power. This module
-      // returned the unshifted answer, silently, because nothing read the
-      // attribute at all.
+      // with 9° on one transformer -- t1 carries −146.70 MW against the +150.66
+      // it carries unshifted: reversed, and very nearly as large the other way.
+      // This module returned the unshifted answer, silently, because nothing read
+      // the attribute at all.
+      //
+      // The fixture carried 30° when that was found, where the shifted flow was
+      // −840.53 MW. PyPSA 1.3.0 put the shift into the LOPF's Kirchhoff row as
+      // well, and 30° is not a feasible network there any more.
       //
       // Only transformers have one; a line's is structurally zero.
       val shifts = branches.map { edge =>

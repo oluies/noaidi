@@ -55,18 +55,22 @@ import SchemaSweepSuite.*
   * is modelled — and it is refused outright by `Lopf.rejectUnhandled`, which is
   * what makes that survivable.
   *
-  * Two further imprecisions follow from matching text rather than meaning, and
-  * both can decide a rule. [[quoted]] is '''every''' identifier-shaped string
-  * literal in the main sources — error-message fragments, JSON keys, HDF5 paths
-  * — not only literals in an accessor position, so an unrelated one can mask an
-  * attribute as named. Quoting `"v_ang"` anywhere would fail open on
-  * `Line.v_ang_min` and `v_ang_max` and fail their rulings as stale in the same
-  * run. [[interpolated]] compounds it by taking a full cross-product, so it
-  * manufactures names no code contains; that one can only ever mask, never
-  * report. Narrowing `quoted` to accessor call sites would remove most of the
-  * surface and is the obvious move if either misfires — neither has yet, and a
-  * narrower match trades this for spurious unaccounted attributes, which is
-  * noisier and no safer.
+  * One imprecision follows from matching text rather than meaning, and it can
+  * decide a rule. [[quoted]] is '''every''' identifier-shaped string literal in
+  * the main sources — error-message fragments, JSON keys, HDF5 paths — not only
+  * literals in an accessor position, so an unrelated one can mask an attribute as
+  * named. Quoting `"v_ang_min"` anywhere, for any reason, is enough to account
+  * for `Line.v_ang_min` and to fail its ruling as stale in the same run.
+  * Narrowing `quoted` to accessor call sites would remove most of that surface;
+  * it has not misfired yet, and a narrower match trades this for spurious
+  * unaccounted attributes, which is noisier and no safer.
+  *
+  * [[interpolated]] used to compound it by crossing `quoted` with every suffix,
+  * which manufactured names no code contains and could only ever mask, never
+  * report — invisible until upstream shipped one of the names it had invented.
+  * PyPSA 1.3.0 did: `Transformer.phase_shift_min` and `phase_shift_max`, from
+  * `"phase_shift"` quoted for the linear flow. Its stems now come from
+  * [[stems]], read out of the map that binds them, so it manufactures nothing.
   *
   * A ruling's *reason* is prose and nothing checks it. The rules above check that
   * a reason exists and still applies to a real attribute; whether it is true is a

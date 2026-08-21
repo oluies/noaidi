@@ -444,10 +444,13 @@ class LinearPowerFlowSuite extends munit.FunSuite:
 
   test("a phase-shifting transformer moves power, and the shift is load-bearing") {
     assume(available, "goldens missing")
-    // `phase-shift` is `transformer-levels` with 30 degrees on t1, and nothing
+    // `phase-shift` is `transformer-levels` with 9 degrees on t1, and nothing
     // else changed -- so the two goldens differ by exactly this term. That makes
     // the comparison sharp rather than merely present: t1 carries +150.66 MW
-    // unshifted and -840.53 MW shifted, reversed and 5.6 times the power.
+    // unshifted and -146.70 MW shifted, reversed and very nearly as large the
+    // other way. The threshold below has 297 MW of margin, not the 991 it had
+    // when the fixture carried 30 degrees -- which PyPSA 1.3.0 made infeasible
+    // by putting the shift in the LOPF's Kirchhoff row too.
     //
     // This module returned the unshifted answer for both, silently, because
     // nothing read the attribute at all. There was no code site to put a refusal

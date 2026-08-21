@@ -212,11 +212,27 @@ object Cycles:
     * with it anyway -- so refusing there would turn an agreement into an error.
     */
   def rejectOptimisableShift(network: Network, refuse: String => Nothing): Unit =
+    // Not `Branches.optional`, which maps every non-finite value to zero. That
+    // rule exists to keep a NaN out of a susceptance, and used for a *comparison*
+    // it silently rewrites an unbounded range to no range at all: a transformer
+    // with `phase_shift_max = inf` would read as `0.0 < 0.0` and pass, while
+    // PyPSA's own `min < max` is satisfied and the variable is created. `inf` is
+    // how PyPSA spells an unbounded bound everywhere else, so it is the value
+    // most likely to turn up.
+    //
+    // NaN is left as NaN rather than mapped to zero, because every comparison
+    // against it is false -- which is exactly what pandas does with the same
+    // test, so a half-written pair refuses here if and only if it creates a
+    // variable there.
+    def bound(table: ComponentTable, attribute: String, id: String): Double =
+      if table.spec.attribute(attribute).isEmpty && !table.static.contains(attribute) then 0.0
+      else table.float(attribute, id)
+
     network.table("Transformer").foreach { table =>
       if table.spec.attribute("phase_shift_min").isDefined then
         table.ids.foreach { id =>
-          val low  = Branches.optional(table, "phase_shift_min", id)
-          val high = Branches.optional(table, "phase_shift_max", id)
+          val low  = bound(table, "phase_shift_min", id)
+          val high = bound(table, "phase_shift_max", id)
           if low < high then
             refuse(
               s"Transformer '$id' has phase_shift_min = $low below phase_shift_max = $high, so its " +

@@ -35,6 +35,36 @@ class GoldenNetworkSuite extends munit.FunSuite:
     assertEquals(schema.attributeCount, 454)
   }
 
+  test("a piecewise cost curve is refused, from PyPSA's own export") {
+    assume(available, "goldens missing")
+    // Against `unsupported/piecewise-cost`, written by `export_to_csv_folder`
+    // rather than by hand. That distinction is the whole reason the fixture
+    // exists: the first version of this refusal matched a `_piecewise` suffix
+    // read out of PyPSA's Excel sheet-name table, and the hand-written CSV in the
+    // test agreed with it and passed, while `_CSVExporter.save_piecewise` writes
+    // `<list>-<attr>-pw.csv` with a two-row header and the refusal matched
+    // nothing a real export produces.
+    val directory = goldens.resolve("unsupported").resolve("piecewise-cost")
+    assert(Files.isDirectory(directory), s"no unsupported fixture at $directory")
+    assert(
+      Files.exists(directory.resolve("generators-marginal_cost-pw.csv")),
+      "the fixture does not carry the file this refusal is keyed to",
+    )
+
+    val failure = intercept[CsvReader.MalformedNetwork](CsvReader.read(directory, schema, "pw"))
+    assert(
+      failure.getMessage.contains("piecewise"),
+      s"refused, but not as a piecewise curve: ${failure.getMessage}",
+    )
+    // Not a row count. Read as a time series the file fails on its header or its
+    // length, and both messages blame the snapshots for a file that is indexed by
+    // breakpoint -- which is the diagnostic this refusal exists to replace.
+    assert(
+      !failure.getMessage.contains("snapshots"),
+      s"refused as a malformed time series rather than as a curve: ${failure.getMessage}",
+    )
+  }
+
   test("a piecewise-capable attribute is still read as static-or-series") {
     assume(available, "goldens missing")
     // PyPSA 1.3.0 widened nine attributes to `static or piecewise or series`, and

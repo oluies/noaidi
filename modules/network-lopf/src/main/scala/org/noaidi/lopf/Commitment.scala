@@ -49,13 +49,7 @@ import org.noaidi.network.*
   */
 object Commitment:
 
-  /** Refuse any committable entity.
-    *
-    * Swept over every table declaring the attribute rather than over `Generator`
-    * by name: PyPSA declares `committable` on Link and Process too, and a third
-    * literal copy of the component list is one more place to miss when a class is
-    * added.
-    */
+  /** Refuse the two flags that make availability an integer decision. */
   def reject(network: Network, refuse: String => Nothing): Unit =
     rejectCommittable(network, refuse)
     rejectMaintainable(network, refuse)
@@ -97,6 +91,13 @@ object Commitment:
         }
     }
 
+  /** Refuse any committable entity.
+    *
+    * Swept over every table declaring the attribute rather than over `Generator`
+    * by name: PyPSA declares `committable` on Link and Process too, and a third
+    * literal copy of the component list is one more place to miss when a class is
+    * added.
+    */
   private def rejectCommittable(network: Network, refuse: String => Nothing): Unit =
     network.tables.values.foreach { table =>
       if table.spec.attribute("committable").isDefined && table.static.contains("committable") then

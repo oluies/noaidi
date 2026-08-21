@@ -217,7 +217,12 @@ jobs:
           summary=$(grep -E '^Test run .* finished:' sweep.log | tail -1 || true)
           total=$(sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p' <<<"$summary")
           ignored=$(sed -nE 's/.*[^0-9]([0-9]+) ignored.*/\1/p' <<<"$summary")
-          skipped=$(grep -cE '^==> s ' sweep.log || true)
+          # No line anchor, and a character class rather than a bare space: this
+          # file already records that an ANSI-coloured `==> X` slips past the
+          # `sed` range below, and an ANSI-coloured `==> s` would slip past this
+          # identically -- returning 0, which reads as "nothing skipped". That is
+          # the same guard-that-does-not-guard this check was added to replace.
+          skipped=$(grep -cE '==> s [A-Za-z]' sweep.log || true)
           echo "sweep: ${summary:-<no summary line>}"
           if [ -z "${total:-}" ] || [ "$total" -lt 1 ]; then
             echo "::error::the sweep reported no cases -- it did not run"

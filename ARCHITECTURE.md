@@ -326,7 +326,7 @@ riskiest assumption would still be untested.
 
 From L1 onward every module is gated on golden-file comparison against a pinned
 PyPSA run, and that harness now exists: `reference/generate_goldens.py` pins
-PyPSA 1.2.4 and captures schema, exported tables, sub-network decomposition, LPF
+the PyPSA version `reference/goldens/manifest.json` records and captures schema, exported tables, sub-network decomposition, LPF
 and optimisation results for each reference network. Prima itself is validated
 against ojAlgo and the Netlib corpus instead, which are the right oracles for an
 LP solver and the wrong ones for a network model.

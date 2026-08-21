@@ -7732,6 +7732,23 @@
    "count": 14
   }
  },
+ "unsupported": {
+  "piecewise-cost": [
+   "buses-marginal_price.csv",
+   "buses.csv",
+   "crs.json",
+   "generators-marginal_cost-pw.csv",
+   "generators-p.csv",
+   "generators.csv",
+   "loads-p.csv",
+   "loads-p_set.csv",
+   "loads.csv",
+   "meta.json",
+   "network.csv",
+   "snapshots.csv",
+   "sub_networks.csv"
+  ]
+ },
  "versions": {
   "numpy": "2.5.1",
   "pandas": "3.0.5",

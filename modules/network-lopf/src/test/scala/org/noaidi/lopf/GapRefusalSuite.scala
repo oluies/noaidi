@@ -122,15 +122,32 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   refuses("an optimisable phase shift range", "phase_shift_min") {
     mutate("transformer-taps", "transformers.csv", setColumn(_, "phase_shift_min", "-15.0"))
   }
-  // The breakpoints arrive as a file beside the component, not as a column, so
-  // this is the one refusal keyed off what the reader produced rather than off a
-  // value in the static table.
-  refuses("a piecewise marginal cost", "piecewise") {
-    withExtraFile(
-      "ac-dc-meshed",
-      "generators-marginal_cost_piecewise.csv",
-      ",Manchester Wind\n0,0.0\n1,50.0\n2,200.0\n3,400.0\n4,900.0\n5,1600.0\n6,2500.0\n7,3600.0\n8,4900.0\n9,6400.0\n",
+  // An unbounded range, which the first version of this refusal let through.
+  // It read both bounds via `Branches.optional`, whose "non-finite means absent"
+  // rule maps `inf` to 0.0 -- so `0.0 < 0.0` was false, the network passed, and
+  // PyPSA's own `min < max` was satisfied and made the variable. Reverting to
+  // `Branches.optional` fails this case and nothing else.
+  refuses("an unbounded optimisable phase shift", "phase_shift_max") {
+    mutate("transformer-taps", "transformers.csv", setColumn(_, "phase_shift_max", "inf"))
+  }
+
+  test("an inverted phase shift range is not refused") {
+    assume(available, "goldens missing")
+    // The other half of `min < max`, and a case where refusing would turn an
+    // agreement into an error. `check_phase_shift_bounds` reports `min > max` as
+    // a likely mistake and PyPSA then holds the shift fixed at `phase_shift`,
+    // which is exactly what this model does with it -- so the two agree on the
+    // answer and there is nothing to refuse.
+    //
+    // NaN is the same case arithmetically: every comparison against it is false,
+    // in Scala as in pandas, so a half-written pair creates no variable there and
+    // refuses here only if it would.
+    val n = mutate(
+      "transformer-taps",
+      "transformers.csv",
+      before => setColumn(setColumn(before, "phase_shift_min", "5.0"), "phase_shift_max", "-5.0"),
     )
+    Lopf.build(n): Unit
   }
 
   // Capacity expansion: the two forms of capital cost this model does not price.

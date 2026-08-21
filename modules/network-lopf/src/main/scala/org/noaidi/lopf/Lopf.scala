@@ -104,10 +104,10 @@ object Lopf:
     // merely committable -- was the one that returned a number.
     Commitment.reject(network, m => throw new UnsupportedNetwork(m))
     Expansion.reject(network)
-    // Both new in PyPSA 1.3.0, and both invisible to every check above: a
-    // piecewise cost is a file the reader loads and nothing reads, and an
-    // optimisable shift is a pair of columns whose default is inert.
-    rejectPiecewiseCosts(network)
+    // New in PyPSA 1.3.0, and invisible to every check above because its default
+    // is inert: a pair of columns left at 0.0 is not a range. The other 1.3.0
+    // refusal, piecewise costs, is in `CsvReader` -- that one is a file rather
+    // than a value, and the reader is what meets it.
     Cycles.rejectOptimisableShift(network, m => throw new UnsupportedNetwork(m))
 
     val snapshots = network.snapshots.indices
@@ -565,11 +565,26 @@ object Lopf:
     // but the *ratio* between the two terms does not cancel, which is what makes
     // the conversion the thing to get right rather than a presentation detail.
     //
+    // Resolved once per branch, alongside `impedances` and for the reason stated
+    // there: a year-long network has 8760 snapshots, and a branch shared by two
+    // cycles would otherwise be looked up twice per snapshot. `phase_shift` is
+    // `static or series` in PyPSA 1.3.0, so the *value* cannot leave the snapshot
+    // loop -- but the table, the schema lookup and the row lookup can, which is
+    // all of the cost except the array index.
+    //
     // Only a Transformer carries one. A Line has no `phase_shift` attribute at
     // all, so asking for one would throw rather than read zero.
+    val shifters = cycles.flatMap { cycle =>
+      cycle.terms.collect {
+        case (component, id, _) if component == "Transformer" =>
+          (component, id) -> network.require(component)
+      }
+    }.toMap
+
     def shiftOf(component: String, id: String, t: Int): Double =
-      if component != "Transformer" then 0.0
-      else math.toRadians(Branches.optionalAt(network.require(component), "phase_shift", id, t))
+      shifters
+        .get((component, id))
+        .fold(0.0)(table => math.toRadians(Branches.optionalAt(table, "phase_shift", id, t)))
 
     snapshots.foreach { t =>
       cycles.foreach { cycle =>
@@ -791,47 +806,6 @@ object Lopf:
     * the answer cheaper with no diagnostic -- so this is loud, matching
     * `Topology.danglingReferences`, which the model layer already made throw.
     */
-  /** Refuse a network carrying piecewise cost breakpoints.
-    *
-    * PyPSA 1.3.0 lets `marginal_cost`, `capital_cost` and `efficiency` be
-    * piecewise-linear in an entity's output or capacity, which the schema records
-    * by widening their type from `static or series` to
-    * `static or piecewise or series`.
-    *
-    * The breakpoints are not in that column. They are exported beside the
-    * component as `<list>-<attribute>_piecewise.csv`, and `CsvReader` reads any
-    * such file into `series` under that name -- so a network with a piecewise
-    * cost loads here without complaint, nothing reads the breakpoints, and every
-    * cost the objective is built from comes out of the static column they were
-    * meant to replace. That is the shape this port refuses on sight: a plausible
-    * number, off in an unstated direction, reported `Optimal`.
-    *
-    * Keyed off the series the reader actually produced rather than off the
-    * schema's type string. The type is what the sweep watches; the file is what
-    * decides whether a given network has one.
-    *
-    * Only half of these reach here, and the other half is worse rather than
-    * better. A piecewise file is indexed by '''breakpoint''', not by snapshot, so
-    * `CsvReader` -- which takes any `<list>-<attr>.csv` for a time series --
-    * throws `MalformedNetwork` about a row count whenever the two counts differ,
-    * blaming the snapshots for a file that was never one. It is only when they
-    * happen to coincide that the file loads and this refusal fires. Both outcomes
-    * refuse the network, which is what matters; making them say the same thing
-    * means teaching L1 that a piecewise file is not a series, and that is a
-    * reader change rather than a modelling one.
-    */
-  private def rejectPiecewiseCosts(network: Network): Unit =
-    network.tables.values.foreach { table =>
-      table.series.keys.filter(_.endsWith("_piecewise")).foreach { attribute =>
-        val plain = attribute.stripSuffix("_piecewise")
-        throw new UnsupportedNetwork(
-          s"${table.spec.name} carries $attribute, which is a piecewise cost curve; the objective " +
-            s"here is linear in one coefficient per entity, so the curve would be dropped and the " +
-            s"static $plain column priced in its place"
-        )
-      }
-    }
-
   private def rejectDanglingBuses(network: Network): Unit =
     Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
       throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")

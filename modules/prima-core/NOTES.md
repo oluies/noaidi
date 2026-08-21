@@ -1134,6 +1134,11 @@ looked at* is the shape of all six.
 
 ### The residue is committed, with reasons
 
+*Counted against PyPSA 1.2.4, which was pinned when this was written. The 1.3.0
+bump moved every figure here and narrowed the interpolation rule; see* PyPSA
+1.3.0, and a pin that stopped being free *below. The shape of the argument is
+what this section is for, and that did not change.*
+
 323 of the 422 attributes are inputs. 253 are named outright and another 24 are
 built by interpolation — `Expansion` reads capacity bounds as
 `s"${attribute}_max"`, so `p_nom_max` is read by code that never writes it down.
@@ -1891,9 +1896,35 @@ entity stays available at every snapshot.
 **Piecewise costs.** `marginal_cost`, `capital_cost` and `efficiency` may now be
 piecewise-linear, which the schema records by widening their type to `static or
 piecewise or series`. The breakpoints are not in that column — they are a file
-beside the component, `<list>-<attr>_piecewise.csv` — and `CsvReader` takes any
-such file for a time series. So the curve loads, nothing reads it, and the
-objective is built from the static column it was meant to replace.
+beside the component — so a model that read only the column would price the
+curve at a number the network does not use. `CsvReader` refuses the file.
+
+That refusal was wrong twice before it was right, and both mistakes are the same
+mistake: **the name was read out of the source instead of out of an export.**
+
+The first version matched a `_piecewise` suffix, taken from the sheet-name table
+in `network/io.py` that maps `generators-marginal_cost_piecewise` to
+`generators-marginal_cost_pw`. That table exists for Excel's 31-character sheet
+limit and describes neither end of the CSV path; `_CSVExporter.save_piecewise`
+writes `f"{list_name}-{attr}-pw.csv"`. The hand-written CSV in the test agreed
+with the misreading and passed, which is precisely what
+`GoldenNetworkSuite`'s opening paragraph says a hand-written fixture can only
+ever do.
+
+The second version had the name right and the *layer* wrong. It sat in `Lopf`,
+keyed off a loaded series — but a piecewise file is indexed by breakpoint and
+carries a two-row header (`name` over `attribute`), so `CsvReader` never gets far
+enough to produce that series. It fails on the header or on a row count that has
+no reason to match the snapshots, and both messages blame the snapshots for a
+file that was never about them. The guard could not fire on any real export.
+
+It now lives in `CsvReader`, which is what meets the file, and the fixture it is
+tested against is written by `export_to_csv_folder` into `goldens/unsupported/` —
+a directory for networks the reader must *turn away*, so that walking
+`manifest["networks"]` does not try to load one. `piecewise_cost()` also runs
+`n.optimize()` on the network before exporting it, because a badly built
+breakpoint frame raises a `KeyError` about an index level while still writing a
+file that looks perfectly plausible.
 
 **Optimisable phase shifts** are refused for the same class of reason: when
 `phase_shift_min < phase_shift_max` the shift is a per-snapshot *variable* in the

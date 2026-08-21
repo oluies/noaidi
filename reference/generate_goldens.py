@@ -157,7 +157,7 @@ def ac_pf_pv():
 # starts succeeding is reported too -- which is how a PyPSA upgrade that fixed the
 # limitation would announce itself instead of going unnoticed.
 KNOWN_UNSUPPORTED = {
-    ("ac-dc-meshed", "pf"): "PyPSA 1.2.4 raises AttributeError inside its own sub-network handling",
+    ("ac-dc-meshed", "pf"): "PyPSA raises AttributeError inside its own sub-network handling",
     ("ac-dc-dispatch", "pf"): "same as ac-dc-meshed, from which it is derived",
     ("ac-dc-co2", "pf"): "same as ac-dc-meshed, from which it is derived",
 }
@@ -431,6 +431,62 @@ def inactive_removed():
     """
     n = standard_types_network()
     n.remove("Line", "hv23")
+    return n
+
+
+def piecewise_cost():
+    """A generator whose marginal cost is a piecewise curve, new in PyPSA 1.3.0.
+
+    Exported under `unsupported/` rather than `networks/`: `CsvReader` refuses a
+    network carrying breakpoints, so this is a fixture for a *refusal* to read,
+    not a network any L1 suite can load.
+
+    It exists for its file name and its shape, both of which were guessed wrong
+    the first time. The refusal originally matched a `_piecewise` suffix taken
+    from PyPSA's *Excel* sheet-name table, which maps long sheet names to short
+    ones for Excel's 31-character limit and describes neither end of the CSV
+    path. `_CSVExporter.save_piecewise` writes ``f"{list_name}-{attr}-pw.csv"``,
+    so the real file is `generators-marginal_cost-pw.csv` -- and it carries a
+    **two-row header**, `name` over `attribute`, because the breakpoints are a
+    MultiIndex-columned frame indexed by breakpoint rather than by snapshot:
+
+        name,curved,curved
+        attribute,p_pu,marginal_cost
+        breakpoint,,
+        0,0.0,0.0
+        1,0.5,300.0
+        2,1.0,1200.0
+
+    A hand-written fixture agreed with the misreading and passed. This one comes
+    from PyPSA, and `n.optimize()` is run on it here so the frame is known to be
+    one PyPSA accepts rather than merely one it will write back out.
+
+    `x` is `p_pu` and `y` is `marginal_cost`, per `piecewise_attrs("Generator")`.
+    `curved` is cheaper than `flat` on its static `marginal_cost` and dearer over
+    most of the curve, so a model that dropped the breakpoints and priced the
+    static column would dispatch it and come out below the truth.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "b")
+    n.add("Load", "d", bus="b", p_set=[100.0, 140.0, 90.0])
+    n.add("Generator", "flat", bus="b", control="Slack", p_nom=200.0, marginal_cost=40.0)
+    n.add("Generator", "curved", bus="b", p_nom=200.0, marginal_cost=5.0)
+
+    columns = pd.MultiIndex.from_product(
+        [["curved"], ["p_pu", "marginal_cost"]], names=["name", "attribute"]
+    )
+    breakpoints = pd.DataFrame(
+        [[0.0, 0.0], [0.5, 300.0], [1.0, 1200.0]], columns=columns
+    )
+    breakpoints.index.name = "breakpoint"
+    n.c.Generator.piecewise["marginal_cost"] = breakpoints
+
+    # Solved here and nowhere else. This fixture records no results -- the port
+    # refuses the network -- so the only check that the frame is well formed is
+    # that PyPSA's own optimiser accepts it. Built wrong, it raises a KeyError
+    # about an index level and still exports a file that looks plausible.
+    n.optimize(solver_name="highs")
     return n
 
 
@@ -1404,7 +1460,7 @@ def capture_network(name: str, build) -> dict:
     except _Diverged:
         pass  # already recorded above
     except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
-        # ac-dc-meshed lands here: PyPSA 1.2.4 raises AttributeError inside its
+        # ac-dc-meshed lands here: PyPSA raises AttributeError inside its
         # own sub-network handling. Recorded so the absence is visibly PyPSA's
         # rather than an oversight in this script.
         results["pf"] = {"error": f"{type(exc).__name__}: {exc}"}
@@ -1552,6 +1608,39 @@ def write_standard_types(out: Path) -> dict:
     return written
 
 
+def write_unsupported(out: Path) -> dict:
+    """CSV exports of networks the port refuses, written for the refusal to read.
+
+    Not under `networks/`, and the distinction is the point. Everything there is
+    a network `CsvReader` must load; these are networks it must **turn away**, so
+    enumerating them alongside the others would fail every L1 suite that walks
+    the manifest.
+
+    They are generated rather than hand-written for the reason the goldens exist
+    at all: a hand-written CSV only confirms agreement with your reading of the
+    format. This directory exists because that failed. The first version of the
+    piecewise refusal matched a `_piecewise` suffix taken from PyPSA's *Excel*
+    sheet-name table, and the test hand-wrote a file with that name and passed --
+    while `_CSVExporter.save_piecewise` writes ``f"{list_name}-{attr}-pw.csv"``
+    with a two-row header, which the refusal did not match and the reader could
+    not parse.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    written = {}
+    for name, build in UNSUPPORTED_NETWORKS.items():
+        target = out / name
+        if target.exists():
+            shutil.rmtree(target)
+        print(f"  {name}: CSV (unsupported)")
+        build().export_to_csv_folder(str(target))
+        written[name] = sorted(f.name for f in target.iterdir())
+    return written
+
+
+UNSUPPORTED_NETWORKS = {
+    "piecewise-cost": piecewise_cost,
+}
+
 def write_malformed(out: Path) -> None:
     """Deliberately broken netCDF files, for the reader's error paths.
 
@@ -1628,7 +1717,7 @@ def main() -> int:
     # PATH is required rather than defaulting into `goldens/`. A default there
     # would be exactly the half-regeneration this comment claims to prevent:
     # `schema.json` rewritten from whatever PyPSA the invoking venv happens to
-    # hold while `manifest.json` still records 1.2.4, so the pinned schema and
+    # hold while `manifest.json` still records the pinned one, so the schema and
     # the recorded pin disagree and every schema-driven suite reads an unpinned
     # schema believing it is the golden. Regenerating the goldens is the no-flag
     # path, which rewrites the manifest alongside them.
@@ -1672,6 +1761,7 @@ def main() -> int:
                 unexpected_successes.append(f"{name}/{stage} succeeded, but is listed in KNOWN_UNSUPPORTED")
 
     write_malformed(OUT / "binary" / "malformed")
+    manifest["unsupported"] = write_unsupported(OUT / "unsupported")
     manifest["standard_types"] = write_standard_types(OUT / "standard_types")
 
     reference = capture_reference_schema()

@@ -49,6 +49,29 @@ object CsvReader:
     val staticFiles = csvs.filterNot(_.contains("-")).filterNot(reserved.contains)
     val seriesFiles = csvs.filter(f => f.contains("-") && !reserved.contains(f))
 
+    // Piecewise breakpoints are not a time series, and taking them for one is
+    // how the first version of this refusal came to be unreachable.
+    //
+    // PyPSA 1.3.0 writes a piecewise cost curve beside its component as
+    // `<list>-<attr>-pw.csv`. That matches the `<list>-<attr>.csv` shape this
+    // reader takes for a series, but nothing else about it fits: the frame is
+    // indexed by *breakpoint* rather than snapshot, and it carries a two-row
+    // header (`name` over `attribute`) because the columns are a MultiIndex. Read
+    // as a series it fails on whichever comes first -- a row count that has no
+    // reason to match the snapshots, or `p_pu` where a float belongs -- and both
+    // messages blame the snapshots for a file that was never about them.
+    //
+    // Refused here rather than in `Lopf`, which is where it started. The reader
+    // is what meets the file, and a model-layer guard keyed off a loaded series
+    // could only ever fire on a file this reader had already failed to parse.
+    val piecewise = csvs.filter(f => f.endsWith("-pw.csv") && !reserved.contains(f))
+    if piecewise.nonEmpty then
+      throw new MalformedNetwork(
+        s"${piecewise.head} is a piecewise cost curve, which this port does not model: the " +
+          "objective here is linear in one coefficient per entity, so the breakpoints would be " +
+          "dropped and the static column priced in their place"
+      )
+
     val seriesByComponent = seriesFiles.groupBy { f =>
       val stem = f.stripSuffix(".csv")
       stem.substring(0, stem.indexOf('-'))

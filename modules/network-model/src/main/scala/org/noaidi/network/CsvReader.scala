@@ -64,12 +64,14 @@ object CsvReader:
     // Refused here rather than in `Lopf`, which is where it started. The reader
     // is what meets the file, and a model-layer guard keyed off a loaded series
     // could only ever fire on a file this reader had already failed to parse.
-    val piecewise = csvs.filter(f => f.endsWith("-pw.csv") && !reserved.contains(f))
+    // `NetCdfReader` carries the same refusal against the other spelling, because
+    // moving it out of `Lopf` cost the coverage of both readers that one site had.
+    val piecewise = csvs.filter(_.endsWith("-pw.csv")).sorted
     if piecewise.nonEmpty then
-      throw new MalformedNetwork(
-        s"${piecewise.head} is a piecewise cost curve, which this port does not model: the " +
-          "objective here is linear in one coefficient per entity, so the breakpoints would be " +
-          "dropped and the static column priced in their place"
+      throw new UnsupportedNetworkFile(
+        s"${piecewise.mkString(", ")} holds piecewise cost curves, which this port does not " +
+          "model: the objective here is linear in one coefficient per entity, so the breakpoints " +
+          "would be dropped and the static column priced in their place"
       )
 
     val seriesByComponent = seriesFiles.groupBy { f =>

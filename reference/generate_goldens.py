@@ -1631,9 +1631,20 @@ def write_unsupported(out: Path) -> dict:
         target = out / name
         if target.exists():
             shutil.rmtree(target)
+        n = build()
         print(f"  {name}: CSV (unsupported)")
-        build().export_to_csv_folder(str(target))
-        written[name] = sorted(f.name for f in target.iterdir())
+        n.export_to_csv_folder(str(target))
+        # And netCDF, because this port has two readers and both feed the same
+        # model. The refusal these fixtures exist for was first written against
+        # one of them, which is the same mistake as writing it against a filename
+        # read out of the source: a guard that covers the format you happened to
+        # look at. The two spellings are not alike -- CSV gets
+        # `<list>-<attr>-pw.csv`, netCDF gets a `<list>_pw_<attr>` variable with
+        # its own breakpoint dimension -- so each reader needs its own, and each
+        # needs a real file to be tested against.
+        print(f"  {name}: netCDF (unsupported)")
+        n.export_to_netcdf(str(out / f"{name}.nc"))
+        written[name] = sorted(f.name for f in target.iterdir()) + [f"{name}.nc"]
     return written
 
 

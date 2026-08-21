@@ -35,33 +35,38 @@ class GoldenNetworkSuite extends munit.FunSuite:
     assertEquals(schema.attributeCount, 454)
   }
 
-  test("a piecewise cost curve is refused, from PyPSA's own export") {
+  test("a piecewise cost curve is refused by both readers, from PyPSA's own exports") {
     assume(available, "goldens missing")
-    // Against `unsupported/piecewise-cost`, written by `export_to_csv_folder`
-    // rather than by hand. That distinction is the whole reason the fixture
-    // exists: the first version of this refusal matched a `_piecewise` suffix
-    // read out of PyPSA's Excel sheet-name table, and the hand-written CSV in the
-    // test agreed with it and passed, while `_CSVExporter.save_piecewise` writes
-    // `<list>-<attr>-pw.csv` with a two-row header and the refusal matched
-    // nothing a real export produces.
+    // Against `unsupported/piecewise-cost`, written by `export_to_csv_folder` and
+    // `export_to_netcdf` rather than by hand. That distinction is the whole reason
+    // the fixture exists: the first version of this refusal matched a
+    // `_piecewise` suffix read out of PyPSA's Excel sheet-name table, and the
+    // hand-written CSV in the test agreed with it and passed, while
+    // `_CSVExporter.save_piecewise` writes `<list>-<attr>-pw.csv`.
+    //
+    // Both readers, because both feed `Lopf` and the guard this replaced sat in
+    // `Lopf` where one site covered them both. The two spellings share nothing:
+    // `generators-marginal_cost-pw.csv` against a `generators_pw_marginal_cost`
+    // variable.
     val directory = goldens.resolve("unsupported").resolve("piecewise-cost")
     assert(Files.isDirectory(directory), s"no unsupported fixture at $directory")
     assert(
       Files.exists(directory.resolve("generators-marginal_cost-pw.csv")),
-      "the fixture does not carry the file this refusal is keyed to",
+      "the fixture does not carry the CSV file this refusal is keyed to",
     )
 
-    val failure = intercept[CsvReader.MalformedNetwork](CsvReader.read(directory, schema, "pw"))
+    val fromCsv =
+      intercept[UnsupportedNetworkFile](CsvReader.read(directory, schema, "piecewise-cost"))
     assert(
-      failure.getMessage.contains("piecewise"),
-      s"refused, but not as a piecewise curve: ${failure.getMessage}",
+      fromCsv.getMessage.contains("piecewise"),
+      s"refused, but not as a piecewise curve: ${fromCsv.getMessage}",
     )
     // Not a row count. Read as a time series the file fails on its header or its
     // length, and both messages blame the snapshots for a file that is indexed by
     // breakpoint -- which is the diagnostic this refusal exists to replace.
     assert(
-      !failure.getMessage.contains("snapshots"),
-      s"refused as a malformed time series rather than as a curve: ${failure.getMessage}",
+      !fromCsv.getMessage.contains("snapshots"),
+      s"refused as a malformed time series rather than as a curve: ${fromCsv.getMessage}",
     )
   }
 

@@ -242,3 +242,31 @@ class NetCdfReaderSuite extends munit.FunSuite:
 
   override def afterAll(): Unit =
     temporaries.foreach(p => if Files.exists(p) then Files.delete(p))
+
+  test("a piecewise cost curve is refused rather than read as a static column") {
+    assume(available, "goldens missing")
+    // The other half of the refusal `GoldenNetworkSuite` pins on the CSV side.
+    // Both readers feed `Lopf`, and this guard used to sit there -- one site
+    // covering both -- so moving it into the readers is only equivalent if both
+    // of them got one.
+    //
+    // The file is a real `export_to_netcdf`, not a hand-built dataset. PyPSA
+    // writes the curve as `generators_pw_marginal_cost` over its own `breakpoint`
+    // dimension; `readTable` skips only `<list>_i` and `<list>_t_*`, so without
+    // this it would take that variable -- and the two index variables beside it --
+    // for static columns, and fail on a length check that blames `generators_i`'s
+    // entity count.
+    val file = goldens.resolve("unsupported").resolve("piecewise-cost.nc")
+    assume(Files.exists(file), s"no unsupported netCDF fixture at $file")
+
+    val failure =
+      intercept[UnsupportedNetworkFile](NetCdfReader.read(file, schema, "piecewise-cost"))
+    assert(
+      failure.getMessage.contains("piecewise"),
+      s"refused, but not as a piecewise curve: ${failure.getMessage}",
+    )
+    assert(
+      !failure.getMessage.contains("entities"),
+      s"refused by the entity-count check rather than as a curve: ${failure.getMessage}",
+    )
+  }

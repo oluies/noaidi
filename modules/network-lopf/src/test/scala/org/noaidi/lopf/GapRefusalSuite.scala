@@ -30,6 +30,17 @@ import org.noaidi.prima.PdhgParams
   * A gap being implemented is not a failure of this suite; it is a reason to
   * delete a case from it, deliberately, in the change that implements it. Three
   * cases were removed that way when the AC transformer model was written.
+  *
+  * ==One documented gap is not here==
+  *
+  * Piecewise cost curves. Every case in this suite goes through `Lopf.build`, and
+  * that gap is refused a layer below it: a curve is a *file*, so `CsvReader` and
+  * `NetCdfReader` turn it away before a model is built and neither raises
+  * `Lopf.UnsupportedNetwork`. Its cases are `GoldenNetworkSuite`'s "a piecewise
+  * cost curve is refused by both readers" and `NetCdfReaderSuite`'s "a piecewise
+  * cost curve is refused rather than read as a static column", both against real
+  * PyPSA exports in `goldens/unsupported/`. Named here so that the gap list in
+  * NOTES and this suite can still be read against each other.
   */
 class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 

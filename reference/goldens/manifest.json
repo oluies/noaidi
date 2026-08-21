@@ -7746,7 +7746,8 @@
    "meta.json",
    "network.csv",
    "snapshots.csv",
-   "sub_networks.csv"
+   "sub_networks.csv",
+   "piecewise-cost.nc"
   ]
  },
  "versions": {

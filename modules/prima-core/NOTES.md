@@ -1926,6 +1926,25 @@ a directory for networks the reader must *turn away*, so that walking
 breakpoint frame raises a `KeyError` about an index level while still writing a
 file that looks perfectly plausible.
 
+**And there was a third mistake, which is the second one again.** Moving the
+guard out of `Lopf` cost something that site had for free: `Lopf` is downstream
+of *both* readers, so one check covered both. A refusal in `CsvReader` alone
+covers one of this port's two entry points, and `NetCdfReader` would have taken
+PyPSA's `generators_pw_marginal_cost` — which is neither `<list>_i` nor
+`<list>_t_*` — for a static column and failed on a length check blaming the
+entity count for a frame indexed by breakpoint. The same misdirected diagnostic
+the CSV refusal was written to remove, in the other reader. Both readers carry it
+now, and `goldens/unsupported/` holds a real export in each format, because the
+two spellings share nothing: `generators-marginal_cost-pw.csv` against a
+`generators_pw_marginal_cost` variable over its own `breakpoint` dimension.
+
+The refusal is `UnsupportedNetworkFile`, not either reader's `MalformedNetwork`.
+`goldens/binary/malformed` is what that type is for — a column shorter than its
+index, a time unit CF does not define — and a piecewise export is none of those.
+It is exactly what PyPSA meant to write; the reason it is refused is a fact about
+this port. It is deliberately not a subclass, since that would keep every
+existing `catch` working and let the two go on being confused.
+
 **Optimisable phase shifts** are refused for the same class of reason: when
 `phase_shift_min < phase_shift_max` the shift is a per-snapshot *variable* in the
 row, not the constant this model puts there.

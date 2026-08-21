@@ -7733,22 +7733,24 @@
   }
  },
  "unsupported": {
-  "piecewise-cost": [
-   "buses-marginal_price.csv",
-   "buses.csv",
-   "crs.json",
-   "generators-marginal_cost-pw.csv",
-   "generators-p.csv",
-   "generators.csv",
-   "loads-p.csv",
-   "loads-p_set.csv",
-   "loads.csv",
-   "meta.json",
-   "network.csv",
-   "snapshots.csv",
-   "sub_networks.csv",
-   "piecewise-cost.nc"
-  ]
+  "piecewise-cost": {
+   "csv": [
+    "buses-marginal_price.csv",
+    "buses.csv",
+    "crs.json",
+    "generators-marginal_cost-pw.csv",
+    "generators-p.csv",
+    "generators.csv",
+    "loads-p.csv",
+    "loads-p_set.csv",
+    "loads.csv",
+    "meta.json",
+    "network.csv",
+    "snapshots.csv",
+    "sub_networks.csv"
+   ],
+   "netcdf": "piecewise-cost.nc"
+  }
  },
  "versions": {
   "numpy": "2.5.1",

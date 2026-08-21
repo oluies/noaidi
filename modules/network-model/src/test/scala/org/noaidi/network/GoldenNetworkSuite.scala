@@ -35,7 +35,7 @@ class GoldenNetworkSuite extends munit.FunSuite:
     assertEquals(schema.attributeCount, 454)
   }
 
-  test("a piecewise cost curve is refused by both readers, from PyPSA's own exports") {
+  test("a piecewise cost curve is refused by the CSV reader, from PyPSA's own export") {
     assume(available, "goldens missing")
     // Against `unsupported/piecewise-cost`, written by `export_to_csv_folder` and
     // `export_to_netcdf` rather than by hand. That distinction is the whole reason
@@ -44,8 +44,13 @@ class GoldenNetworkSuite extends munit.FunSuite:
     // hand-written CSV in the test agreed with it and passed, while
     // `_CSVExporter.save_piecewise` writes `<list>-<attr>-pw.csv`.
     //
-    // Both readers, because both feed `Lopf` and the guard this replaced sat in
-    // `Lopf` where one site covered them both. The two spellings share nothing:
+    // The CSV half only, and named that way after a review caught the name
+    // claiming both. `network-model` does not depend on `network-io`, so
+    // `NetCdfReader` is not on this suite's classpath and deleting its guard left
+    // this case green -- while `GapRefusalSuite`'s doc cited it, by that name, as
+    // one of the two covering the gap. The netCDF half is
+    // `NetCdfReaderSuite`'s "a piecewise cost curve is refused rather than read as
+    // a static column"; the two spellings share nothing beyond the exception type,
     // `generators-marginal_cost-pw.csv` against a `generators_pw_marginal_cost`
     // variable.
     val directory = goldens.resolve("unsupported").resolve("piecewise-cost")

@@ -1897,10 +1897,13 @@ entity stays available at every snapshot.
 piecewise-linear, which the schema records by widening their type to `static or
 piecewise or series`. The breakpoints are not in that column — they are a file
 beside the component — so a model that read only the column would price the
-curve at a number the network does not use. `CsvReader` refuses the file.
+curve at a number the network does not use. Both readers refuse the file.
 
-That refusal was wrong twice before it was right, and both mistakes are the same
-mistake: **the name was read out of the source instead of out of an export.**
+That refusal was wrong three times before it was right, and the three are one
+mistake wearing different clothes: **it was written against what was in front of
+me rather than against what PyPSA produces.** A name read out of the source, a
+layer chosen without checking where the file is met, a format guarded because it
+was the one I had looked at.
 
 The first version matched a `_piecewise` suffix, taken from the sheet-name table
 in `network/io.py` that maps `generators-marginal_cost_piecewise` to

@@ -67,12 +67,7 @@ object CsvReader:
     // `NetCdfReader` carries the same refusal against the other spelling, because
     // moving it out of `Lopf` cost the coverage of both readers that one site had.
     val piecewise = csvs.filter(_.endsWith("-pw.csv")).sorted
-    if piecewise.nonEmpty then
-      throw new UnsupportedNetworkFile(
-        s"${piecewise.mkString(", ")} holds piecewise cost curves, which this port does not " +
-          "model: the objective here is linear in one coefficient per entity, so the breakpoints " +
-          "would be dropped and the static column priced in their place"
-      )
+    if piecewise.nonEmpty then throw UnsupportedNetworkFile.piecewise(piecewise)
 
     val seriesByComponent = seriesFiles.groupBy { f =>
       val stem = f.stripSuffix(".csv")

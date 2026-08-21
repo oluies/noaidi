@@ -104,6 +104,31 @@ object NetCdfReader:
         .sortBy(_._1)
     )
 
+    // The netCDF spelling of the refusal `CsvReader` makes against
+    // `<list>-<attr>-pw.csv`. Both readers feed the same model, so a guard in one
+    // of them is half a guard -- which is what moving this out of `Lopf` cost,
+    // since that one site sat downstream of both.
+    //
+    // Here rather than in `readTable`, so that the two guards ask the same
+    // question. `readTable` runs only for a spec the schema knows *and* whose
+    // `<list>_i` exists, so a curve on any other list would have been ignored and
+    // the network loaded -- while the CSV check, at the top of `read`, refuses a
+    // `-pw.csv` whatever it belongs to. It also re-scanned every dataset name once
+    // per component, sixteen passes to answer a question about the file.
+    //
+    // PyPSA writes a curve as `<list>_pw_<attr>`, dimensioned by its own
+    // `breakpoint` axis, alongside `<list>_pw_<attr>_i` and
+    // `<list>_pw_<attr>_attr_i`. Only the first is named: the other two are that
+    // curve's indices, and reporting them as things that "hold piecewise cost
+    // curves" describes the file wrongly. None of the three is a static column,
+    // and `readTable` excludes only `<list>_i` and `<list>_t_*`, so without this
+    // all three would be read as columns and the first would fail a length check
+    // blaming `<list>_i`'s entity count for a frame indexed by breakpoint.
+    val piecewise = datasets.keys.toIndexedSeq
+      .filter(n => n.contains("_pw_") && !n.endsWith("_i"))
+      .sorted
+    if piecewise.nonEmpty then throw UnsupportedNetworkFile.piecewise(piecewise)
+
     // Driven off the schema's list names. Splitting a dataset name on
     // underscores could not tell `sub_networks_carrier` apart from a `networks`
     // list with a `sub_carrier` attribute; the schema is what says which prefixes
@@ -137,27 +162,6 @@ object NetCdfReader:
       snapshotCount: Int,
   ): ComponentTable =
     val prefix = s"${spec.listName}_"
-
-    // The netCDF spelling of the refusal `CsvReader` makes against
-    // `<list>-<attr>-pw.csv`. Both readers feed the same model, so a guard in one
-    // of them is half a guard -- which is what moving this out of `Lopf` cost,
-    // since that one site sat downstream of both.
-    //
-    // PyPSA writes a curve as `<list>_pw_<attr>`, dimensioned by its own
-    // `breakpoint` axis and by an attribute index, alongside
-    // `<list>_pw_<attr>_i` and `<list>_pw_<attr>_attr_i`. None of those is a
-    // static column, and none is caught by the two exclusions below: `rest` is
-    // neither exactly `i` nor `t_`-prefixed for any of them. So all three would be
-    // read as columns and the first would fail the length check with a message
-    // blaming `generators_i`'s entity count for a frame indexed by breakpoint --
-    // the same misdirected diagnostic the CSV path was refused to avoid.
-    val piecewise = datasets.keys.filter(_.startsWith(prefix + "pw_")).toIndexedSeq.sorted
-    if piecewise.nonEmpty then
-      throw new UnsupportedNetworkFile(
-        s"${piecewise.mkString(", ")} holds piecewise cost curves, which this port does not " +
-          "model: the objective here is linear in one coefficient per entity, so the breakpoints " +
-          "would be dropped and the static column priced in their place"
-      )
 
     val statics = ListMap.from(
       datasets.toIndexedSeq

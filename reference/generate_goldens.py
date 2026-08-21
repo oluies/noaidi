@@ -1609,7 +1609,7 @@ def write_standard_types(out: Path) -> dict:
 
 
 def write_unsupported(out: Path) -> dict:
-    """CSV exports of networks the port refuses, written for the refusal to read.
+    """CSV and netCDF exports of networks the port refuses, for the refusals to read.
 
     Not under `networks/`, and the distinction is the point. Everything there is
     a network `CsvReader` must load; these are networks it must **turn away**, so
@@ -1644,7 +1644,15 @@ def write_unsupported(out: Path) -> dict:
         # needs a real file to be tested against.
         print(f"  {name}: netCDF (unsupported)")
         n.export_to_netcdf(str(out / f"{name}.nc"))
-        written[name] = sorted(f.name for f in target.iterdir()) + [f"{name}.nc"]
+        # Recorded as two artefacts rather than one flat list. The netCDF file is
+        # a *sibling* of the CSV directory, so appending its name to that
+        # directory's listing asserted `unsupported/<name>/<name>.nc`, a path that
+        # does not exist -- and left the list unsorted, unlike every other file
+        # list in the manifest.
+        written[name] = {
+            "csv": sorted(f.name for f in target.iterdir()),
+            "netcdf": f"{name}.nc",
+        }
     return written
 
 

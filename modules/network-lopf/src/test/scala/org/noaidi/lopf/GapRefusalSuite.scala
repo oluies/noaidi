@@ -36,11 +36,12 @@ import org.noaidi.prima.PdhgParams
   * Piecewise cost curves. Every case in this suite goes through `Lopf.build`, and
   * that gap is refused a layer below it: a curve is a *file*, so `CsvReader` and
   * `NetCdfReader` turn it away before a model is built and neither raises
-  * `Lopf.UnsupportedNetwork`. Its cases are `GoldenNetworkSuite`'s "a piecewise
-  * cost curve is refused by both readers" and `NetCdfReaderSuite`'s "a piecewise
-  * cost curve is refused rather than read as a static column", both against real
-  * PyPSA exports in `goldens/unsupported/`. Named here so that the gap list in
-  * NOTES and this suite can still be read against each other.
+  * `Lopf.UnsupportedNetwork`. It takes two cases rather than one, because the two
+  * readers live in modules that cannot see each other: `GoldenNetworkSuite`'s "a
+  * piecewise cost curve is refused by the CSV reader" and `NetCdfReaderSuite`'s
+  * "a piecewise cost curve is refused rather than read as a static column", each
+  * against a real PyPSA export in `goldens/unsupported/`. Named here so that the
+  * gap list in NOTES and this suite can still be read against each other.
   */
 class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 

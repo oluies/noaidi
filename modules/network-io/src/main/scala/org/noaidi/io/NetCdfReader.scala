@@ -112,22 +112,30 @@ object NetCdfReader:
     // Here rather than in `readTable`, so that the two guards ask the same
     // question. `readTable` runs only for a spec the schema knows *and* whose
     // `<list>_i` exists, so a curve on any other list would have been ignored and
-    // the network loaded -- while the CSV check, at the top of `read`, refuses a
-    // `-pw.csv` whatever it belongs to. It also re-scanned every dataset name once
-    // per component, sixteen passes to answer a question about the file.
+    // the network loaded -- while the CSV check, which runs before any component
+    // table is built, refuses a `-pw.csv` whatever it belongs to. It also
+    // re-scanned every dataset name once per component, sixteen passes to answer a
+    // question about the file.
     //
     // PyPSA writes a curve as `<list>_pw_<attr>`, dimensioned by its own
     // `breakpoint` axis, alongside `<list>_pw_<attr>_i` and
-    // `<list>_pw_<attr>_attr_i`. Only the first is named: the other two are that
-    // curve's indices, and reporting them as things that "hold piecewise cost
-    // curves" describes the file wrongly. None of the three is a static column,
-    // and `readTable` excludes only `<list>_i` and `<list>_t_*`, so without this
-    // all three would be read as columns and the first would fail a length check
+    // `<list>_pw_<attr>_attr_i`. None of the three is a static column, and
+    // `readTable` excludes only `<list>_i` and `<list>_t_*`, so without this all
+    // three would be read as columns and the first would fail a length check
     // blaming `<list>_i`'s entity count for a frame indexed by breakpoint.
-    val piecewise = datasets.keys.toIndexedSeq
-      .filter(n => n.contains("_pw_") && !n.endsWith("_i"))
-      .sorted
-    if piecewise.nonEmpty then throw UnsupportedNetworkFile.piecewise(piecewise)
+    //
+    // Detected on the whole family and *reported* as the value variables alone.
+    // Those are two questions and they were being answered by one expression:
+    // excluding the indices from the filter meant the refusal fired only when a
+    // non-`_i` sibling was present, so a renamed value variable, a partial export
+    // or a future spelling would carry the indices past the guard and back into
+    // the length check this exists to replace. The fallback keeps the message
+    // honest in that case -- naming an index is worse than nothing only when
+    // something better was available.
+    val curves  = datasets.keys.toIndexedSeq.filter(_.contains("_pw_")).sorted
+    val bearing = curves.filterNot(_.endsWith("_i"))
+    if curves.nonEmpty then
+      throw UnsupportedNetworkFile.piecewise(if bearing.isEmpty then curves else bearing)
 
     // Driven off the schema's list names. Splitting a dataset name on
     // underscores could not tell `sub_networks_carrier` apart from a `networks`

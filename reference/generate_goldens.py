@@ -1701,6 +1701,28 @@ def write_malformed(out: Path) -> None:
         {"snapshots_snapshot": times},
         coords={"snapshots": np.array([0, 1])},
     ).to_netcdf(out / "bad-time-unit.nc")
+    # A piecewise curve carrying only its index variables.
+    #
+    # Synthetic, and unlike everything else in this directory it is not a
+    # deliberately broken file -- no PyPSA export produces it at all, because
+    # `save_piecewise` always writes the value variable beside its indices. That
+    # is exactly why it is here. `NetCdfReader`'s refusal detects on the whole
+    # `<list>_pw_<attr>` family rather than on the value variable alone, so that a
+    # renamed value variable, a partial export or a future spelling still refuses
+    # instead of falling through to the static-column length check it exists to
+    # replace. Nothing PyPSA writes can exercise that, so the alternative to a
+    # synthetic fixture is an unexercised guard.
+    xr.Dataset(
+        {
+            "snapshots_snapshot": ("snapshots", np.array([0, 1])),
+            "generators_pw_marginal_cost_i": (
+                "breakpoint",
+                np.array(["curved"], dtype=object),
+            ),
+        },
+        coords={"snapshots": np.array([0, 1]), "breakpoint": np.array([0])},
+    ).to_netcdf(out / "piecewise-index-only.nc")
+
 
     print(f"  wrote malformed fixtures to {out}")
 

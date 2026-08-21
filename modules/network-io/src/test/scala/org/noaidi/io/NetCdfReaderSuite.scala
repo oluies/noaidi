@@ -269,4 +269,39 @@ class NetCdfReaderSuite extends munit.FunSuite:
       !failure.getMessage.contains("entities"),
       s"refused by the entity-count check rather than as a curve: ${failure.getMessage}",
     )
+    // The message names what holds the curve, not what indexes it. PyPSA writes
+    // `generators_pw_marginal_cost` beside `..._i` and `..._attr_i`, and the
+    // fixture carries all three -- so reporting the pair as things that "hold
+    // piecewise cost curves" describes the file wrongly, and nothing above would
+    // notice: both assertions pass either way.
+    assert(
+      failure.getMessage.contains("generators_pw_marginal_cost"),
+      s"the message does not name the curve: ${failure.getMessage}",
+    )
+    Seq("generators_pw_marginal_cost_i", "generators_pw_marginal_cost_attr_i").foreach { index =>
+      assert(
+        !failure.getMessage.contains(index),
+        s"the message reports $index, which indexes the curve rather than holding it: " +
+          failure.getMessage,
+      )
+    }
+
+    // And a curve whose *only* datasets are those indices still refuses. The
+    // guard detects on the whole `_pw_` family and reports the value variables,
+    // which are two questions -- answering both with one filter meant the refusal
+    // fired only when a non-`_i` sibling was present, so a renamed value variable
+    // or a partial export would carry the indices back into the length check.
+    //
+    // `binary/malformed` rather than `unsupported/`, and synthetic rather than
+    // exported: `save_piecewise` always writes the value variable, so nothing
+    // PyPSA produces can exercise this and the alternative is an unexercised
+    // guard. It is a hypothesis about future shapes, stated as one.
+    val indexOnly = goldens.resolve("binary").resolve("malformed").resolve("piecewise-index-only.nc")
+    assume(Files.exists(indexOnly), s"no index-only fixture at $indexOnly")
+    val fallback =
+      intercept[UnsupportedNetworkFile](NetCdfReader.read(indexOnly, schema, "piecewise-index-only"))
+    assert(
+      fallback.getMessage.contains("piecewise"),
+      s"an index-only curve was not refused as one: ${fallback.getMessage}",
+    )
   }

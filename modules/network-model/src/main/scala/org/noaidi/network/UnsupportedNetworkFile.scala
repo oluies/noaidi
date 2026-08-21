@@ -15,7 +15,10 @@ package org.noaidi.network
   * a `<list>_pw_<attr>` variable with its own breakpoint dimension. A caller that
   * wants to tell "your export is damaged" from "this port does not model that"
   * can do it on the type, and `goldens/unsupported/` holds a real PyPSA export of
-  * each so both paths are tested against a file rather than against a guess.
+  * each so both paths are tested against a file rather than against a guess. One
+  * fixture there is synthetic and labelled so in the manifest: it carries a shape
+  * no exporter writes, which is what makes it evidence about the reader's
+  * detection rather than about the format.
   *
   * Not a subclass of either `MalformedNetwork`. Making it one would keep every
   * existing `catch` working, which is precisely the property that would let the

@@ -1653,7 +1653,54 @@ def write_unsupported(out: Path) -> dict:
             "csv": sorted(f.name for f in target.iterdir()),
             "netcdf": f"{name}.nc",
         }
+    written.update(write_synthetic_unsupported(out))
     return written
+
+
+def write_synthetic_unsupported(out: Path) -> dict:
+    """Shapes no exporter produces, for the refusals that must survive them.
+
+    Separate from `write_malformed` on purpose, and the reason is the distinction
+    `UnsupportedNetworkFile` exists to draw. `binary/malformed` is what three
+    places -- that type's scaladoc, NOTES, and `write_malformed`'s own docstring
+    -- point at to *define* "broken file", and everything in it raises
+    `MalformedNetwork`. A file that is perfectly well formed and merely unmodelled
+    raises the other type, so putting one there would make the directory a
+    counterexample to the boundary it anchors.
+
+    Separate from the exports above too, and labelled `synthetic` in the manifest,
+    because it is not evidence about what PyPSA writes. It is a hypothesis about
+    what PyPSA might one day write, and the goldens' whole argument is that those
+    two are not interchangeable.
+    """
+    import xarray as xr
+
+    # A piecewise curve carrying only its index variables.
+    #
+    # `save_piecewise` always writes the value variable beside its indices, so
+    # nothing PyPSA produces reaches this branch -- and `NetCdfReader` detects on
+    # the whole `<list>_pw_<attr>` family rather than on the value variable alone
+    # precisely so that a renamed value variable, a partial export or a future
+    # spelling still refuses instead of falling through to the static-column
+    # length check. The alternative to a synthetic fixture is an unexercised
+    # guard.
+    xr.Dataset(
+        {
+            "snapshots_snapshot": ("snapshots", np.array([0, 1])),
+            "generators_pw_marginal_cost_i": (
+                "breakpoint",
+                np.array(["curved"], dtype=object),
+            ),
+        },
+        coords={"snapshots": np.array([0, 1]), "breakpoint": np.array([0])},
+    ).to_netcdf(out / "piecewise-index-only.nc")
+
+    return {
+        "piecewise-index-only": {
+            "netcdf": "piecewise-index-only.nc",
+            "synthetic": "no exporter writes this; it pins the detection filter, not the format",
+        }
+    }
 
 
 UNSUPPORTED_NETWORKS = {
@@ -1701,27 +1748,6 @@ def write_malformed(out: Path) -> None:
         {"snapshots_snapshot": times},
         coords={"snapshots": np.array([0, 1])},
     ).to_netcdf(out / "bad-time-unit.nc")
-    # A piecewise curve carrying only its index variables.
-    #
-    # Synthetic, and unlike everything else in this directory it is not a
-    # deliberately broken file -- no PyPSA export produces it at all, because
-    # `save_piecewise` always writes the value variable beside its indices. That
-    # is exactly why it is here. `NetCdfReader`'s refusal detects on the whole
-    # `<list>_pw_<attr>` family rather than on the value variable alone, so that a
-    # renamed value variable, a partial export or a future spelling still refuses
-    # instead of falling through to the static-column length check it exists to
-    # replace. Nothing PyPSA writes can exercise that, so the alternative to a
-    # synthetic fixture is an unexercised guard.
-    xr.Dataset(
-        {
-            "snapshots_snapshot": ("snapshots", np.array([0, 1])),
-            "generators_pw_marginal_cost_i": (
-                "breakpoint",
-                np.array(["curved"], dtype=object),
-            ),
-        },
-        coords={"snapshots": np.array([0, 1]), "breakpoint": np.array([0])},
-    ).to_netcdf(out / "piecewise-index-only.nc")
 
 
     print(f"  wrote malformed fixtures to {out}")

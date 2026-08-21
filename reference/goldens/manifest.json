@@ -7750,6 +7750,10 @@
     "sub_networks.csv"
    ],
    "netcdf": "piecewise-cost.nc"
+  },
+  "piecewise-index-only": {
+   "netcdf": "piecewise-index-only.nc",
+   "synthetic": "no exporter writes this; it pins the detection filter, not the format"
   }
  },
  "versions": {

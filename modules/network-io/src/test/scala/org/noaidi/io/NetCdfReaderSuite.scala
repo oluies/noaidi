@@ -285,23 +285,41 @@ class NetCdfReaderSuite extends munit.FunSuite:
           failure.getMessage,
       )
     }
+  }
 
-    // And a curve whose *only* datasets are those indices still refuses. The
-    // guard detects on the whole `_pw_` family and reports the value variables,
-    // which are two questions -- answering both with one filter meant the refusal
-    // fired only when a non-`_i` sibling was present, so a renamed value variable
-    // or a partial export would carry the indices back into the length check.
+  test("an index-only piecewise family is still refused, and named") {
+    assume(available, "goldens missing")
+    // A curve whose *only* datasets are its indices. The guard detects on the
+    // whole `_pw_` family and reports the value variables, which are two
+    // questions -- answering both with one filter meant the refusal fired only
+    // when a non-`_i` sibling was present, so a renamed value variable or a
+    // partial export would carry the indices back into the static-column length
+    // check the guard exists to replace.
     //
-    // `binary/malformed` rather than `unsupported/`, and synthetic rather than
-    // exported: `save_piecewise` always writes the value variable, so nothing
-    // PyPSA produces can exercise this and the alternative is an unexercised
-    // guard. It is a hypothesis about future shapes, stated as one.
-    val indexOnly = goldens.resolve("binary").resolve("malformed").resolve("piecewise-index-only.nc")
-    assume(Files.exists(indexOnly), s"no index-only fixture at $indexOnly")
-    val fallback =
-      intercept[UnsupportedNetworkFile](NetCdfReader.read(indexOnly, schema, "piecewise-index-only"))
+    // Synthetic, and in `unsupported/` rather than `binary/malformed/`:
+    // `save_piecewise` always writes the value variable, so nothing PyPSA
+    // produces reaches this branch, and `binary/malformed` is the directory three
+    // separate docs point at to define what `MalformedNetwork` is for. A file
+    // raising the other type would make it a counterexample to its own boundary.
+    //
+    // Its own case rather than a second half of the one above, which reads a real
+    // export and says so. One name, one file: sharing them meant an unrelated
+    // failure in the message assertions masked a regression in the filter.
+    val file = goldens.resolve("unsupported").resolve("piecewise-index-only.nc")
+    assume(Files.exists(file), s"no index-only fixture at $file")
+
+    val failure =
+      intercept[UnsupportedNetworkFile](NetCdfReader.read(file, schema, "piecewise-index-only"))
     assert(
-      fallback.getMessage.contains("piecewise"),
-      s"an index-only curve was not refused as one: ${fallback.getMessage}",
+      failure.getMessage.contains("piecewise"),
+      s"an index-only curve was not refused as one: ${failure.getMessage}",
+    )
+    // The fallback, which was the part left unpinned: with no value variable to
+    // name, the message reports the family rather than nothing. Dropping it makes
+    // `names.mkString(", ")` render an empty sequence, and the refusal names no
+    // dataset at all while still containing the word "piecewise".
+    assert(
+      failure.getMessage.contains("generators_pw_marginal_cost_i"),
+      s"the refusal names no dataset: ${failure.getMessage}",
     )
   }

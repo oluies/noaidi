@@ -1941,6 +1941,13 @@ now, and `goldens/unsupported/` holds a real export in each format, because the
 two spellings share nothing: `generators-marginal_cost-pw.csv` against a
 `generators_pw_marginal_cost` variable over its own `breakpoint` dimension.
 
+It holds one synthetic file besides, labelled as such in the manifest. The netCDF
+guard detects on the whole `_pw_` family and reports only the value variables, so
+that a renamed value variable or a partial export still refuses instead of falling
+back into the length check — and `save_piecewise` always writes the value
+variable, so nothing PyPSA produces reaches that branch. The alternative to a
+fixture that says "no exporter writes this" was a guard nothing exercised.
+
 The refusal is `UnsupportedNetworkFile`, not either reader's `MalformedNetwork`.
 `goldens/binary/malformed` is what that type is for — a column shorter than its
 index, a time unit CF does not define — and a piecewise export is none of those.

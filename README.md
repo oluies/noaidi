@@ -52,12 +52,13 @@ is 4.9e-10 on macOS/aarch64/JDK 26 and 5.874e-10 on Linux/x86_64 — a differenc
 between configurations rather than between solvers, unchanged across two major
 versions of ojAlgo, and asserted not to exceed 1e-8.
 
-The two configurations differed in architecture *and* JDK, so which one explained
-the gap was open. CI now runs the ladder on JDK 21 and JDK 25 on the same Linux
-host and both report **5.874e-10**, identical to three digits. That does not prove
-the architecture hypothesis, but it removes the JDK as the explanation, which is
-what the two-JDK matrix is there to do. aarch64 Linux is the one cell still
-missing — see [`HPC.md`](HPC.md).
+The two configurations differ in architecture *and* JDK, so which one explains
+the gap is open. CI runs the ladder on JDK 21 and JDK 25 on the same Linux host
+and both report 5.874e-10 — agreement to the four digits the report prints,
+which rules out JVM sensitivity *between those two versions* and no more than
+that: the macOS figure was taken on JDK 26, which is in neither matrix.
+Architecture remains the leading hypothesis and is not established. aarch64 Linux
+is the cell that would settle it — see [`HPC.md`](HPC.md).
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
 - [`HPC.md`](HPC.md) — a plan for running this on NAISS Arrhenius, and what it would change.
@@ -222,8 +223,14 @@ everything from the foundation layer up is ahead:
 10. **L5 runtime**: ZIO Streams over snapshots and contingencies, Pekko cluster distribution.
 
 From L1 onwards, every module is gated on golden-file comparison against a
-pinned PyPSA version run on the same example networks. That harness exists:
-`reference/generate_goldens.py` pins the version `reference/goldens/manifest.json`
-records, and a weekly job installs the *newest* PyPSA and diffs its component
-registry against the pinned one, so a release that changes an answer is noticed
-rather than waited for.
+pinned PyPSA version run on the same example networks. That harness exists: the
+pin is the `pypsa==` in `reference/README.md`'s install command,
+`reference/generate_goldens.py` records whichever version produced the goldens
+into `reference/goldens/manifest.json`, and a weekly job installs the *newest*
+PyPSA and diffs its component registry against the pinned one.
+
+What that job detects is **schema** drift — an attribute added, a default or a
+unit moved — plus an attribute sweep asking whether anything unaccounted for has
+appeared. A release that changes a *formula* without touching the registry passes
+it silently, and only regenerating the goldens finds that. PyPSA 1.3.0 happened to
+do both.

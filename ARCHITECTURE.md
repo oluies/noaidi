@@ -46,6 +46,7 @@ graph TD
     zioLib["ZIO / ZIO Streams"]:::ext
     ojalgoLib["ojAlgo"]:::ext
     upickleLib["uPickle"]:::ext
+    jhdfLib["jhdf"]:::ext
 
     primaZio --> primaCore
     primaOjalgo --> primaCore
@@ -60,6 +61,7 @@ graph TD
     primaZio -.-> zioLib
     primaOjalgo -.-> ojalgoLib
     networkModel -.-> upickleLib
+    networkIo -.-> jhdfLib
 
     classDef ext fill:#f6f6f6,stroke:#bbb,stroke-dasharray:4 3,color:#555;
 ```
@@ -344,12 +346,16 @@ over well-understood libraries; if it had been built first, the project's
 riskiest assumption would still be untested.
 
 From L1 onward every module is gated on golden-file comparison against a pinned
-PyPSA run, and that harness now exists: `reference/generate_goldens.py` pins the
-version `reference/goldens/manifest.json` records, and captures schema, exported
-tables, sub-network decomposition, LPF and optimisation results for each
-reference network. Prima itself is validated against ojAlgo and the Netlib
-corpus instead, which are the right oracles for an LP solver and the wrong ones
-for a network model.
+PyPSA run, and that harness now exists. The pin is the `pypsa==` in
+`reference/README.md`'s install command; `reference/generate_goldens.py` pins
+nothing itself. It records whichever version produced the goldens into
+`reference/goldens/manifest.json`, and writes the schema, exported tables,
+sub-network decomposition, LPF and optimisation results beside it under
+`reference/goldens/` — the manifest carries the versions and a per-network
+summary, not the artefacts themselves.
+
+Prima itself is validated against ojAlgo and the Netlib corpus instead, which are
+the right oracles for an LP solver and the wrong ones for a network model.
 
 Generating the goldens '''before''' designing anything that consumes them has paid
 for itself repeatedly. Three PyPSA conventions that documentation does not state,

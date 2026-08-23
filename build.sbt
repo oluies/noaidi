@@ -32,6 +32,18 @@ lazy val primaCore = project
   .settings(commonSettings)
   .settings(
     name := "prima-core",
+    // `VectorKernels` uses `jdk.incubator.vector`. Scala compiles against an
+    // incubator module with no flag, but the JVM does not resolve one at run
+    // time without being told, so loading that class raises
+    // `NoClassDefFoundError` otherwise. Only the *tests* fork a JVM here, and
+    // only they load it -- `Pdhg.solve` constructs `ScalaKernels` -- so nothing
+    // a downstream caller does needs this flag unless it asks for that backend.
+    //
+    // `Test / fork` is required for `javaOptions` to reach anything: without a
+    // forked JVM sbt ignores them, and the suite would fail on a flag the build
+    // appears to set.
+    Test / fork := true,
+    Test / javaOptions += "--add-modules=jdk.incubator.vector",
   )
 
 // Effect boundary. Solver runs, cancellation and device interaction are ZIO
@@ -210,6 +222,10 @@ lazy val networkLopf = project
   .settings(
     name := "network-lopf",
     Test / fork := true,
+    // `KernelSplit` can run the solve on `VectorKernels`, which loads the
+    // incubator module. See `primaCore` for why this is needed and why it is
+    // needed only by a forked test JVM.
+    Test / javaOptions += "--add-modules=jdk.incubator.vector",
     Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
   )
 

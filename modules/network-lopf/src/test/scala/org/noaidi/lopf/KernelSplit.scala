@@ -3,7 +3,7 @@ package org.noaidi.lopf
 import java.nio.file.{Files, Path, Paths}
 import org.noaidi.network.{CsvReader, Network, Schema}
 import org.noaidi.prima.{PdhgParams, Pdhg, SparseMatrix}
-import org.noaidi.prima.kernels.{KernelCapabilities, Kernels, ScalaKernels}
+import org.noaidi.prima.kernels.{KernelCapabilities, Kernels, ScalaKernels, VectorKernels}
 
 /** Where a PDHG solve's time actually goes, per kernel operation.
   *
@@ -36,14 +36,22 @@ import org.noaidi.prima.kernels.{KernelCapabilities, Kernels, ScalaKernels}
   */
 object KernelSplit:
 
+  /** Any backend whose vectors are plain arrays -- the two CPU ones. */
+  type ArrayKernels = Kernels { type Vec = Array[Double]; type Mat = SparseMatrix }
+
   /** Counts and wall clock per operation, wrapped around a real backend.
     *
-    * Specialised to `ScalaKernels` rather than written against `Kernels`
-    * generically: the trait's `Vec` and `Mat` are abstract type members, so a
-    * generic decorator has to thread path-dependent types through every
-    * signature to say nothing this needs to say.
+    * Written against a refinement rather than against `Kernels` generically:
+    * the trait's `Vec` and `Mat` are abstract type members, so a fully generic
+    * decorator has to thread path-dependent types through every signature to say
+    * nothing this needs to say. Pinning them to `Array[Double]` covers both CPU
+    * backends and would not cover a device one, which is the right limit for a
+    * tool that measures host wall clock.
+    *
+    * One decorator for both, so the two runs are comparable: the timing overhead
+    * is charged identically rather than by a separate harness per backend.
     */
-  final class Instrumented(inner: ScalaKernels) extends Kernels:
+  final class Instrumented(inner: ArrayKernels) extends Kernels:
     type Vec = Array[Double]
     type Mat = SparseMatrix
 
@@ -103,6 +111,10 @@ object KernelSplit:
   def main(args: Array[String]): Unit =
     val name      = args.headOption.getOrElse("scigrid-de")
     val tolerance = args.lift(1).map(_.toDouble).getOrElse(1e-4)
+    // Which backend to attribute. The instrument is the same either way, so the
+    // two runs are comparable in a way a separate harness per backend would not
+    // be -- the overhead below is charged identically to both.
+    val backend = args.lift(2).getOrElse("scala")
 
     val schema  = Schema.fromFile(goldens.resolve("schema.json"))
     val network = CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
@@ -136,7 +148,13 @@ object KernelSplit:
       finally warm.close()
     }
 
-    val k = Instrumented(ScalaKernels())
+    val inner: ArrayKernels = backend match
+      case "vector" =>
+        require(VectorKernels.isAvailable, "jdk.incubator.vector not resolved; pass --add-modules")
+        VectorKernels()
+      case _ => ScalaKernels()
+    println(s"backend: ${inner.capabilities.name}")
+    val k = Instrumented(inner)
     val t0 = System.nanoTime()
     val solution = try Pdhg.solveWith(problem, params, k) finally ()
     val wall = (System.nanoTime() - t0) / 1e6

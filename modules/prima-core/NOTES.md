@@ -1862,6 +1862,66 @@ that would flatter the dense share.
 The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
 three runs) and the shares are what to read; absolute times are context.
 
+### SIMD: 1.08x, and the reason it is not more
+
+The measurement above says 45.5% of a solve is dense loops with no SIMD in the
+source, and the obvious inference — vectorise them, get most of that half —
+gives the wrong answer. Written out beforehand it was "3x on the dense
+operations would be 1.43x overall". The measured result is **1.08x**, and the
+gap between those two numbers is the interesting part.
+
+**There was SIMD in the tree. It was just not in the source.** HotSpot's
+SuperWord pass auto-vectorises a simple `while` loop over contiguous arrays, so
+`axpby`, `scale` and `dualStep` were already running as vector instructions.
+Confirmed rather than assumed: under `-XX:-UseSuperWord` the reference `axpby`
+slows from 7.0 to 8.6 µs. Against a loop C2 has already widened, the Vector API
+brings only its own overhead — and loses.
+
+What C2 will *not* do is reassociate floating-point addition, because that
+changes the answer. A reduction therefore stays scalar however simple it looks,
+and that is where the whole win is:
+
+| operation | ratio | why |
+| --- | --- | --- |
+| `dot` | **1.65x faster** | reduction; C2 will not reassociate |
+| `squaredNorm` | **1.64x faster** | reduction |
+| `primalStep` | **1.27x faster** | data-dependent clamp per element |
+| `axpby` | 1.44x slower | C2 already vectorises it |
+| `dualStep` | 1.30x slower | C2 already vectorises it |
+| `scale` | 2.17x slower | C2 already vectorises it |
+
+So `VectorKernels` widens three operations and hands the other three back. All
+six widened came out at 1.029x — noise. The three that win, measured over
+interleaved runs to control for drift, give 5,602 ms against 5,202 ms: **1.077x**.
+
+==Two lanes, and that is most of the story==
+
+`SPECIES_PREFERRED` is **2** here: Apple Silicon, 128-bit NEON, two doubles. That
+is the narrowest useful width, and two lanes leave almost nothing to pay the
+API's overhead with. On x86_64 with AVX2 (four) or AVX-512 (eight) the losing
+rows above could easily flip.
+
+Nothing here has measured that, and the honest position is that this result is
+about *this* machine. CI runs Linux/x86_64 and does not run this benchmark; doing
+so is the cheapest next measurement in this area, and it would either roughly
+double the win or leave it where it is.
+
+==One implementation trap, worth 3x==
+
+The first version held the species in a `private val`. `squaredNorm` then ran
+**three times slower** than the scalar loop it replaces — worse than not
+vectorising at all.
+
+`DoubleVector.SPECIES_PREFERRED` is a `static final` field, and HotSpot's vector
+intrinsics constant-fold on the species: read through an instance field it is an
+ordinary load, and the operations stop being intrinsified entirely. Referencing
+the JDK's field directly at each use site is the whole fix, and it is the
+difference between 70.6 µs and 13.7 µs on the same operation.
+
+That is worth recording because the failure is silent. The code is correct either
+way and passes every contract test either way; only the timing says which of the
+two things it compiled to.
+
 ### What `scigrid-de` cannot gate
 
 Its `optimize` dispatch. Adding the `standard-types` fixture rewrote 59,000 lines

@@ -102,8 +102,10 @@ object KernelSplit:
           f"  ${names(i)}%-12s ${ms}%10.1f ms  ${share}%5.1f%%  ${calls(i)}%10d calls  ${each}%8.1f us/call"
         }
       val sparse = 100.0 * nanos(0) / total
-      (rows :+ f"%n  sparse ${sparse}%.1f%%, dense ${100.0 - sparse}%.1f%%  (total in kernels: ${total / 1e6}%.1f ms)")
-        .mkString("\n")
+      val summary =
+        f"%n  sparse ${sparse}%.1f%%, dense ${100.0 - sparse}%.1f%%" +
+          f"  (total in kernels: ${total / 1e6}%.1f ms)"
+      (rows :+ summary).mkString("\n")
 
   private def goldens: Path =
     Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))

@@ -351,8 +351,8 @@ PyPSA run, and that harness now exists. The pin is the `pypsa==` in
 nothing itself. It records whichever version produced the goldens into
 `reference/goldens/manifest.json`, and writes the schema, exported tables,
 sub-network decomposition, LPF and optimisation results beside it under
-`reference/goldens/` — the manifest carries the versions and a per-network
-summary, not the artefacts themselves.
+`reference/goldens/` — the manifest carries versions and summaries, not the
+artefacts themselves.
 
 Prima itself is validated against ojAlgo and the Netlib corpus instead, which are
 the right oracles for an LP solver and the wrong ones for a network model.

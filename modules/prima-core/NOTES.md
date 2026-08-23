@@ -71,12 +71,12 @@ The two configurations differ in more than one way — macOS/aarch64/JDK 26
 against Linux/x86_64/JDK 25 — so the JDK was a second uncontrolled variable. CI
 now reports the figure on two JDKs on the same OS, and it comes out at
 5.874e-10 on both JDK 21 and JDK 25 — agreement to the four digits `Report`
-prints with `%.3e`, not a comparison of the underlying doubles, which nothing
-does. That rules out JVM
-sensitivity between those two versions — but the macOS figure was taken on JDK
-26, which is not in the matrix, so it does not rule the JDK out entirely.
-Architecture remains the leading hypothesis, via summation order in ojAlgo's
-simplex and its hardware-profile-dependent blocking; it is not yet established.
+prints with `%.3e`, not a comparison of the underlying doubles; nothing
+performs one. That rules out JVM sensitivity between those two versions — but
+the macOS figure was taken on JDK 26, which is not in the matrix, so it does
+not rule the JDK out entirely. Architecture remains the leading hypothesis, via
+summation order in ojAlgo's simplex and its hardware-profile-dependent
+blocking; it is not yet established.
 
 The practical consequence stands either way: a shift in this number across a
 dependency bump is not evidence about the bump unless both measurements came

@@ -278,35 +278,62 @@ class VectorKernelsSuite extends KernelContractSuite("scala-vector"):
     // leaves whatever `allocate` put there, which is zero -- a plausible number.
     // Lengths are swept rather than sampled so that every remainder against the
     // machine's lane count is covered whatever that count is.
-    val vector = VectorKernels()
-    val ref    = ScalaKernels()
-    try
-      (0 to 40).foreach { n =>
-        val x = Array.tabulate(n)(i => 1.0 + i * 0.25)
-        val y = Array.tabulate(n)(i => 2.0 - i * 0.125)
-        val a = new Array[Double](n)
-        val b = new Array[Double](n)
-        vector.axpby(1.5, x, -0.5, y, a)
-        ref.axpby(1.5, x, -0.5, y, b)
-        assertEquals(a.toSeq, b.toSeq, s"axpby at length $n")
-        assertEqualsDouble(vector.dot(x, y), ref.dot(x, y), 1e-12, s"dot at length $n")
-        assertEqualsDouble(
-          vector.squaredNorm(x), ref.squaredNorm(x), 1e-12, s"squaredNorm at length $n")
-      }
-    finally
-      vector.close()
-      ref.close()
+    //
+    // Both coverages, because they widen different operations: the default
+    // widens three, and `widenEverything` widens the three `ScalaKernels` is
+    // otherwise left to. Sweeping only the default would leave the second set's
+    // tails untested on every machine.
+    val ref = ScalaKernels()
+    Seq(VectorKernels(), VectorKernels.widenEverything()).foreach { vector =>
+      val who = vector.capabilities.name
+      try
+        (0 to 40).foreach { n =>
+          val x  = Array.tabulate(n)(i => 1.0 + i * 0.25)
+          val y  = Array.tabulate(n)(i => 2.0 - i * 0.125)
+          val a  = new Array[Double](n)
+          val b  = new Array[Double](n)
+          vector.axpby(1.5, x, -0.5, y, a)
+          ref.axpby(1.5, x, -0.5, y, b)
+          assertEquals(a.toSeq, b.toSeq, s"$who: axpby at length $n")
+
+          vector.scale(0.75, x, a)
+          ref.scale(0.75, x, b)
+          assertEquals(a.toSeq, b.toSeq, s"$who: scale at length $n")
+
+          // `primalStep` has the only nontrivial tail -- two blends and a scalar
+          // `if/else if` that duplicates the clamp -- and bounds chosen so the
+          // clamp fires on some elements rather than passing everything through.
+          val cost  = Array.tabulate(n)(i => 0.5 - i * 0.05)
+          val ktY   = Array.tabulate(n)(i => i * 0.1)
+          val lower = Array.tabulate(n)(i => if i % 3 == 0 then 1.0 else Double.NegativeInfinity)
+          val upper = Array.tabulate(n)(i => if i % 4 == 0 then 2.0 else Double.PositiveInfinity)
+          vector.primalStep(x, ktY, cost, lower, upper, 0.5, a)
+          ref.primalStep(x, ktY, cost, lower, upper, 0.5, b)
+          assertEquals(a.toSeq, b.toSeq, s"$who: primalStep at length $n")
+
+          assertEqualsDouble(vector.dot(x, y), ref.dot(x, y), 1e-12, s"$who: dot at length $n")
+          assertEqualsDouble(
+            vector.squaredNorm(x), ref.squaredNorm(x), 1e-12, s"$who: squaredNorm at length $n")
+        }
+      finally vector.close()
+    }
+    ref.close()
   }
 
   test("the dual projection splits at the equality boundary wherever it falls") {
     assume(VectorKernels.isAvailable, "jdk.incubator.vector not resolved")
+    // Against `widenEverything`, and that is the point of writing it that way.
+    // The default coverage delegates `dualStep` to `ScalaKernels`, so the
+    // earlier version of this test compared `ScalaKernels` with itself across
+    // all 38 splits and was true by construction -- it asserted nothing about
+    // the widening it claimed to cover.
+    //
     // `dualStep` applies two different projections to two ranges of one array,
-    // and the boundary between them is `numEqualities` -- a number with no
-    // reason to land on a vector boundary. The widened version stops its first
-    // run at the last whole vector *inside* the equality block and starts the
-    // second unaligned, so every split has to be checked, not just the aligned
-    // ones. Sigma is negative for some entries' arithmetic so the clamp fires.
-    val vector = VectorKernels()
+    // and the boundary is `numEqualities`, a number with no reason to land on a
+    // vector boundary. The widened version stops its first run at the last whole
+    // vector *inside* the equality block and starts the second unaligned, so
+    // every split has to be checked and not just the aligned ones.
+    val vector = VectorKernels.widenEverything()
     val ref    = ScalaKernels()
     try
       val n     = 37

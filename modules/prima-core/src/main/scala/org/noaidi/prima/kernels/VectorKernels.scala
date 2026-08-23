@@ -93,7 +93,7 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * dependencies and is still callable from a host that has never heard of this
   * file; what it does not have is a SIMD path you get without asking.
   */
-final class VectorKernels extends Kernels:
+final class VectorKernels(alsoWidenAutoVectorised: Boolean = false) extends Kernels:
 
   type Vec = Array[Double]
   type Mat = SparseMatrix
@@ -105,11 +105,21 @@ final class VectorKernels extends Kernels:
   // as a field, `squaredNorm` ran three times slower than the scalar loop it
   // replaces.
   private inline def species: VectorSpecies[java.lang.Double] = DoubleVector.SPECIES_PREFERRED
+  // Only for the capability name. As a loop stride it would be an instance-field
+  // read in the hot loop, which is the pattern the comment above exists to avoid
+  // -- `species.length` inlines to the `static final` and folds.
   private val lanes                                           = species.length
   private val scalar                                          = ScalaKernels()
 
   val capabilities: KernelCapabilities =
-    KernelCapabilities(name = s"scala-vector-$lanes", device = "cpu", supportsFloat64 = true)
+    KernelCapabilities(
+      // The lane count and the coverage both travel in the name, because a
+      // measurement of one is not a measurement of the other and the two were
+      // conflated once already.
+      name = if alsoWidenAutoVectorised then s"scala-vector-$lanes-all" else s"scala-vector-$lanes",
+      device = "cpu",
+      supportsFloat64 = true,
+    )
 
   def allocate(n: Int): Array[Double]                       = scalar.allocate(n)
   def upload(data: Array[Double]): Array[Double]            = scalar.upload(data)
@@ -137,15 +147,35 @@ final class VectorKernels extends Kernels:
       y: Array[Double],
       out: Array[Double],
   ): Unit =
-    // Left to SuperWord, which vectorises it already and better: widened by hand
-    // it runs 1.44x slower at two lanes.
-    scalar.axpby(alpha, x, beta, y, out)
+    if !alsoWidenAutoVectorised then scalar.axpby(alpha, x, beta, y, out)
+    else
+      val n     = out.length
+      val bound = species.loopBound(n)
+      val va    = DoubleVector.broadcast(species, alpha)
+      val vb    = DoubleVector.broadcast(species, beta)
+      var i     = 0
+      while i < bound do
+        val vx = DoubleVector.fromArray(species, x, i)
+        val vy = DoubleVector.fromArray(species, y, i)
+        vx.mul(va).add(vy.mul(vb)).intoArray(out, i)
+        i += species.length
+      while i < n do
+        out(i) = alpha * x(i) + beta * y(i)
+        i += 1
 
   def scale(alpha: Double, x: Array[Double], out: Array[Double]): Unit =
-    // The same, and the worst of the three at 2.17x slower. Also the rarest
-    // operation in a solve -- 928 calls against `axpby`'s 133,660 -- so it would
-    // not have been worth widening even had it won.
-    scalar.scale(alpha, x, out)
+    if !alsoWidenAutoVectorised then scalar.scale(alpha, x, out)
+    else
+      val n     = out.length
+      val bound = species.loopBound(n)
+      val va    = DoubleVector.broadcast(species, alpha)
+      var i     = 0
+      while i < bound do
+        DoubleVector.fromArray(species, x, i).mul(va).intoArray(out, i)
+        i += species.length
+      while i < n do
+        out(i) = alpha * x(i)
+        i += 1
 
   def dot(x: Array[Double], y: Array[Double]): Double =
     val n     = x.length
@@ -158,7 +188,7 @@ final class VectorKernels extends Kernels:
       // `fma` would be more accurate and is not used: the scalar reference does
       // a separate multiply and add, and the contract suite compares against it.
       acc = acc.add(vx.mul(vy))
-      i += lanes
+      i += species.length
     var sum = acc.reduceLanes(VectorOperators.ADD)
     while i < n do
       sum += x(i) * y(i)
@@ -173,7 +203,7 @@ final class VectorKernels extends Kernels:
     while i < bound do
       val vx = DoubleVector.fromArray(species, x, i)
       acc = acc.add(vx.mul(vx))
-      i += lanes
+      i += species.length
     var sum = acc.reduceLanes(VectorOperators.ADD)
     while i < n do
       sum += x(i) * x(i)
@@ -209,7 +239,7 @@ final class VectorKernels extends Kernels:
       val above = step.compare(VectorOperators.GT, vhi)
       val below = step.compare(VectorOperators.LT, vlo)
       step.blend(vhi, above).blend(vlo, below).intoArray(out, i)
-      i += lanes
+      i += species.length
     while i < n do
       val step = x(i) - tau * (cost(i) - ktY(i))
       out(i) =
@@ -226,12 +256,43 @@ final class VectorKernels extends Kernels:
       numEqualities: Int,
       out: Array[Double],
   ): Unit =
-    // Left to SuperWord as well, at 1.30x slower widened. The widened version
-    // also had to split its two runs at `numEqualities`, which has no reason to
-    // land on a vector boundary -- so it was the most intricate of the three and
-    // the one paying least for it.
-    scalar.dualStep(y, kxBar, rhs, sigma, numEqualities, out)
+    if !alsoWidenAutoVectorised then scalar.dualStep(y, kxBar, rhs, sigma, numEqualities, out)
+    else
+      val n      = out.length
+      val vsigma = DoubleVector.broadcast(species, sigma)
 
+      // The first run stops at the last whole vector *inside* the equality
+      // block rather than at `loopBound(n)`, so the boundary between the two
+      // projections never falls mid-vector -- which is what would otherwise need
+      // a mask and a reason to trust it.
+      val eqBound = species.loopBound(numEqualities)
+      var i       = 0
+      while i < eqBound do
+        val vy = DoubleVector.fromArray(species, y, i)
+        val vr = DoubleVector.fromArray(species, rhs, i)
+        val vk = DoubleVector.fromArray(species, kxBar, i)
+        vy.add(vsigma.mul(vr.sub(vk))).intoArray(out, i)
+        i += species.length
+      while i < numEqualities do
+        out(i) = y(i) + sigma * (rhs(i) - kxBar(i))
+        i += 1
+
+      // The second starts wherever that scalar tail left off, so it is not
+      // aligned to a vector boundary -- `fromArray` requires only that the whole
+      // vector is in bounds, not that it is aligned.
+      val zero     = DoubleVector.zero(species)
+      val ineqStop = i + species.loopBound(n - i)
+      while i < ineqStop do
+        val vy   = DoubleVector.fromArray(species, y, i)
+        val vr   = DoubleVector.fromArray(species, rhs, i)
+        val vk   = DoubleVector.fromArray(species, kxBar, i)
+        val step = vy.add(vsigma.mul(vr.sub(vk)))
+        step.blend(zero, step.compare(VectorOperators.LE, zero)).intoArray(out, i)
+        i += species.length
+      while i < n do
+        val step = y(i) + sigma * (rhs(i) - kxBar(i))
+        out(i) = if step > 0.0 then step else 0.0
+        i += 1
 
 end VectorKernels
 
@@ -248,4 +309,15 @@ object VectorKernels:
       true
     catch case _: Throwable => false
 
-  def apply(): VectorKernels = new VectorKernels
+  def apply(): VectorKernels = new VectorKernels(alsoWidenAutoVectorised = false)
+
+  /** Every dense operation widened, including the three SuperWord already does.
+    *
+    * Not the default, and not dead code: it exists so the division this class
+    * makes stays a *measurement* rather than a decision baked in on one machine.
+    * That division was made at two lanes, where widening those three lost by
+    * 1.44x, 1.30x and 2.17x. Whether it still loses at eight is a different
+    * question about a different machine, and answering it needs both versions
+    * to exist at once so they can be run minutes apart on the same host.
+    */
+  def widenEverything(): VectorKernels = new VectorKernels(alsoWidenAutoVectorised = true)

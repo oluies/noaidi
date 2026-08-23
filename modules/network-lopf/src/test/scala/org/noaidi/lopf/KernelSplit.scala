@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema}
+import java.nio.file.{Path, Paths}
+import org.noaidi.network.{CsvReader, Schema}
 import org.noaidi.prima.{PdhgParams, Pdhg, SparseMatrix}
 import org.noaidi.prima.kernels.{KernelCapabilities, Kernels, ScalaKernels, VectorKernels}
 
@@ -91,6 +91,16 @@ object KernelSplit:
                  nEq: Int, o: Array[Double]): Unit =
       timed(7)(inner.dualStep(y, kx, r, sigma, nEq, o))
 
+    /** Discard what the warm-up recorded, keeping the compiled state it left. */
+    def reset(): Unit =
+      java.util.Arrays.fill(nanos, 0L)
+      java.util.Arrays.fill(calls, 0L)
+
+    /** One call per iteration, so this is the iteration count. */
+    def iterations: Long = calls(names.indexOf("primalStep"))
+
+    def totalNanos: Long = nanos.sum
+
     def report(): String =
       val total = nanos.sum.toDouble
       val rows = names.indices
@@ -101,7 +111,11 @@ object KernelSplit:
           val each  = if calls(i) > 0 then nanos(i).toDouble / calls(i) / 1000.0 else 0.0
           f"  ${names(i)}%-12s ${ms}%10.1f ms  ${share}%5.1f%%  ${calls(i)}%10d calls  ${each}%8.1f us/call"
         }
-      val sparse = 100.0 * nanos(0) / total
+      // By name. Indexing `nanos(0)` coupled the headline number to `spmv`
+      // happening to be first in `names`, so reordering the display would have
+      // misreported the split with nothing failing.
+      val sparseIndex = names.indexOf("spmv")
+      val sparse      = if total > 0 then 100.0 * nanos(sparseIndex) / total else 0.0
       val summary =
         f"%n  sparse ${sparse}%.1f%%, dense ${100.0 - sparse}%.1f%%" +
           f"  (total in kernels: ${total / 1e6}%.1f ms)"
@@ -142,26 +156,54 @@ object KernelSplit:
     }
     println(f"timing overhead: ${probe}%.1f ns per instrumented call")
 
-    // Warm up on the same problem, so the measured run meets a compiled loop.
-    // Discarded: the point is the JIT state it leaves behind.
-    locally {
-      val warm = ScalaKernels()
-      try Pdhg.solveWith(problem, params, warm)
-      finally warm.close()
-    }
-
+    // Backend first, then warm up *through the instrument on that backend*.
+    //
+    // This was wrong and the error was not small. The warm-up used a bare
+    // `ScalaKernels` and ran before the backend was chosen, so a `vector` run
+    // entered its measured solve with every widened loop never executed, while
+    // the `scala` run entered fully compiled -- and every `kernels.*` call site
+    // inside `Pdhg` had been profiled monomorphic on the wrong receiver, so the
+    // measured run deoptimised and re-profiled. Both effects are charged per
+    // call, both fall hardest on the operations being compared, and both push in
+    // the direction that understates the vector backend.
     val inner: ArrayKernels = backend match
       case "vector" =>
         require(VectorKernels.isAvailable, "jdk.incubator.vector not resolved; pass --add-modules")
         VectorKernels()
+      case "vector-all" =>
+        require(VectorKernels.isAvailable, "jdk.incubator.vector not resolved; pass --add-modules")
+        VectorKernels.widenEverything()
       case _ => ScalaKernels()
     println(s"backend: ${inner.capabilities.name}")
+
     val k = Instrumented(inner)
+
+    // Timed, because the obvious explanation for a gap against the 12.7 s NOTES
+    // records for this configuration was that the older figure was cold. It is
+    // not: cold and warm come out within about 1% of each other here, so
+    // whatever produced 12.7 s was a different machine or a different
+    // measurement, and this harness cannot reconcile the two. Printed anyway,
+    // since a reader comparing the two numbers deserves to know that JIT state
+    // was checked and is not the answer.
+    val coldStart = System.nanoTime()
+    Pdhg.solveWith(problem, params, k)
+    val cold = (System.nanoTime() - coldStart) / 1e6
+    k.reset()
+
     val t0 = System.nanoTime()
-    val solution = try Pdhg.solveWith(problem, params, k) finally ()
+    val solution = Pdhg.solveWith(problem, params, k)
     val wall = (System.nanoTime() - t0) / 1e6
 
-    println(s"status ${solution.status}, objective ${solution.objectiveValue}")
-    println(f"wall clock ${wall}%.1f ms")
-    println(k.report())
-    k.close()
+    try
+      println(s"status ${solution.status}, objective ${solution.objectiveValue}")
+      println(f"cold solve ${cold}%.1f ms, warm solve ${wall}%.1f ms")
+      println(f"iterations ${k.iterations}%d")
+      // Both quantities, and their ratio. Every share below is a share of the
+      // kernel total, and how much of the solve that total *is* has to be stated
+      // rather than assumed -- it is the difference between a claim about the
+      // solve and a claim about the eight operations in it.
+      val inKernels = k.totalNanos / 1e6
+      println(f"wall clock ${wall}%.1f ms, in kernels ${inKernels}%.1f ms " +
+        f"(${100.0 * inKernels / wall}%.1f%% of the solve)")
+      println(k.report())
+    finally k.close()

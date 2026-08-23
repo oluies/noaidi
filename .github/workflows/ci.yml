@@ -141,6 +141,12 @@ jobs:
   kernel-split:
     name: Kernel split and SIMD ratio (x86_64)
     runs-on: ubuntu-latest
+    # Reported, never gated -- and now actually so. The comment said this while
+    # `set -euo pipefail` and no `continue-on-error` meant any sbt failure turned
+    # the job red on every PR: a benchmark that can block a merge is a gate
+    # whatever its comment says.
+    continue-on-error: true
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
@@ -153,63 +159,71 @@ jobs:
 
       - uses: sbt/setup-sbt@v1
 
-      - name: Measure both backends
+      - name: Measure
         run: |
           set -euo pipefail
-          # Interleaved rather than two runs of each in sequence, so a drift in
-          # the runner's load partly cancels instead of landing entirely on
-          # whichever backend went second.
-          for pass in 1 2; do
-            for backend in scala vector; do
-              sbt --batch \
-                "networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $backend" \
-                2>&1 | tee -a split.log
-            done
-          done
+          # ABBA, not ABAB. Interleaving alone does not counterbalance: with
+          # `scala vector` twice, `vector` is always second within a pass, so
+          # drift that is monotone over the job's life -- a neighbour ramping up,
+          # page cache filling, thermal state -- lands systematically on one arm
+          # rather than cancelling.
+          run() {
+            echo "=== pass $1 backend $2 lanes ${3:-default} ===" | tee -a split.log
+            local opts=""
+            [ -n "${3:-}" ] && opts="set networkLopf/Test/javaOptions += \"-XX:MaxVectorSize=$3\"; "
+            sbt --batch \
+              "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
+              2>&1 | tee -a split.log
+          }
+          run 1 scala
+          run 1 vector
+          run 2 vector
+          run 2 scala
+          # Does widening the three SuperWord already handles win at this width?
+          # Decided at two lanes, never tested at more.
+          run 3 vector-all
+          run 3 scala
+          # Width isolated on one machine, which a cross-machine comparison
+          # cannot do: same host, same workload, 16 and 32 bytes give two and
+          # four lanes against the default eight.
+          run 4 vector 16
+          run 4 vector 32
 
-      - name: Publish the split
+      # The reporter before the report, as `action-pins` and the drift job both
+      # do. Its failure mode is publishing a plausible number computed from the
+      # wrong thing, which is what it was written to stop.
+      - name: Test the reporter
+        run: python3 .github/scripts/test_kernel_split_report.py
+
+      - name: Publish
         if: always()
         run: |
           set -euo pipefail
+          if [ ! -f split.log ]; then
+            echo "## Kernel split: no measurements" >> "$GITHUB_STEP_SUMMARY"
+            echo "The measure step produced no log." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Captured rather than piped straight out, so an empty match is a
+          # warning instead of a silently empty code block. sbt sends a forked
+          # run's output through its logger on some configurations, so the
+          # prefix is optional rather than assumed absent.
+          rows=$(grep -E "^(\[info\] )?(===|scigrid-de:|backend:|status |cold solve|iterations |wall clock|timing overhead)|^(\[info\] )?  [a-zA-Z]+ +[0-9]|sparse .*dense" split.log || true)
+          if [ -z "$rows" ]; then
+            echo "::warning::the summary filter matched nothing; publishing the raw tail"
+            rows=$(tail -60 split.log)
+          fi
           {
             echo "## Kernel split on x86_64"
             echo
-            echo "The backend name carries the lane count: \`scala-vector-N\`."
+            echo "Backend names carry the lane count and the coverage:"
+            echo "\`scala-vector-N\` widens three operations, \`scala-vector-N-all\` widens six."
             echo
             echo '```'
-            # The per-operation tables and the totals, without sbt's own noise.
-            # `[a-zA-Z]`, not `[a-z]`: the operation names are camelCase, and a
-            # lowercase-only class silently drops `squaredNorm`, `primalStep` and
-            # `dualStep` -- which are the three the vector backend widens, so the
-            # published table would have omitted exactly the rows the job exists
-            # to show while looking complete.
-            grep -E "^(scigrid-de:|backend:|status |wall clock|timing overhead)|^  [a-zA-Z]+ +[0-9]|sparse .*dense" split.log || true
+            echo "$rows"
             echo '```'
             echo
-            # The one number the job exists for. Both backends' kernel totals,
-            # averaged over the two passes, and their ratio -- computed here
-            # rather than left to a reader with two columns of milliseconds.
-            python3 - <<'PY'
-          import re
-          text = open("split.log", encoding="utf-8", errors="replace").read()
-          # Backend name and kernel total arrive in that order per run.
-          runs = re.findall(r"backend: (\S+).*?total in kernels: ([0-9.,]+) ms", text, re.S)
-          by = {}
-          for name, total in runs:
-              by.setdefault(name, []).append(float(total.replace(",", ".")))
-          for name, totals in by.items():
-              print(f"- `{name}`: " + ", ".join(f"{t:.0f} ms" for t in totals)
-                    + f"  (mean {sum(totals)/len(totals):.0f} ms)")
-          ref = next((v for k, v in by.items() if k == "scala-reference"), None)
-          vec = next((v for k, v in by.items() if k.startswith("scala-vector")), None)
-          if ref and vec:
-              r = (sum(ref)/len(ref)) / (sum(vec)/len(vec))
-              print(f"\n**SIMD ratio: {r:.3f}x** (above 1.0 means the vector backend is faster).")
-              print("\nApple Silicon at two lanes measured 1.08x. A materially larger")
-              print("number here is the case for widening more operations than the three")
-              print("`VectorKernels` currently widens; a similar one says the division")
-              print("it makes is not specific to that machine.")
-          PY
+            python3 .github/scripts/kernel_split_report.py split.log
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Prima's answers are only meaningful next to an independent solver's, so the

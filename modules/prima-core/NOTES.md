@@ -1809,6 +1809,59 @@ sparse matrix-vector products each is precisely the workload `Kernels` exists to
 move, and it is the first instance in this repository large enough for the
 question to matter.
 
+### Where the time actually goes: 55% sparse, 45% dense
+
+The paragraph above reasons from a whole-solve number that SpMV "is precisely the
+workload `Kernels` exists to move". That is the standard expectation for a
+first-order method, and it is half right in a way that changes what to do first.
+
+`KernelSplit` runs the real solve with a `Kernels` decorator that attributes wall
+clock to each of the eight operations. On `scigrid-de` at 1e-4 — 60,552 variables,
+23,688 rows, 14,848 iterations:
+
+| operation | share | calls | per call |
+| --- | --- | --- | --- |
+| `spmv` | 54.5% | 29,930 | 105.5 µs |
+| `axpby` | 16.4% | 133,660 | 7.1 µs |
+| `squaredNorm` | 11.5% | 29,724 | 22.4 µs |
+| `primalStep` | 9.8% | 14,848 | 38.3 µs |
+| `dot` | 3.3% | 14,848 | 12.9 µs |
+| `copy` | 2.8% | 29,839 | 5.5 µs |
+| `dualStep` | 1.6% | 14,848 | 6.2 µs |
+| `scale` | 0.1% | 928 | 6.7 µs |
+
+**Sparse 54.5%, dense 45.5%.** SpMV is the largest single operation by a wide
+margin and it is not the majority of the time. Nearly half the solve is spent in
+six operations that are flat loops over contiguous `Array[Double]` — the ones a
+`Kernels` backend can vectorise without touching an index buffer.
+
+That reorders the acceleration work. A device backend has to move SpMV, which is
+the hard kernel and the one the Cyfra spike existed to answer; but the *cheap*
+half of the win is available on the CPU, in this repository, without a driver.
+There is no SIMD anywhere in this tree — `ScalaKernels` is scalar `while` loops
+by design, being the correctness oracle — so the 45.5% is entirely unexploited.
+
+The arithmetic is worth stating so it can be checked against later: at a 3×
+speedup on the dense operations and nothing on SpMV, the solve goes to
+54.5 + 45.5/3 = 69.7% of its time, or 1.43× faster. At 2×, 1.28×. Neither is the
+order of magnitude a GPU is for, and both are a fraction of the work.
+
+==On trusting these numbers==
+
+Two `System.nanoTime` reads per call, measured at **17.8 ns** per pair on this
+machine. Against `scigrid-de`'s cheapest operation at 5.5 µs that is 0.3%, and
+0.08% of the run — the shares are safe.
+
+They are *not* safe on a small network, and the tool prints the overhead so this
+is visible rather than assumed: on `ac-dc-meshed` `axpby` runs in about 40 ns, so
+nearly half of what would be attributed to it is the clock. Those runs agree with
+this one at 52–53% sparse, which is reassuring and is not evidence — the
+distortion falls on the operations with the most calls, which is the direction
+that would flatter the dense share.
+
+The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
+three runs) and the shares are what to read; absolute times are context.
+
 ### What `scigrid-de` cannot gate
 
 Its `optimize` dispatch. Adding the `standard-types` fixture rewrote 59,000 lines

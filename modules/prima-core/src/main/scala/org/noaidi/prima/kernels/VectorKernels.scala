@@ -51,11 +51,24 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * is, and it is why the losses above are losses: two lanes leave almost no
   * headroom to pay for the API's overhead.
   *
-  * On x86_64 with AVX2 (four lanes) or AVX-512 (eight) the arithmetic changes and
-  * `axpby` may well flip. Nothing here has measured that, so the division above
-  * should be re-measured rather than trusted on a machine with wider vectors.
+  * CI has since measured **eight** lanes on Linux/x86_64, and the answer is not
+  * the one predicted. The reductions scale roughly as the width suggests --
+  * `squaredNorm` 1.64x at two lanes becomes 4.73x at eight, `dot` 1.65x becomes
+  * 3.38x -- and the whole solve goes from 1.08x only to **1.13x**, because those
+  * two operations are 15% of it. Amdahl, not the Vector API: an infinite speedup
+  * on them caps the solve at about 1.18x.
+  *
+  * `primalStep` does not scale with width at all (1.27x at two lanes, 1.11x at
+  * eight), which is worth knowing and is not explained here.
+  *
+  * One thing that measurement does '''not''' settle: `axpby`, `scale` and
+  * `dualStep` were handed back to SuperWord on two-lane evidence, and this run
+  * exercised them only in their delegated form. Whether widening them wins at
+  * eight lanes is untested -- the numbers above say nothing about it either way.
+  *
   * `KernelSplit` in `network-lopf` is the tool, and it prints the lane count in
-  * the backend name for exactly this reason.
+  * the backend name so no number from it can be read without the width that
+  * produced it.
   *
   * ==Reductions do not associate==
   *

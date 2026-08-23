@@ -1922,6 +1922,64 @@ That is worth recording because the failure is silent. The code is correct eithe
 way and passes every contract test either way; only the timing says which of the
 two things it compiled to.
 
+### Eight lanes: the reductions scale, the solve does not
+
+The section above measures 1.08x on Apple Silicon at two lanes and says the
+result is about that machine. CI's `kernel-split` job answers it on Linux/x86_64,
+where `SPECIES_PREFERRED` is **eight** — AVX-512, four times the width.
+
+The prediction written down beforehand was that eight lanes would "roughly double
+the win". It does not. The solve goes from 1.08x to **1.13x**.
+
+The reductions behave exactly as width suggests:
+
+| operation | 2 lanes | 8 lanes |
+| --- | --- | --- |
+| `squaredNorm` | 1.64x | **4.73x** |
+| `dot` | 1.65x | **3.38x** |
+| `primalStep` | 1.27x | 1.11x |
+
+`squaredNorm` at 4.73x is a fine result and it buys almost nothing, because
+`squaredNorm` and `dot` together are 15.5% of the solve on this machine. An
+*infinite* speedup on both caps the whole thing at about 1.18x. This is Amdahl
+rather than anything about the Vector API, and it is the answer to whether wider
+vectors change the picture: they change the operations and not the total.
+
+`primalStep` going the other way — 1.27x at two lanes, 1.11x at eight — is not
+explained. It is the one widened operation that is not a reduction.
+
+==Two confounds, both measurable because the runs are interleaved==
+
+**The runner drifted.** Five of the eight operations are byte-identical code in
+both backends, since `VectorKernels` delegates them. Those five came out
+uniformly slower during the vector runs — 0.898x, 0.937x, 0.930x, 0.937x, 0.978x,
+mean **0.936** — which is machine load, not code. Raw, the solve ratio is 1.057x;
+corrected by that factor it is 1.13x. The truth is near the corrected figure and
+the correction is an estimate, so both are recorded.
+
+That the control operations agree on a direction and roughly a magnitude is what
+makes the correction defensible. Had they scattered around 1.0, the right
+conclusion would have been that the run was too noisy to read.
+
+**The vector backend does more work.** It takes 1.3% more iterations — 30,317
+`spmv` calls against 29,930. Reductions in a different order give slightly
+different iterates, so the trajectory differs and the solve takes a few more
+steps. The per-call comparison above holds call counts at the scalar run's for
+this reason; a totals comparison would charge the vector backend for arithmetic
+the scalar one never did.
+
+==What this settles, and what it does not==
+
+It settles the lane question: wider vectors do not make this backend
+transformative, and the ceiling is set by what is *not* widened. On x86_64 `spmv`
+is 40–47% of the solve and `axpby` a further 24–28%.
+
+It does not settle whether `axpby`, `scale` and `dualStep` should be widened at
+eight lanes. They were handed back to SuperWord on two-lane evidence, and this
+run exercised only their delegated form, so it says nothing about them either
+way. That is the obvious next measurement if this line is pursued — and on the
+shares above, `axpby` is worth more than both reductions put together.
+
 ### What `scigrid-de` cannot gate
 
 Its `optimize` dispatch. Adding the `standard-types` fixture rewrote 59,000 lines

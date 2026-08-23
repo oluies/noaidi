@@ -6,8 +6,11 @@ tested Scala module before any power-system domain logic is written on top of
 it.
 
 Effects and concurrency go through ZIO; numeric kernels are isolated behind a
-small interface so they can later be staged to GPU (Cyfra → SPIR-V/Vulkan) or to
-hardware (Spatial/Chisel) without touching the algorithms that call them.
+small interface so they can later be staged to GPU or to hardware
+(Spatial/Chisel) without touching the algorithms that call them. The GPU spike
+went through Cyfra → SPIR-V/Vulkan; [`HPC.md`](HPC.md) argues CUDA via Panama is
+the better target for the hardware actually in prospect, and the point of the
+interface is that this is a backend choice rather than a rewrite.
 
 ## Current state
 
@@ -37,18 +40,24 @@ optimisation.
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-666 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+709 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.
 Presolve moved that from 14 to 16 and settles four infeasible instances without
 iterating at all.
 
-Worst relative objective disagreement with ojAlgo across the
-validation ladder is 4.9e-10 on macOS/aarch64/JDK 26 and 5.9e-10 on
-Linux/x86_64/JDK 25 — a difference between configurations rather than between
-solvers, unchanged across two major versions of ojAlgo, and asserted not to
-exceed 1e-8.
+Worst relative objective disagreement with ojAlgo across the validation ladder
+is 4.9e-10 on macOS/aarch64/JDK 26 and 5.874e-10 on Linux/x86_64 — a difference
+between configurations rather than between solvers, unchanged across two major
+versions of ojAlgo, and asserted not to exceed 1e-8.
+
+The two configurations differed in architecture *and* JDK, so which one explained
+the gap was open. CI now runs the ladder on JDK 21 and JDK 25 on the same Linux
+host and both report **5.874e-10**, identical to three digits. That does not prove
+the architecture hypothesis, but it removes the JDK as the explanation, which is
+what the two-JDK matrix is there to do. aarch64 Linux is the one cell still
+missing — see [`HPC.md`](HPC.md).
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
 - [`HPC.md`](HPC.md) — a plan for running this on NAISS Arrhenius, and what it would change.
@@ -119,7 +128,9 @@ having before building the full backend.
 
 ## Building
 
-Requires JDK 17+ (developed on 26) and sbt 2.0.6, which the build pins.
+Requires JDK 21+ and sbt 2.0.6, which the build pins. CI runs the suite on 21
+and 25; development is on 26. Nothing in the build sets a `--release` floor, so
+21 is what is *tested* rather than what is enforced.
 
 ```bash
 sbt testFull                                                    # all modules
@@ -205,11 +216,14 @@ everything from the foundation layer up is ahead:
 4. **Prima GPU**: the remaining seven kernel operations behind `Kernels`, then a timing against the CPU reference, then validation against cuPDLP-C. Worth resolving the dense-instance warm-start regression first — it is a concrete, reproducible anomaly with two named suspects in NOTES.md, and it decides how much a GPU can actually buy.
 5. ~~**L0 foundation**: typed columnar store, CSV round-trip, sub-network topology.~~ ✅ (dense linear algebra deferred to L2, where Newton-Raphson needs it)
 6. **L1 I/O and solver plumbing**: CSV round-trips PyPSA byte-for-byte and netCDF reads into the same model; PyPSA's own `.h5` is pandas' PyTables layout with pickled column metadata and is not read — see NOTES. A solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima remains.
-7. **L2 physics**: LPF matches PyPSA's voltage angles to 1e-9 and its line flows and slack dispatch to 1e-6 on every reference network, `scigrid-de` included — 585 buses, 852 lines and 96 transformers, where every impedance comes from a standard type name rather than from a file. LOPF matches PyPSA's objective, dispatch and line flows on the dispatch fixture, and its objective under a binding CO2 cap; nodal prices agree wherever the dual is unique and are a different point of the same optimal dual face elsewhere — settled, see NOTES. Newton-Raphson AC power flow matches PyPSA's voltage magnitudes and angles to 1e-9 on both fixtures that have one. Its DC counterpart is not implemented because the pinned PyPSA does not implement it either — see NOTES. A phase-shifting transformer is modelled in both the linear flow — where it moves 991 MW on the reference fixture, and was silently dropped before because no code read the attribute — and the AC path, along with off-nominal tap ratios and the transformer T model. Those three were refused until the assumption behind the refusal was tested: an asymmetric `Y` needed no solver change at all, and the admittance matches PyPSA's angles to 3e-16. Unit commitment reproduces PyPSA's schedule, dispatch and objective on a purpose-built fixture, solved by Prima's own branch-and-bound, and SCLOPF reproduces PyPSA's N-1 secure dispatch via outage distribution factors. Storage carries state across snapshots — the one constraint here that is not separable by snapshot — which makes `scigrid-de` the first realistic network the port optimises: 60,552 variables, solved to 1e-4 in 13 s and to 1e-6 in 145 s. Capacity expansion makes `p_nom` a decision, reproducing PyPSA's objective and chosen capacities on `ac-dc-meshed` and `storage-hvdc` — the last two stock examples the port could not touch. `Store` is modelled too: one signed power variable, no efficiencies and no power rating at all. Ramp limits and the `e_sum_max`/`e_sum_min` energy budgets are built as well — both were silently dropped before, for the same reason the phase shift was, and dropping the budgets under-priced the reference answer by 23,280. A committable generator is now refused by LOPF rather than solved with the flag ignored, which cost 18,500 against PyPSA's 17,000 — dearer, not cheaper, because dropping the status turns `p_min_pu` into a floor the unit can never leave. A link may deliver late: `delay` shifts its output into a later snapshot, measured in elapsed time against the `generators` weighting rather than in snapshots, and `cyclic_delay` wraps what is still in flight at the end of the horizon. It was refused before, having been silently delivered instantly for 500 against PyPSA's 9,000; implementing it took one new file, because shifting the receiving term changes which column a balance row references and nothing else. Multi-investment periods are modelled too, which was the other silent mis-solve: nothing read `investment_periods.csv` at all, so a network whose cheap generator is built in the second period cost 2,000 against PyPSA's 17,000. Snapshots are now `(period, timestep)` pairs through the model layer, the CSV round-trip and the netCDF reader; an asset is active only between its `build_year` and the end of its `lifetime`; and every cost carries its period's discount factor while a global constraint sums against its `years` — two columns of one small file that do different jobs. Capacity expansion *across* periods is still refused, along with per-period storage cycling, growth limits and commitment on a multi-period network: each is a different formulation rather than the same one with an extra factor.
+7. **L2 physics**: LPF matches PyPSA's voltage angles to 1e-9 and its line flows and slack dispatch to 1e-6 on every reference network, `scigrid-de` included — 585 buses, 852 lines and 96 transformers, where every impedance comes from a standard type name rather than from a file. LOPF matches PyPSA's objective, dispatch and line flows on the dispatch fixture, and its objective under a binding CO2 cap; nodal prices agree wherever the dual is unique and are a different point of the same optimal dual face elsewhere — settled, see NOTES. Newton-Raphson AC power flow matches PyPSA's voltage magnitudes and angles to 1e-9 on both fixtures that have one. Its DC counterpart is not implemented because the pinned PyPSA does not implement it either — see NOTES. A phase-shifting transformer is modelled in both the linear flow — where it moves 297 MW on the reference fixture, and was silently dropped before because no code read the attribute — and the AC path, along with off-nominal tap ratios and the transformer T model. Those three were refused until the assumption behind the refusal was tested: an asymmetric `Y` needed no solver change at all, and the admittance matches PyPSA's angles to 3e-16. Unit commitment reproduces PyPSA's schedule, dispatch and objective on a purpose-built fixture, solved by Prima's own branch-and-bound, and SCLOPF reproduces PyPSA's N-1 secure dispatch via outage distribution factors. Storage carries state across snapshots — the one constraint here that is not separable by snapshot — which makes `scigrid-de` the first realistic network the port optimises: 60,552 variables, solved to 1e-4 in 13 s and to 1e-6 in 145 s. Capacity expansion makes `p_nom` a decision, reproducing PyPSA's objective and chosen capacities on `ac-dc-meshed` and `storage-hvdc` — the last two stock examples the port could not touch. `Store` is modelled too: one signed power variable, no efficiencies and no power rating at all. Ramp limits and the `e_sum_max`/`e_sum_min` energy budgets are built as well — both were silently dropped before, for the same reason the phase shift was, and dropping the budgets under-priced the reference answer by 23,280. A committable generator is now refused by LOPF rather than solved with the flag ignored, which cost 18,500 against PyPSA's 17,000 — dearer, not cheaper, because dropping the status turns `p_min_pu` into a floor the unit can never leave. A link may deliver late: `delay` shifts its output into a later snapshot, measured in elapsed time against the `generators` weighting rather than in snapshots, and `cyclic_delay` wraps what is still in flight at the end of the horizon. It was refused before, having been silently delivered instantly for 500 against PyPSA's 9,000; implementing it took one new file, because shifting the receiving term changes which column a balance row references and nothing else. Multi-investment periods are modelled too, which was the other silent mis-solve: nothing read `investment_periods.csv` at all, so a network whose cheap generator is built in the second period cost 2,000 against PyPSA's 17,000. Snapshots are now `(period, timestep)` pairs through the model layer, the CSV round-trip and the netCDF reader; an asset is active only between its `build_year` and the end of its `lifetime`; and every cost carries its period's discount factor while a global constraint sums against its `years` — two columns of one small file that do different jobs. Capacity expansion *across* periods is still refused, along with per-period storage cycling, growth limits and commitment on a multi-period network: each is a different formulation rather than the same one with an extra factor. PyPSA 1.3.0 then moved the phase shift *into* the LOPF's Kirchhoff row, where through 1.2.4 there had been no shift term at all — so upstream's own two L2 models had disagreed about the same network, and this port had reproduced the disagreement deliberately. The row here gained the same term, and the two fixtures carrying a shift had to drop below 10 degrees, past which the circulating flow exceeds a transformer rating and the network has no solution to compare. That release's other three features are refused rather than mispriced, each because its default is inert and ignoring it errs cheap: maintenance scheduling, which places outages by an integer decision; piecewise cost curves, whose breakpoints are a file beside the component rather than a column, so a model reading only the column prices the curve at a number the network does not use; and an optimisable phase shift, where the angle is a per-snapshot variable rather than the constant this model emits.
 8. **L3 features**: clustering, statistics, sector coupling, plotting.
 9. **L4 acceleration**: remaining kernels onto Cyfra/MLX/CUDA, plus Spatial/Chisel for FPGA.
 10. **L5 runtime**: ZIO Streams over snapshots and contingencies, Pekko cluster distribution.
 
 From L1 onwards, every module is gated on golden-file comparison against a
-pinned PyPSA version run on the same example networks. That harness does not
-exist yet, because nothing below L1 has power-system semantics to compare.
+pinned PyPSA version run on the same example networks. That harness exists:
+`reference/generate_goldens.py` pins the version `reference/goldens/manifest.json`
+records, and a weekly job installs the *newest* PyPSA and diffs its component
+registry against the pinned one, so a release that changes an answer is noticed
+rather than waited for.

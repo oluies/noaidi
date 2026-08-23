@@ -41,6 +41,7 @@ graph TD
     networkModel["network-model<br/><i>PyPSA data model, topology</i>"]
     networkLopf["network-lopf<br/><i>dispatch LP</i>"]
     networkPf["network-pf<br/><i>linear + Newton-Raphson AC</i>"]
+    networkIo["network-io<br/><i>netCDF reader</i>"]
 
     zioLib["ZIO / ZIO Streams"]:::ext
     ojalgoLib["ojAlgo"]:::ext
@@ -53,7 +54,9 @@ graph TD
     primaMps --> primaCore
     networkLopf --> networkModel
     networkLopf --> primaCore
+    networkLopf --> networkPf
     networkPf --> networkModel
+    networkIo --> networkModel
     primaZio -.-> zioLib
     primaOjalgo -.-> ojalgoLib
     networkModel -.-> upickleLib
@@ -70,6 +73,22 @@ that have no reason to meet. The module carries its own dense Cholesky and LU �
 two routines rather than one, because the Newton Jacobian is unsymmetric so
 Cholesky does not apply to it — and both double as the fp64 oracles for the
 sparse factorisations a country-scale network will need.
+
+`network-lopf` depends on `network-pf`, which looks backwards for a module whose
+job is optimisation. It is there for SCLOPF: the outage distribution factors an
+N-1 secure dispatch is built from are a power-flow sensitivity, not an
+optimisation concept. Deriving them inside the LP module would put a second
+definition of susceptance and slack in the tree, and the two would drift.
+
+`network-io` reads PyPSA's netCDF export into the model `network-model` defines,
+so both readers answer to the same golden networks. That is also why the two
+share a refusal type rather than each owning one: `UnsupportedNetworkFile` is
+raised for a file that is *well formed and not modelled here* — a piecewise cost
+curve is exactly what PyPSA meant to write — and is deliberately distinct from
+either reader's `MalformedNetwork`, which is for a file that is broken. The two
+have different remedies, so a caller has to be able to tell them apart on the
+type. A refusal in one reader is half a refusal, and both spellings of a feature
+are refused in the reader that meets them.
 
 `prima-core` has no third-party dependencies at all. That is not minimalism for
 its own sake: it is what lets the solver be called from a Pekko actor, a ZIO

@@ -84,6 +84,20 @@ object Report:
       .maxOption
       .getOrElse(0.0)
     println(f"%nworst relative objective gap against the oracle: $worst%.3e")
+    // And the same number without rounding, because the rounded one has been
+    // over-read. `README`, `HPC.md` and `NOTES` all compare this figure across
+    // the two JDK jobs in CI, and one of them called the result "bit-identical"
+    // -- which `%.3e` cannot support: four significant digits agreeing says
+    // nothing about the other forty-nine bits.
+    //
+    // Both forms, because they answer different questions. Seventeen digits
+    // round-trip a `Double`, so the decimal is exact and still readable; the raw
+    // bits are what a reader diffing two job logs can compare without trusting
+    // that claim about round-tripping. Neither is asserted on -- the comparison
+    // is across two CI jobs, which nothing here can see -- so this makes the
+    // claim checkable rather than checked, and the prose stays at what the
+    // rounded line supports until a run has shown otherwise.
+    println(f"  exactly: $worst%.17e  (raw bits 0x${java.lang.Double.doubleToRawLongBits(worst)}%016x)")
     if disagreements.nonEmpty then
       println(s"STATUS DISAGREEMENTS: ${disagreements.map(_.name).mkString(", ")}")
 

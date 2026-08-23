@@ -54,11 +54,11 @@ versions of ojAlgo, and asserted not to exceed 1e-8.
 
 The two configurations differ in architecture *and* JDK, so which one explains
 the gap is open. CI runs the ladder on JDK 21 and JDK 25 on the same Linux host
-and both report 5.874e-10, bit-identical — which rules out JVM sensitivity
-*between those two versions*, and no more than that: the macOS figure was taken
-on JDK 26, which is not in the matrix. Architecture remains the leading
-hypothesis and is not established. aarch64 Linux is the cell that would settle it
-— see [`HPC.md`](HPC.md).
+and both report 5.874e-10 — agreement to the four digits the report prints,
+which rules out JVM sensitivity *between those two versions* and no more than
+that: the macOS figure was taken on JDK 26, which is in neither matrix.
+Architecture remains the leading hypothesis and is not established. aarch64 Linux
+is the cell that would settle it — see [`HPC.md`](HPC.md).
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together and why.
 - [`HPC.md`](HPC.md) — a plan for running this on NAISS Arrhenius, and what it would change.

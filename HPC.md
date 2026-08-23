@@ -43,10 +43,10 @@ configuration — 4.9e-10 on macOS/aarch64/JDK 26 against 5.874e-10 on
 Linux/x86_64 — and states plainly that architecture is "the leading hypothesis,
 not established", because the JDK was a second uncontrolled variable.
 
-CI has since narrowed that, without closing it. The Linux figure is bit-identical
-on JDK 21 and JDK 25, so there is no JVM sensitivity *between those two
-versions* — but the macOS measurement is on JDK 26, which is in neither matrix,
-so the JDK is not ruled out.
+CI has since narrowed that, without closing it. The Linux figure comes out the
+same on JDK 21 and JDK 25, to the four digits the validation report prints, so
+no JVM sensitivity is visible *between those two versions*. The macOS measurement
+is on JDK 26, which is in neither matrix, so the JDK is not ruled out.
 
 Grace is **aarch64 Linux**. It is the missing cell in that table, and it is the
 one that separates the two remaining variables: an aarch64 Linux run on a JDK the

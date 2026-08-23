@@ -49,6 +49,48 @@ import org.noaidi.network.*
   */
 object Commitment:
 
+  /** Refuse the two flags that make availability an integer decision. */
+  def reject(network: Network, refuse: String => Nothing): Unit =
+    rejectCommittable(network, refuse)
+    rejectMaintainable(network, refuse)
+
+  /** Refuse any maintainable entity.
+    *
+    * PyPSA 1.3.0 added maintenance scheduling, and it is the same shape as
+    * commitment one attribute over. `maintainable` turns an entity's
+    * availability into a binary schedule: `maintenance_events` outages of
+    * `maintenance_duration` snapshots each, over which output is capped at
+    * `maintenance_pu` rather than `p_max_pu`. Placing those outages is an integer
+    * decision, so it is a mixed-integer model for the same reason a commitment
+    * is, and [[Lopf]] builds a linear one.
+    *
+    * Ignoring the flag errs in the '''cheap''' direction, which is the one this
+    * port refuses on sight rather than reasons about: a unit that must stand down
+    * for some window is instead available at every snapshot, so the answer comes
+    * out below the truth and reports `Optimal`. [[UnitCommitment]] does not model
+    * it either, so unlike the committable case there is no second path to name --
+    * the remedy is to clear the flag, or to keep the maintenance out of the
+    * network handed here.
+    *
+    * Swept over every table declaring the attribute, as the committable check is
+    * and for the same reason: PyPSA puts `maintainable` on Generator, Link and
+    * Process.
+    */
+  private def rejectMaintainable(network: Network, refuse: String => Nothing): Unit =
+    network.tables.values.foreach { table =>
+      if table.spec.attribute("maintainable").isDefined && table.static.contains("maintainable")
+      then
+        table.ids.foreach { id =>
+          if table.bool("maintainable", id) then
+            refuse(
+              s"${table.spec.name} '$id' is maintainable, so PyPSA schedules maintenance_events " +
+                "outages of maintenance_duration snapshots against it, capped at maintenance_pu; " +
+                "placing them is an integer decision and this builds a linear model, which would " +
+                "leave the entity available at every snapshot and answer below the truth"
+            )
+        }
+    }
+
   /** Refuse any committable entity.
     *
     * Swept over every table declaring the attribute rather than over `Generator`
@@ -56,7 +98,7 @@ object Commitment:
     * literal copy of the component list is one more place to miss when a class is
     * added.
     */
-  def reject(network: Network, refuse: String => Nothing): Unit =
+  private def rejectCommittable(network: Network, refuse: String => Nothing): Unit =
     network.tables.values.foreach { table =>
       if table.spec.attribute("committable").isDefined && table.static.contains("committable") then
         table.ids.foreach { id =>

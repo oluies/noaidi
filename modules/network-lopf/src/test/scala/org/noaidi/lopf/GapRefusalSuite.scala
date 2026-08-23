@@ -30,6 +30,18 @@ import org.noaidi.prima.PdhgParams
   * A gap being implemented is not a failure of this suite; it is a reason to
   * delete a case from it, deliberately, in the change that implements it. Three
   * cases were removed that way when the AC transformer model was written.
+  *
+  * ==One documented gap is not here==
+  *
+  * Piecewise cost curves. Every case in this suite goes through `Lopf.build`, and
+  * that gap is refused a layer below it: a curve is a *file*, so `CsvReader` and
+  * `NetCdfReader` turn it away before a model is built and neither raises
+  * `Lopf.UnsupportedNetwork`. It takes two cases rather than one, because the two
+  * readers live in modules that cannot see each other: `GoldenNetworkSuite`'s "a
+  * piecewise cost curve is refused by the CSV reader" and `NetCdfReaderSuite`'s
+  * "a piecewise cost curve is refused rather than read as a static column", each
+  * against a real PyPSA export in `goldens/unsupported/`. Named here so that the
+  * gap list in NOTES and this suite can still be read against each other.
   */
 class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 
@@ -52,16 +64,39 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
       Files.deleteIfExists(dir)
     }
 
-  /** A copy of a golden network with one file rewritten, read back through the
-    * real parse path.
-    */
-  private def mutate(name: String, file: String, edit: String => String): Network =
+  /** A copy of a golden network's directory, for the mutations below. */
+  private def copyOf(name: String): Path =
     val dir = Files.createTempDirectory("noaidi-gap-")
     temporaries += dir
     val source = goldens.resolve("networks").resolve(name)
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
     }
+    dir
+
+  /** A golden network with one file added, for a component it does not carry. */
+  private def withExtraFile(name: String, file: String, content: String): Network =
+    val dir = copyOf(name)
+    Files.writeString(dir.resolve(file), content)
+    CsvReader.read(dir, schema, name)
+
+  /** A golden network with several files added or rewritten at once.
+    *
+    * [[withExtraFile]] takes one, which is enough for a component the fixture
+    * does not carry and not enough for a branch: `investment-periods` is a
+    * single bus, so a line needs both a second bus and the line itself before it
+    * is anything but a dangling reference.
+    */
+  private def withFiles(name: String, files: (String, String)*): Network =
+    val dir = copyOf(name)
+    files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
+    CsvReader.read(dir, schema, name)
+
+  /** A copy of a golden network with one file rewritten, read back through the
+    * real parse path.
+    */
+  private def mutate(name: String, file: String, edit: String => String): Network =
+    val dir    = copyOf(name)
     val target = dir.resolve(file)
     val before = Files.readString(target)
     val after  = edit(before)
@@ -85,6 +120,47 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
         s"refused, but the message does not mention '$word': ${failure.getMessage}",
       )
     }
+
+  // The three PyPSA 1.3.0 arrived with. Each is inert at its default, which is
+  // what let the pin move without any existing fixture noticing, and each errs
+  // cheap when ignored -- the direction this port refuses on sight.
+  refuses("a maintainable generator", "maintainable") {
+    mutate("ac-dc-meshed", "generators.csv", setColumn(_, "maintainable", "True"))
+  }
+  refuses("a maintainable link", "maintainable") {
+    mutate("ac-dc-meshed", "links.csv", setColumn(_, "maintainable", "True"))
+  }
+  // `min < max` is the range, exactly as `define_phase_shift_variables` tests it.
+  refuses("an optimisable phase shift range", "phase_shift_min") {
+    mutate("transformer-taps", "transformers.csv", setColumn(_, "phase_shift_min", "-15.0"))
+  }
+  // An unbounded range, which the first version of this refusal let through.
+  // It read both bounds via `Branches.optional`, whose "non-finite means absent"
+  // rule maps `inf` to 0.0 -- so `0.0 < 0.0` was false, the network passed, and
+  // PyPSA's own `min < max` was satisfied and made the variable. Reverting to
+  // `Branches.optional` fails this case and nothing else.
+  refuses("an unbounded optimisable phase shift", "phase_shift_max") {
+    mutate("transformer-taps", "transformers.csv", setColumn(_, "phase_shift_max", "inf"))
+  }
+
+  test("an inverted phase shift range is not refused") {
+    assume(available, "goldens missing")
+    // The other half of `min < max`, and a case where refusing would turn an
+    // agreement into an error. `check_phase_shift_bounds` reports `min > max` as
+    // a likely mistake and PyPSA then holds the shift fixed at `phase_shift`,
+    // which is exactly what this model does with it -- so the two agree on the
+    // answer and there is nothing to refuse.
+    //
+    // NaN is the same case arithmetically: every comparison against it is false,
+    // in Scala as in pandas, so a half-written pair creates no variable there and
+    // refuses here only if it would.
+    val n = mutate(
+      "transformer-taps",
+      "transformers.csv",
+      before => setColumn(setColumn(before, "phase_shift_min", "5.0"), "phase_shift_max", "-5.0"),
+    )
+    Lopf.build(n): Unit
+  }
 
   // Capacity expansion: the two forms of capital cost this model does not price.
   refuses("annuitised overnight_cost", "overnight_cost") {
@@ -124,9 +200,76 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   }
 
   // Whole features, refused as networks rather than as attributes.
-  refuses("multi-investment periods", "investment period")(network("investment-periods"))
-  refuses("Link delay", "delay")(network("link-delay"))
   refuses("committable units", "committable")(network("unit-commitment"))
+
+  // `multi-investment periods` was here as one blanket refusal. `Lopf` models
+  // multi-period dispatch now, so the case is gone and what replaces it is the
+  // narrower set: the parts whose *formulation* differs rather than merely their
+  // weighting. Each is a mutation of the one multi-period fixture, so none of
+  // them is unreachable-by-construction.
+  refuses("capacity expansion across investment periods", "extendable") {
+    mutate("investment-periods", "generators.csv", setColumn(_, "p_nom_extendable", "True"))
+  }
+  refuses("Carrier max_growth between periods", "max_growth") {
+    withExtraFile("investment-periods", "carriers.csv", "name,max_growth\nAC,100.0\n")
+  }
+  refuses("per-period storage cycling", "cyclic_state_of_charge_per_period") {
+    withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,cyclic_state_of_charge_per_period\ns,b,10.0,4.0,True\n",
+    )
+  }
+  refuses("a snapshot in an undeclared period", "does not declare") {
+    mutate("investment-periods", "snapshots.csv",
+           setColumn(_, "period", (i, p) => if i == "3" then "2050" else p))
+  }
+  // The whole-horizon row families. `Lopf` masks a partly-built asset's columns
+  // by pinning them to zero, which is enough for a bound and not enough for a
+  // row whose shape or right-hand side depends on which assets exist.
+  refuses("a line built partway through the horizon", "cycle basis") {
+    withFiles(
+      "investment-periods",
+      "buses.csv" ->
+        "name,v_nom,control,generator,sub_network\nb,110.0,Slack,new,0\nb2,110.0,PQ,,0\n",
+      "lines.csv" ->
+        ("name,bus0,bus1,x,r,s_nom,build_year,lifetime\n" +
+          "l0,b,b2,0.1,0.01,100.0,0,inf\n" +
+          "l1,b,b2,0.2,0.02,100.0,2040,30.0\n"),
+    )
+  }
+  refuses("a ramp-limited unit built partway through the horizon", "ramp-limited") {
+    withFiles(
+      "investment-periods",
+      "generators.csv" ->
+        ("name,bus,control,p_nom,marginal_cost,build_year,lifetime,ramp_limit_up\n" +
+          "new,b,Slack,200.0,5.0,2040,30.0,0.5\n" +
+          "old,b,PQ,200.0,80.0,0,inf,1.0\n"),
+    )
+  }
+  // A partly-built storage unit or store is *not* here. Three cases were, on the
+  // grounds that pinning its columns to zero left the energy-balance rows saying
+  // something PyPSA does not say -- which was true, and the answer was to emit
+  // the rows over the asset's active snapshots rather than to refuse the network
+  // that exposes it. `LopfSuite` carries what replaced them.
+  refuses("a period label that is not a year", "is not a year") {
+    withFiles(
+      "investment-periods",
+      "investment_periods.csv" -> "period,objective,years\n2030,1.0,10\n2040-Q1,1.0,10\n",
+      "snapshots.csv" ->
+        (",period,timestep,objective,stores,generators\n" +
+          "0,2030,0,1.0,1.0,1.0\n" +
+          "1,2030,1,1.0,1.0,1.0\n" +
+          "2,2040-Q1,0,1.0,1.0,1.0\n" +
+          "3,2040-Q1,1,1.0,1.0,1.0\n"),
+    )
+  }
+
+  // `Link delay` was here. `Delays` implements it, so the case is gone rather
+  // than reworded -- the same way three transformer cases went when the AC model
+  // was written. What replaced it is a golden comparison on `link-delay` and
+  // `link-delay-wrap`, plus the two invalid-delay refusals in `LopfSuite`, which
+  // are PyPSA parity rather than a gap.
 
   test("gap: security-constrained expansion of the transmission is refused") {
     assume(available, "goldens missing")

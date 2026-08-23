@@ -15,7 +15,7 @@ xarray's netCDF-4 backend is already a PyPSA dependency.
 
 ```bash
 uv venv reference/.venv --python 3.13
-uv pip install --python reference/.venv/bin/python "pypsa==1.2.4" highspy tables
+uv pip install --python reference/.venv/bin/python "pypsa==1.3.0" highspy tables
 ./reference/.venv/bin/python reference/generate_goldens.py
 ```
 
@@ -24,11 +24,46 @@ without Python present. Regenerate and commit the diff when the pinned version
 is bumped — a change in the goldens *is* the compatibility break, and reviewing
 it is the point.
 
+## Noticing that upstream moved
+
+The goldens are pinned, so they cannot drift. Upstream can, and nothing in CI
+can see it: CI only ever reads this directory, which will keep reporting the port
+correct long after PyPSA has changed underneath it.
+
+`.github/workflows/pypsa-drift.yml` runs weekly, installs the *newest* PyPSA and
+compares. It deliberately does not regenerate anything here — a schema from an
+unpinned version is not a golden, it is the thing a golden gets compared
+against, and a job that quietly rewrote these files would destroy the reviewable
+diff that is the whole point of pinning.
+
+```bash
+# Just the component registry, from whichever PyPSA is installed.
+./reference/.venv/bin/python reference/generate_goldens.py --schema-only /tmp/schema.json
+
+# What changed, and whether any of it can move a number. Stdlib only, so it runs
+# on a bare checkout. Exit 1 means drift.
+python3 reference/schema_drift.py reference/goldens/schema.json /tmp/schema.json
+python3 reference/test_schema_drift.py     # the comparator's own tests
+```
+
+A reworded description is reported and passes. A changed `type`, `default`,
+`status`, `varying` or `unit` fails — `unit` included, because MW against kW is
+the one change where PyPSA and this port would go on agreeing with each other
+and both be wrong about the world.
+
+The workflow then runs `SchemaSweepSuite` against the new schema, which is the
+half a diff cannot do: the diff says `Generator.foo` was added, and only the
+sweep knows whether anything in this port already reads it. A new input
+attribute that nothing reads and no ruling covers fails by name. What comes out
+is an issue, not a red cross — a new PyPSA release is not a defect in this
+repository. A generator that *cannot read the registry at all* does fail the
+job, because that means the API these files are derived from has changed shape.
+
 ## What is here
 
 | Path | What it is |
 | --- | --- |
-| `goldens/schema.json` | All 16 component types, 422 attributes: type, unit, default, and whether it may vary by snapshot. The typed store is generated from this rather than from the documentation, which describes a version rather than the one pinned. |
+| `goldens/schema.json` | All 16 component types, 454 attributes: type, unit, default, and whether it may vary by snapshot. The typed store is generated from this rather than from the documentation, which describes a version rather than the one pinned. |
 | `goldens/networks/<name>/` | PyPSA's own CSV directory export. This is the format L1 must round-trip, not a convenience dump. |
 | `goldens/results/<name>.json` | Linear power flow and optimisation outputs that L2 must reproduce within documented tolerances. |
 | `goldens/manifest.json` | Versions used, and a per-network summary of what carries time-varying data. |
@@ -108,6 +143,6 @@ an unmeetable target.
 
 ## Versions
 
-Pinned at PyPSA 1.2.4 (pandas 3.0.5, Python 3.13). Note the migration brief
+Pinned at PyPSA 1.3.0 (pandas 3.0.5, Python 3.13). Note the migration brief
 cites PyPSA 0.30.2 documentation; 1.x reorganised the component API, so the
 schema here is the authority for what the port targets.

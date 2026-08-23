@@ -1,0 +1,5 @@
+name,bus,control,p_nom,marginal_cost
+cheap,a,Slack,400.0,5.0
+local,b,Slack,400.0,90.0
+cheap2,c,Slack,400.0,4.0
+local2,d,Slack,400.0,80.0

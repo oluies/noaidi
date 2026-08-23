@@ -27,18 +27,18 @@ class NetCdfReaderSuite extends munit.FunSuite:
     * Stale by four fixtures when this replaced it, including `scigrid-de` — 71
     * datasets and 1.7 MB against the 28 of a three-bus network, and the only one
     * exercising the reader at any scale.
-    */
-  /** Every golden network except the multi-period ones. PyPSA writes their
-    * snapshot index as `period`/`timestep` variables rather than a
-    * `snapshots_snapshot` dataset, which this reader requires and `Network` has
-    * nowhere to put — the same limitation `Periods.reject` enforces at the solve
-    * layer. Skipped by the manifest's `multi_period` flag, not by name.
+    *
+    * The multi-period ones are no longer excluded: the reader decodes PyPSA's
+    * `period`/`timestep` index and `Network` carries it, so `investment-periods`
+    * runs through the whole sweep like any other. The paragraph that used to sit
+    * here still described a `multi_period` skip that the `.keys` below never
+    * performed.
     */
   private lazy val networks: List[String] =
     ujson
       .read(Files.readString(goldens.resolve("manifest.json")))("networks")
       .obj
-      .collect { case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name }
+      .keys
       .toList
       .sorted
 
@@ -147,6 +147,44 @@ class NetCdfReaderSuite extends munit.FunSuite:
         assertEquals(binary.snapshotWeightings(column).toSeq, values.toSeq, s"$name: $column")
       }
     }
+
+    test(s"netCDF and CSV agree on the investment periods of $name") {
+      assume(available, "goldens missing")
+      // The three fields the reader gained when multi-period networks entered
+      // this sweep, and the only ones the comparisons above do not reach. Left
+      // uncompared, a wrong dataset prefix returns an empty weighting map and
+      // `periodWeighting("years", …)` falls back to 1.0 -- which mis-scales
+      // every global constraint by the period length, ten-fold on this fixture,
+      // with nothing here failing. The fallback is right for a network that
+      // declares no weighting and silent for one whose weighting was not found.
+      val binary = fromNetCdf(name)
+      val text   = fromCsv(name)
+      assertEquals(binary.snapshotPeriods, text.snapshotPeriods, s"$name: snapshot periods")
+      assertEquals(binary.investmentPeriods, text.investmentPeriods, s"$name: investment periods")
+      assertEquals(
+        binary.investmentPeriodWeightings.keySet,
+        text.investmentPeriodWeightings.keySet,
+        s"$name: period weighting columns",
+      )
+      text.investmentPeriodWeightings.foreach { (column, values) =>
+        assertEquals(
+          binary.investmentPeriodWeightings(column).toSeq,
+          values.toSeq,
+          s"$name: period weighting $column",
+        )
+      }
+    }
+  }
+
+  test("the period weightings are read, not defaulted") {
+    assume(available, "goldens missing")
+    // `objective` is 1.0 in both periods of the fixture, so only `years`
+    // discriminates a real read from the 1.0 fallback. Pinned here rather than
+    // left to the sweep above, which would pass on two empty maps.
+    val n = fromNetCdf("investment-periods")
+    assertEquals(n.investmentPeriods, IndexedSeq("2030", "2040"))
+    assertEqualsDouble(n.periodWeighting("years", "2030"), 10.0, 0.0)
+    assertEqualsDouble(n.periodWeighting("years", "2040"), 10.0, 0.0)
   }
 
   test("a boolean column stays boolean rather than becoming an integer") {
@@ -204,3 +242,84 @@ class NetCdfReaderSuite extends munit.FunSuite:
 
   override def afterAll(): Unit =
     temporaries.foreach(p => if Files.exists(p) then Files.delete(p))
+
+  test("a piecewise cost curve is refused rather than read as a static column") {
+    assume(available, "goldens missing")
+    // The other half of the refusal `GoldenNetworkSuite` pins on the CSV side.
+    // Both readers feed `Lopf`, and this guard used to sit there -- one site
+    // covering both -- so moving it into the readers is only equivalent if both
+    // of them got one.
+    //
+    // The file is a real `export_to_netcdf`, not a hand-built dataset. PyPSA
+    // writes the curve as `generators_pw_marginal_cost` over its own `breakpoint`
+    // dimension; `readTable` skips only `<list>_i` and `<list>_t_*`, so without
+    // this it would take that variable -- and the two index variables beside it --
+    // for static columns, and fail on a length check that blames `generators_i`'s
+    // entity count.
+    val file = goldens.resolve("unsupported").resolve("piecewise-cost.nc")
+    assume(Files.exists(file), s"no unsupported netCDF fixture at $file")
+
+    val failure =
+      intercept[UnsupportedNetworkFile](NetCdfReader.read(file, schema, "piecewise-cost"))
+    assert(
+      failure.getMessage.contains("piecewise"),
+      s"refused, but not as a piecewise curve: ${failure.getMessage}",
+    )
+    assert(
+      !failure.getMessage.contains("entities"),
+      s"refused by the entity-count check rather than as a curve: ${failure.getMessage}",
+    )
+    // The message names what holds the curve, not what indexes it. PyPSA writes
+    // `generators_pw_marginal_cost` beside `..._i` and `..._attr_i`, and the
+    // fixture carries all three -- so reporting the pair as things that "hold
+    // piecewise cost curves" describes the file wrongly, and nothing above would
+    // notice: both assertions pass either way.
+    assert(
+      failure.getMessage.contains("generators_pw_marginal_cost"),
+      s"the message does not name the curve: ${failure.getMessage}",
+    )
+    Seq("generators_pw_marginal_cost_i", "generators_pw_marginal_cost_attr_i").foreach { index =>
+      assert(
+        !failure.getMessage.contains(index),
+        s"the message reports $index, which indexes the curve rather than holding it: " +
+          failure.getMessage,
+      )
+    }
+  }
+
+  test("an index-only piecewise family is still refused, and named") {
+    assume(available, "goldens missing")
+    // A curve whose *only* datasets are its indices. The guard detects on the
+    // whole `_pw_` family and reports the value variables, which are two
+    // questions -- answering both with one filter meant the refusal fired only
+    // when a non-`_i` sibling was present, so a renamed value variable or a
+    // partial export would carry the indices back into the static-column length
+    // check the guard exists to replace.
+    //
+    // Synthetic, and in `unsupported/` rather than `binary/malformed/`:
+    // `save_piecewise` always writes the value variable, so nothing PyPSA
+    // produces reaches this branch, and `binary/malformed` is the directory three
+    // separate docs point at to define what `MalformedNetwork` is for. A file
+    // raising the other type would make it a counterexample to its own boundary.
+    //
+    // Its own case rather than a second half of the one above, which reads a real
+    // export and says so. One name, one file: sharing them meant an unrelated
+    // failure in the message assertions masked a regression in the filter.
+    val file = goldens.resolve("unsupported").resolve("piecewise-index-only.nc")
+    assume(Files.exists(file), s"no index-only fixture at $file")
+
+    val failure =
+      intercept[UnsupportedNetworkFile](NetCdfReader.read(file, schema, "piecewise-index-only"))
+    assert(
+      failure.getMessage.contains("piecewise"),
+      s"an index-only curve was not refused as one: ${failure.getMessage}",
+    )
+    // The fallback, which was the part left unpinned: with no value variable to
+    // name, the message reports the family rather than nothing. Dropping it makes
+    // `names.mkString(", ")` render an empty sequence, and the refusal names no
+    // dataset at all while still containing the word "piecewise".
+    assert(
+      failure.getMessage.contains("generators_pw_marginal_cost_i"),
+      s"the refusal names no dataset: ${failure.getMessage}",
+    )
+  }

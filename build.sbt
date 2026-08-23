@@ -165,6 +165,25 @@ lazy val primaNetlib = project
 val upickleVersion = "4.4.3"
 val jhdfVersion    = "0.13.0"
 
+// Where the network modules find the goldens and the port's own sources.
+//
+// `NOAIDI_SOURCES` is for `SchemaSweepSuite`, which searches the port as text
+// rather than through the classpath: the modules above network-model are not on
+// it, and the question it asks is what the code says rather than what it exports.
+//
+// Neither is read from the ambient environment, and the reason is worth writing
+// down because the obvious `sys.env.getOrElse` here compiles, reads correctly,
+// and does nothing. sbt 2's thin client does not share its environment with the
+// build server, so a variable exported before `sbt` never reaches this file --
+// it silently keeps the default and a run meant to test a different schema
+// quietly tests the pinned one. The PyPSA drift workflow overrides the path with
+// an sbt `set` command instead, which travels to the server with the rest of the
+// command line.
+def referenceEnv(base: File): Map[String, String] = Map(
+  "NOAIDI_GOLDENS" -> (base / "reference" / "goldens").getAbsolutePath,
+  "NOAIDI_SOURCES" -> (base / "modules").getAbsolutePath,
+)
+
 lazy val networkModel = project
   .in(file("modules/network-model"))
   .settings(commonSettings)
@@ -173,8 +192,7 @@ lazy val networkModel = project
     libraryDependencies += "com.lihaoyi" %% "upickle" % upickleVersion,
     // The goldens are the schema's source of truth, so tests read them from the
     // repository rather than from a copy under test resources.
-    Test / envVars += "NOAIDI_GOLDENS" ->
-      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+    Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
     Test / fork := true,
   )
 
@@ -192,8 +210,7 @@ lazy val networkLopf = project
   .settings(
     name := "network-lopf",
     Test / fork := true,
-    Test / envVars += "NOAIDI_GOLDENS" ->
-      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+    Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
   )
 
 // L2: linear power flow. Deliberately independent of Prima -- LPF is a linear
@@ -206,8 +223,7 @@ lazy val networkPf = project
   .settings(
     name := "network-pf",
     Test / fork := true,
-    Test / envVars += "NOAIDI_GOLDENS" ->
-      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+    Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
   )
 
 // L1: PyPSA's binary formats. Both netCDF-4 and PyPSA's .h5 are HDF5
@@ -221,8 +237,7 @@ lazy val networkIo = project
     name := "network-io",
     libraryDependencies += "io.jhdf" % "jhdf" % jhdfVersion,
     Test / fork := true,
-    Test / envVars += "NOAIDI_GOLDENS" ->
-      ((ThisBuild / baseDirectory).value / "reference" / "goldens").getAbsolutePath,
+    Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
   )
 
 // Cross-backend validation: Prima vs ojAlgo on a ladder of LP instances.

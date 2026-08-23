@@ -139,10 +139,14 @@ object LinearPowerFlow:
       //   B θ = p − K · p_branch_shift        flow = b (θ₀ − θ₁) + p_branch_shift
       //
       // Dropping it is not a small error. On `phase-shift` -- `transformer-levels`
-      // with 30° on one transformer -- t1 carries −840.53 MW against the +150.66
-      // it carries unshifted: reversed, and 5.6 times the power. This module
-      // returned the unshifted answer, silently, because nothing read the
-      // attribute at all.
+      // with 9° on one transformer -- t1 carries −146.70 MW against the +150.66
+      // it carries unshifted: reversed, and very nearly as large the other way.
+      // This module returned the unshifted answer, silently, because nothing read
+      // the attribute at all.
+      //
+      // The fixture carried 30° when that was found, where the shifted flow was
+      // −840.53 MW. PyPSA 1.3.0 put the shift into the LOPF's Kirchhoff row as
+      // well, and 30° is not a feasible network there any more.
       //
       // Only transformers have one; a line's is structurally zero.
       val shifts = branches.map { edge =>
@@ -280,6 +284,26 @@ object LinearPowerFlow:
           // A link's flow is given, so it is an injection here rather than an
           // unknown. It also spans two sub-networks, which is precisely why it
           // does not merge them: each end sees a fixed number.
+          //
+          // `delay` is deliberately not applied. PyPSA's own power flow writes
+          // `p{i} = -p0 * efficiency` at the same snapshot and never consults the
+          // attribute — only the optimiser shifts it, which is where [[Delays]]
+          // in `network-lopf` reproduces it. Honouring it here would agree with
+          // PyPSA's optimiser and disagree with PyPSA's `lpf`, and the contract
+          // is the latter.
+          //
+          // '''Unguarded, and not by oversight.''' An earlier version of this
+          // comment claimed the two delay fixtures' `lpf` blocks would fail if
+          // this changed. They would not: neither is in this suite's network
+          // list, and — decisively — neither carries a link `p_set`, so the
+          // injection here is zero at every snapshot and shifting a zero to
+          // another snapshot changes nothing. A fixture that could tell the
+          // difference needs a delayed link with a non-zero `p_set`, and
+          // `Link.p_set` is itself unmodelled in `Lopf`: PyPSA's
+          // `define_fixed_operation_constraints` fixes the link's dispatch to it,
+          // so such a fixture's `optimize` block would fail until that gap is
+          // closed. Guarding this is blocked behind that, deliberately recorded
+          // rather than asserted.
           val ports = Topology.branchPorts(table)
           table.ids.foreach { id =>
             val p = rawSetpoint(table, id, snapshot)

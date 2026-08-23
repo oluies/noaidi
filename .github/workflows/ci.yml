@@ -97,11 +97,26 @@ jobs:
             | awk '{ sum += $1 } END { print sum + 0 }' || true)
           total=${total:-0}
           echo "Total tests run across all modules: $total"
-          if [ "$total" -lt 1 ]; then
-            echo "::error::No tests ran -- sbt reported success without executing anything."
+          # A floor, not a bare "more than zero". `-lt 1` catches sbt reporting
+          # success having run nothing, and nothing else: a change that silently
+          # stopped running two thirds of the suite -- a module dropped from the
+          # aggregate, a `Test/fork` setting that swallows a runner, an `assume`
+          # that starts failing everywhere -- would sail past it, and the job that
+          # exists to prove the tests ran would go green while most of them did
+          # not.
+          #
+          # A *floor* rather than an exact count, because those fail differently.
+          # An exact count breaks on every commit that adds a case, with an error
+          # saying the tests did not run -- which is both wrong and how a check
+          # gets muted. A floor only fails when coverage goes backwards, which is
+          # when someone should look. Raise it when the suite grows enough to be
+          # worth re-anchoring; it does not need to track the total.
+          MINIMUM_TESTS=690
+          if [ "$total" -lt "$MINIMUM_TESTS" ]; then
+            echo "::error::Only $total tests ran, below the floor of $MINIMUM_TESTS -- either the suite shrank or something stopped running."
             exit 1
           fi
-          echo "$total tests passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "$total tests passed (floor $MINIMUM_TESTS)" >> "$GITHUB_STEP_SUMMARY"
 
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only

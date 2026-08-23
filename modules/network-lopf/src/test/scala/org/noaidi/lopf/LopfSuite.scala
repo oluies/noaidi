@@ -91,8 +91,18 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     CsvReader.read(dir, schema, name)
 
   private def withExtraFile(name: String, file: String, content: String): Network =
+    withFiles(name, file -> content)
+
+  /** A golden network with several files added or rewritten at once.
+    *
+    * For the component-plus-series case: the component is one file and pinning
+    * one of its attributes per snapshot is a second, so a case that needs both
+    * cannot be written with [[withExtraFile]]. A component on its own is a
+    * perfectly good network — `withExtraFile` is this with a single pair.
+    */
+  private def withFiles(name: String, files: (String, String)*): Network =
     val dir = copyOf(name)
-    Files.writeString(dir.resolve(file), content)
+    files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
     CsvReader.read(dir, schema, name)
 
   override def afterAll(): Unit =
@@ -1039,18 +1049,24 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assert(failure.getMessage.contains("hydro"), failure.getMessage)
   }
 
-  test("a phase shift changes the linear flow but not the optimised dispatch") {
+  test("a phase shift moves the optimised dispatch, not only the linear flow") {
     assume(available, "goldens missing")
-    // The half of the claim that was missing. `LinearPowerFlowSuite` asserted
-    // "PyPSA's LOPF ignores the shift" by comparing two goldens to each other,
-    // which invokes no port code at all -- so if someone added a shift term to
-    // `Cycles`, every test would still pass while this module silently diverged
-    // from the golden it is supposed to match.
+    // This test used to assert the opposite, and PyPSA 1.3.0 is why.
     //
-    // PyPSA's Kirchhoff row is `sum(x_l s_l) == 0` with no shift term, so the
-    // optimised flows on `phase-shift` are identical to `transformer-levels`,
-    // which differs from it only by 30 degrees on t1. The linear flow is not: t1
-    // carries -840.53 MW there against +150.66 here.
+    // Through 1.2.4 the Kirchhoff row was `sum(x_l s_l) == 0` with no shift term,
+    // so PyPSA's own optimisation ignored a shift its power flow applied and the
+    // optimised flows on `phase-shift` were identical to `transformer-levels`.
+    // 1.3.0's `define_kirchhoff_voltage_constraints` builds
+    // `sum_l C_lk (x_l s_l + phase_shift_l) = 0` instead, so the optimisation
+    // honours it too. The two models still part company where a rating binds --
+    // `LinearPowerFlowSuite` pins which snapshots those are and why -- but they
+    // no longer disagree about the shift itself.
+    //
+    // The shift is worth an objective here and not only a re-routing: at 9
+    // degrees `t2` runs into its 400 MW rating, so the shifted answer costs
+    // 8,524.43 against the unshifted 7,800. Every smaller shift is free, which
+    // is what makes this fixture stronger than the 30-degree one it replaces --
+    // that one was infeasible under 1.3.0 anyway.
     val expected = results("phase-shift")("optimize")
     assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
 
@@ -1075,17 +1091,25 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       n.require("Transformer").float("phase_shift", "t1") != 0.0,
       "the fixture no longer has a phase shift, so it cannot distinguish anything",
     )
-    // And the unshifted sibling optimises to the same flows, which is the
-    // property being pinned.
+    // And the unshifted sibling optimises to *different* flows, which is the
+    // property being pinned. Dropping the shift term from the Kirchhoff row
+    // leaves a model that balances every bus, satisfies every rating and returns
+    // `Optimal` on this dispatch -- so without this comparison the term could go
+    // missing and only the objective assertion above would notice.
     val plain = Lopf.solve(network("transformer-levels"), params)
-    n.snapshots.indices.foreach { t =>
-      assertEqualsDouble(
-        result.dispatch("Transformer", "t1", t),
-        plain.dispatch("Transformer", "t1", t),
-        1e-3,
-        s"the optimised flows differ under a shift at snapshot $t",
-      )
+    assertEquals(plain.status, SolveStatus.Optimal, s"${plain.solution}")
+    val moved = n.snapshots.indices.count { t =>
+      math.abs(result.dispatch("Transformer", "t1", t) - plain.dispatch("Transformer", "t1", t)) > 1.0
     }
+    assertEquals(moved, n.snapshots.size,
+      "the shift left some snapshot's flow where the unshifted network puts it")
+    // t1 reverses outright rather than merely moving: +150.66 MW unshifted
+    // against -146.70 here.
+    assert(
+      plain.dispatch("Transformer", "t1", 0) > 0.0 && result.dispatch("Transformer", "t1", 0) < 0.0,
+      s"t1 does not reverse: ${plain.dispatch("Transformer", "t1", 0)} -> " +
+        s"${result.dispatch("Transformer", "t1", 0)}",
+    )
   }
 
   test("an inactive component is excluded from the model, not dispatched at zero") {
@@ -1388,57 +1412,365 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assert(free < budgeted - 1.0, s"stripping the budgets changed nothing: $free against $budgeted")
   }
 
-  test("a multi-period network is refused rather than solved as one period") {
+  test("a multi-period network matches PyPSA's, build years and all") {
     assume(available, "goldens missing")
     // `investment_periods.csv` was in the reader's set of non-component files
     // and nothing else read it, so a multi-period network reached the builder
     // looking like an ordinary one. `new` has build_year 2040 and does not
     // exist in 2030; solved flat it ran there anyway, for 2,000 against PyPSA's
     // 17,000. Found by asking what the reader skips, not what the code refuses.
+    val expected = results("investment-periods")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
     val n = network("investment-periods")
     assertEquals(n.investmentPeriods, IndexedSeq("2030", "2040"),
       "the reader no longer picks up the investment periods")
+    // The reader used to take the label from the first column after the index,
+    // which on a `,period,timestep,...` file is `period` -- so the four
+    // snapshots came back as two pairs of duplicates and `timestep` was parsed
+    // as a weighting. Both halves now land where they belong.
+    assertEquals(n.snapshotPeriods, IndexedSeq("2030", "2030", "2040", "2040"), "snapshot periods")
+    assertEquals(n.snapshots, IndexedSeq("0", "1", "0", "1"), "snapshot timesteps")
+    assert(!n.snapshotWeightings.contains("timestep"), "timestep is being read as a weighting")
 
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    assert(failure.getMessage.contains("investment period"), failure.getMessage)
-    assert(failure.getMessage.contains("2040"), failure.getMessage)
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val p      = expected("generator_p")
+    val prices = expected("bus_marginal_price")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      // The price is unique here -- one bus, one marginal unit per period -- so
+      // it is a target rather than one vertex of a dual face, unlike
+      // `ac-dc-dispatch`. It also carries the period weighting, which is 1.0 on
+      // this fixture and so cannot be checked by it; the mutation below does.
+      assertEqualsDouble(result.marginalPrice("b", t), frameValue(prices, t, "b"), 1e-4,
+        s"marginal price at snapshot $t")
+    }
   }
 
-  test("the multi-period refusal is not gratuitous: the flat answer is wrong") {
+  test("the build-year window is what makes it dear, and it is a window") {
     assume(available, "goldens missing")
-    // Guarding the refusal, as for `committable`. Stripping the periods is
-    // exactly what solving it flat amounted to, and the gap it leaves is the
-    // benefit the refusal buys: PyPSA's 17,000 against a flat 2,000, because
-    // the cheap unit runs a period before it is built.
+    // The discriminating half. The comparison above passes against an
+    // implementation that ignored `lifetime` entirely, since `new` is built in
+    // the last period and `old` never retires -- so each end of the window gets
+    // its own mutation.
     val target = results("investment-periods")("optimize")("objective").num
     assertEqualsDouble(target, 17000.0, 1e-6)
 
-    val flat = Lopf.solve(network("investment-periods").copy(investmentPeriods = IndexedSeq.empty), params)
-    assertEquals(flat.status, SolveStatus.Optimal, s"${flat.solution}")
-    assert(
-      flat.objective < target - 1.0,
-      s"solving it flat gives ${flat.objective}, not below PyPSA's $target -- so the refusal " +
-        "blocks a network this port would have got right",
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("investment-periods", "generators.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // Building the cheap unit a period earlier lets it run in 2030 too: the
+    // 2,000 this port used to return by ignoring the build year altogether.
+    assertEqualsDouble(
+      solved(setColumn(_, "build_year", (id, y) => if id == "new" then "2030" else y)),
+      2000.0, 1e-4, "the build year is not restricting anything")
+
+    // And retiring the expensive unit before the first period makes 2030
+    // infeasible -- nothing else can serve the load -- so a lifetime of 1 from
+    // build year 0 has to actually close the window. Reported as a failure to
+    // solve rather than as a number, which is the point: `lifetime` is read.
+    val retired = Lopf.solve(
+      mutate("investment-periods", "generators.csv",
+             setColumn(_, "lifetime", (id, l) => if id == "old" then "1.0" else l)),
+      params,
     )
+    assertNotEquals(retired.status, SolveStatus.Optimal,
+      s"retiring the only 2030 unit still solves, so lifetime is not read: ${retired.objective}")
   }
 
-  test("a delayed link is refused rather than delivered instantly") {
+  test("a period's objective weighting discounts everything in it") {
     assume(available, "goldens missing")
-    // `delay` shifts a link's output by whole snapshots. Default 0, so inert
-    // unless set and no other fixture sets one -- the same shape as the four
-    // attributes the schema sweep found. The balance rows here pair both ends
-    // within one snapshot, which delivers the import in time when it cannot be.
-    val n       = network("link-delay")
-    val failure = intercept[Lopf.UnsupportedNetwork](Lopf.solve(n, params))
-    assert(failure.getMessage.contains("delay"), failure.getMessage)
-    assert(failure.getMessage.contains("tie"), failure.getMessage)
+    // `investment_periods.csv` carries `objective` beside the label and it is
+    // the discount factor for the period. Both are 1.0 on the fixture, which is
+    // exactly where reading it or not cannot be told apart -- so this halves the
+    // second period's and checks the objective moves by the second period's
+    // share alone.
+    //
+    // 16,000 of the 17,000 is 2030 and 1,000 is 2040, so halving 2040 gives
+    // 16,500 rather than 8,500.
+    val halved = Lopf.solve(
+      mutate("investment-periods", "investment_periods.csv",
+             setColumn(_, "objective", (p, w) => if p == "2040" then "0.5" else w)),
+      params,
+    )
+    assertEquals(halved.status, SolveStatus.Optimal, s"${halved.solution}")
+    assertEqualsDouble(halved.objective, 16500.0, 1e-4,
+      "the period objective weighting is not scaling that period's costs")
+
+    // And the price is divided by the same product, so it is unchanged by the
+    // discounting rather than halved with it. PyPSA divides its own prices by
+    // the snapshot weighting times the period weighting; dividing by only the
+    // snapshot half leaves a discounted price that looks entirely plausible.
+    assertEqualsDouble(halved.marginalPrice("b", 2), 5.0, 1e-4,
+      "the nodal price is not being divided by the period weighting")
   }
 
-  test("the delay refusal is not gratuitous: the instantaneous answer is wrong") {
+  test("an ordinary carriers.csv is not read as a growth limit") {
     assume(available, "goldens missing")
-    // The same guard. With the delay cleared the link carries the load at the
-    // first snapshot for 500; PyPSA, honouring it, pays 9,000 for local
-    // generation because the import cannot arrive in time. Eighteen times.
+    // `max_relative_growth` defaults to *0.0*, which is finite -- so a refusal
+    // that tested it the same way as `max_growth` (default +inf) fired on every
+    // multi-period network carrying a `carriers.csv` at all, calling "no
+    // relative limit" a limit of nothing. PyPSA gates on `max_growth != inf`
+    // alone and reads the relative one only for the carriers that selects.
+    //
+    // Nothing caught it because the only multi-period fixture has no
+    // `carriers.csv`, so the loop never ran, and the gap case above passes on
+    // `max_growth` before the relative one is reached.
+    val n = withExtraFile("investment-periods", "carriers.csv", "name,co2_emissions\nAC,0.0\n")
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.objective, 17000.0, 1e-4,
+      "adding a carrier with no growth limit changed the answer")
+  }
+
+  test("a storage unit outside its build year contributes nothing") {
+    assume(available, "goldens missing")
+    // `StorageUnit` declares `build_year` and `lifetime` like a generator does,
+    // and PyPSA masks all four of its variables by `c.da.active` --
+    // `define_operational_variables` and `define_spillage_variables` both pass
+    // the mask. This model bounded only generators and branches by the window,
+    // so a unit built in 2040 charged and discharged freely in 2030 and the
+    // objective came out *below* PyPSA's, reporting `Optimal`.
+    //
+    // `marginal_cost` is negative so that running the unit is worth something on
+    // its own account: at the default zero an idle unit and a masked one produce
+    // the same number and the test could not tell them apart.
+    val n = withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,build_year,lifetime,marginal_cost\n" +
+        "s,b,100.0,4.0,2040,30.0,-10.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+
+    Seq(0, 1).foreach { t =>
+      assertEqualsDouble(r.discharging("s", t), 0.0, 1e-6, s"discharging in 2030 at snapshot $t")
+      assertEqualsDouble(r.charging("s", t), 0.0, 1e-6, s"charging in 2030 at snapshot $t")
+      assertEqualsDouble(r.stateOfCharge("s", t), 0.0, 1e-6, s"state of charge in 2030 at $t")
+    }
+    // And it does run in its own period, so the zeros above are the window
+    // rather than a unit that was never worth using.
+    assert(r.discharging("s", 3) > 1e-6, s"the unit is idle in 2040 too: ${r.solution}")
+  }
+
+  test("a retiring storage unit is not forced empty at its last active snapshot") {
+    assume(available, "goldens missing")
+    // The other end of the activity window, and the one masking the columns does
+    // not reach. PyPSA adds the energy balance with `mask=active` and takes the
+    // previous state from `soc.where(active).ffill.roll(1).ffill`, so an
+    // inactive snapshot gets no row. Emitting a row everywhere and leaning on
+    // the pinned columns is not the same: at the first snapshot after the unit
+    // retires, `soc`, `p_dispatch`, `p_store` and `spill` are all `[0, 0]`, so
+    // the row collapses to `eff_stand · soc(t-1) = 0` and empties the unit at
+    // its last active snapshot -- a constraint PyPSA never imposes.
+    //
+    // The unit here is active in 2030 and gone in 2040, cannot discharge
+    // (`p_max_pu = 0`) and receives 5 of inflow at the second 2030 snapshot. Its
+    // only choices are to hold that energy or to spill it at a cost of 10. PyPSA
+    // lets it hold; a row at snapshot 2 forces the spill and adds 50.
+    val n = withFiles(
+      "investment-periods",
+      "storage_units.csv" ->
+        ("name,bus,p_nom,max_hours,build_year,lifetime,p_max_pu,spill_cost\n" +
+          "s,b,10.0,4.0,2020,15.0,0.0,10.0\n"),
+      "storage_units-inflow.csv" -> ",s\n0,0.0\n1,5.0\n2,0.0\n3,0.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.stateOfCharge("s", 1), 5.0, 1e-6,
+      "the unit was emptied at its last active snapshot")
+    assertEqualsDouble(r.spill("s", 1), 0.0, 1e-6, "the inflow was spilled rather than held")
+    assertEqualsDouble(r.objective, 17000.0, 1e-4, "the forced spill is being paid for")
+  }
+
+  test("a state-of-charge set point outside the window is ignored, not made infeasible") {
+    assume(available, "goldens missing")
+    // `define_fixed_operation_constraints` masks the set point by
+    // `active & ~isnull`. Against a column pinned to `[0, 0]` an unmasked row
+    // reads `0 = target`, so a file written once for the whole horizon -- the
+    // ordinary way to write one -- would make the LP infeasible and the failure
+    // would be reported as the network's.
+    val n = withFiles(
+      "investment-periods",
+      "storage_units.csv" ->
+        "name,bus,p_nom,max_hours,build_year,lifetime\ns,b,10.0,4.0,2040,30.0\n",
+      "storage_units-state_of_charge_set.csv" -> ",s\n0,20.0\n1,\n2,\n3,\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.stateOfCharge("s", 0), 0.0, 1e-6,
+      "the 2030 set point was applied to a unit that does not exist yet")
+  }
+
+  test("a cyclic storage unit wraps to its last active snapshot, not the horizon's") {
+    assume(available, "goldens missing")
+    // The cyclic branch of the same masking, and the one the two cases above do
+    // not reach. PyPSA takes the previous state from
+    // `soc.where(active).ffill.roll(1).ffill`, which at the *first* active
+    // snapshot resolves to the last active one -- not `snapshots.last`, whose
+    // column is pinned to `[0, 0]` for a unit that has retired by then. Closing
+    // the wrap there instead turns a cyclic unit into a non-cyclic one starting
+    // empty, which is a dearer answer reporting `Optimal`.
+    //
+    // The unit is active in 2030 and gone in 2040, and its inflow of 10 arrives
+    // at the *second* 2030 snapshot, so the only route to the first snapshot is
+    // around the wrap. Demand is zero at the second, so discharging there is
+    // worth nothing and the energy is only worth having a snapshot earlier.
+    // `efficiency_store` is below one so that charging and discharging together
+    // is strictly worse than doing neither, which pins the trajectory instead of
+    // leaving a cost-neutral round trip free.
+    val n = withFiles(
+      "investment-periods",
+      "storage_units.csv" ->
+        ("name,bus,p_nom,max_hours,build_year,lifetime,efficiency_store,cyclic_state_of_charge\n" +
+          "s,b,10.0,4.0,2020,15.0,0.9,True\n"),
+      "storage_units-inflow.csv" -> ",s\n0,0.0\n1,10.0\n2,0.0\n3,0.0\n",
+      "loads-p_set.csv"          -> ",d\n0,100.0\n1,0.0\n2,100.0\n3,100.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.discharging("s", 0), 10.0, 1e-6,
+      "the wrap is not carrying the second snapshot's inflow back to the first")
+    assertEqualsDouble(r.charging("s", 0), 0.0, 1e-6,
+      "the discharge is being covered by charging at the same snapshot")
+    // 90 rather than 100 out of the 80/MWh unit at the first snapshot, and 2040
+    // unchanged at 2 x 100 x 5. Wrapping to `snapshots.last` gives 9,000.
+    assertEqualsDouble(r.objective, 8200.0, 1e-4,
+      "the cyclic wrap is closing at the horizon's last snapshot rather than the unit's")
+  }
+
+  test("a storage unit built partway through the horizon starts its window at its initial state") {
+    assume(available, "goldens missing")
+    // The other half of the first active snapshot: with no previous state to
+    // reach back to, `state_of_charge_initial` enters the right-hand side there
+    // -- at the start of the unit's *window*, not at snapshot 0, where its
+    // column is pinned and the row would read `0 = initial` and take the whole
+    // LP infeasible with it.
+    //
+    // The unit is built in 2040 with 20 already stored and no inflow, so every
+    // MWh it discharges is the initial state and nothing else. Dropping the
+    // term leaves it empty and the 2040 demand entirely on the 5/MWh unit.
+    val n = withExtraFile(
+      "investment-periods",
+      "storage_units.csv",
+      "name,bus,p_nom,max_hours,build_year,lifetime,efficiency_store,state_of_charge_initial\n" +
+        "s,b,10.0,4.0,2040,30.0,0.9,20.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.stateOfCharge("s", 2), 10.0, 1e-6,
+      "the first 2040 snapshot did not open at the initial state")
+    Seq(2, 3).foreach { t =>
+      assertEqualsDouble(r.discharging("s", t), 10.0, 1e-6, s"discharging at snapshot $t")
+    }
+    // 16,000 across 2030 plus 5 x (200 - 20) across 2040. Without the initial
+    // state the unit never runs and the answer is 17,000.
+    assertEqualsDouble(r.objective, 16900.0, 1e-4,
+      "the initial state is not reaching the first snapshot of the unit's window")
+  }
+
+  test("a store built partway through the horizon starts its window at its initial energy") {
+    assume(available, "goldens missing")
+    // `Store` gets the identical treatment in `define_store_constraints` and the
+    // identical code here, and no fixture puts a store on a multi-period network
+    // at all -- so the store loop's copy of the change was carried entirely by
+    // the storage unit's tests. This is the same case one component over.
+    //
+    // Only the objective is asserted on the 2040 trajectory: a store has no
+    // power rating, so with a flat 2040 price the 20 can leave over either
+    // snapshot or both and every split costs the same. The total that leaves is
+    // what the initial energy decides, and that is what the objective reads.
+    val n = withExtraFile(
+      "investment-periods",
+      "stores.csv",
+      "name,bus,e_nom,e_initial,build_year,lifetime\nst,b,20.0,20.0,2040,30.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    Seq(0, 1).foreach { t =>
+      assertEqualsDouble(r.energy("st", t), 0.0, 1e-6, s"the store holds energy in 2030 at $t")
+    }
+    assertEqualsDouble(r.objective, 16900.0, 1e-4,
+      "the store's initial energy is not reaching the first snapshot of its window")
+  }
+
+  test("a cyclic store wraps to its last active snapshot, not the horizon's") {
+    assume(available, "goldens missing")
+    // And the store's copy of the cyclic wrap. A cyclic asset moves energy
+    // between snapshots without creating any, so it is worth something only
+    // where the price differs across its window -- hence the marginal cost
+    // series, which makes the second 2030 snapshot the cheap one.
+    //
+    // The store is active in 2030 and gone in 2040. Discharging 10 into the
+    // 80/MWh snapshot and buying it back at 10/MWh saves 700, and the only way
+    // to be full at the first snapshot is around the wrap. Closing that wrap at
+    // `snapshots.last` pins the opening energy to zero, the arbitrage runs the
+    // wrong way round and is not worth taking, and the answer is the undisturbed
+    // 10,000.
+    val n = withFiles(
+      "investment-periods",
+      "stores.csv" -> "name,bus,e_nom,e_cyclic,build_year,lifetime\nst,b,10.0,True,2020,15.0\n",
+      "generators-marginal_cost.csv" ->
+        ",old,new\n0,80.0,5.0\n1,10.0,5.0\n2,80.0,5.0\n3,80.0,5.0\n",
+    )
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.dispatch("Store", "st", 0), 10.0, 1e-6,
+      "the store is not full at the first snapshot of its window")
+    assertEqualsDouble(r.dispatch("Store", "st", 1), -10.0, 1e-6,
+      "the store did not refill at the cheap snapshot it wraps to")
+    assertEqualsDouble(r.objective, 9300.0, 1e-4,
+      "the cyclic wrap is closing at the horizon's last snapshot rather than the store's")
+  }
+
+  test("a delayed link matches PyPSA's") {
+    assume(available, "goldens missing")
+    // `delay` shifts a link's output into a later snapshot. Default 0, so inert
+    // unless set and no fixture set one -- the same shape as the four attributes
+    // the schema sweep found. Until `Delays` this model paired both ends of a
+    // link within one snapshot, which delivered the import in time when it
+    // cannot be: 500 against PyPSA's 9,000, `Optimal`.
+    val expected = results("link-delay")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("link-delay")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val generators = expected("generator_p")
+    val links      = expected("link_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(generators, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      n.require("Link").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Link", id, t), frameValue(links, t, id), 1e-4,
+          s"link $id at snapshot $t")
+      }
+    }
+  }
+
+  test("clearing the delay undercuts PyPSA, as this model silently did") {
+    assume(available, "goldens missing")
+    // The discriminating half, and the one that survives the feature being
+    // implemented: `link-delay` is a fixture where the delay makes the only route
+    // to the load useless, so the shift is worth nothing unless honouring it is
+    // what produces the 9,000.
     val target = results("link-delay")("optimize")("objective").num
     assertEqualsDouble(target, 9000.0, 1e-6)
 
@@ -1448,4 +1780,144 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       instant.objective < target - 1.0,
       s"ignoring the delay gives ${instant.objective}, not below PyPSA's $target",
     )
+  }
+
+  test("a wrapped and a lagging delay both match PyPSA's") {
+    assume(available, "goldens missing")
+    // `link-delay` cannot gate the shift itself: its delay makes the link
+    // useless, so deleting the link reproduces every number in it. Here both
+    // links carry the load they were built for, one across the wrap and one two
+    // snapshots forward.
+    val expected = results("link-delay-wrap")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("link-delay-wrap")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val generators = expected("generator_p")
+    val links      = expected("link_p0")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(generators, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      n.require("Link").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Link", id, t), frameValue(links, t, id), 1e-4,
+          s"link $id at snapshot $t")
+      }
+    }
+  }
+
+  test("each reading the wrap fixture rules out is visible in the golden") {
+    assume(available, "goldens missing")
+    // Guarding the guard, as for `ramp-limits` and `store-bank`. The comparison
+    // above passes against several wrong implementations unless each of these
+    // holds, and every one of them is a separate plausible misreading.
+    val n        = network("link-delay-wrap")
+    val expected = results("link-delay-wrap")("optimize")
+    val p        = expected("generator_p")
+    val flow     = expected("link_p0")
+    val ts       = n.snapshots.indices
+
+    // The delay is elapsed time against the `generators` weighting, not a
+    // snapshot count and not the `objective` weighting sitting beside it in the
+    // same file. At 2.0, `wrap`'s delay of 2 reaches back one snapshot.
+    assertEqualsDouble(ts.map(t => n.weighting("generators", t)).distinct.head, 2.0, 1e-9,
+      "the fixture no longer separates the generators weighting from the objective one")
+    assertEquals(ts.map(t => n.weighting("objective", t)), IndexedSeq(1.0, 1.0, 3.0, 1.0),
+      "the objective weighting is flat again, so which snapshot the source runs in is free")
+
+    // The wrap. The load sits at the first snapshot and its energy leaves at the
+    // last, which is a snapshot that has not happened yet in every reading but
+    // PyPSA's.
+    assertEqualsDouble(frameValue(flow, 3, "wrap"), 200.0, 1e-6, "the cyclic link does not wrap")
+    ts.filter(_ != 3).foreach { t =>
+      assertEqualsDouble(frameValue(flow, t, "wrap"), 0.0, 1e-6, s"the cyclic link also flows at $t")
+    }
+
+    // Efficiency at the *arrival* snapshot, not the departure. 0.5 applies at
+    // the first snapshot, so 200 leaves for 100 to arrive; reading the departure
+    // snapshot's 1.0 would send 100.
+    assertEqualsDouble(frameValue(p, 3, "cheap"), 200.0, 1e-6,
+      "the efficiency is being read at the snapshot the energy left in")
+
+    // The mask, which is not a zero. `lag` is not cyclic, so its first two
+    // snapshots have no source at all -- and the index PyPSA computes for them
+    // and then discards is 0. Keeping it would deliver this 100 at the first
+    // snapshot, where nothing at `d` can absorb it, pinning the flow to zero and
+    // handing the load to `local2`.
+    assertEqualsDouble(frameValue(flow, 0, "lag"), 100.0, 1e-6,
+      "the lagging link carries nothing, so the arrival mask cannot be gated here")
+    assertEqualsDouble(frameValue(p, 2, "local2"), 0.0, 1e-6,
+      "the expensive local unit runs, so the lagging link did not serve its load")
+  }
+
+  test("each half of the delay changes the answer when it is changed") {
+    assume(available, "goldens missing")
+    // The mutation half. Every number here is PyPSA's, re-solved with one
+    // attribute moved -- so a model that built the rows but read the wrong
+    // snapshot would have to be wrong in exactly the same way three times.
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("link-delay-wrap", "links.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // A delay of 1 rounds *down* to the same snapshot boundary as one of 2,
+    // because a snapshot is 2 weighting units long. Identical objective, and
+    // this is the reading that separates elapsed time from a snapshot count: a
+    // model counting snapshots would move `wrap`'s source and pay 3,400.
+    assertEqualsDouble(solved(setColumn(_, "delay", (id, d) => if id == "wrap" then "1" else d)),
+      1400.0, 1e-4, "a delay of 1 and one of 2 no longer round to the same boundary")
+
+    // Three units reaches back past that boundary, into the snapshot the
+    // objective weighting prices at 3.
+    assertEqualsDouble(solved(setColumn(_, "delay", "3")), 3400.0, 1e-4,
+      "reaching a snapshot further back costs nothing, so the shift is not being read")
+
+    // Without the wrap the load at the first snapshot has no source at all, and
+    // the expensive local unit carries it.
+    assertEqualsDouble(solved(setColumn(_, "cyclic_delay", "False")), 9400.0, 1e-4,
+      "turning off the wrap changes nothing")
+
+    // And the sign of the error is not fixed, which is why this was a feature
+    // rather than an approximation to tighten. Ignoring the delay here costs
+    // *more* than honouring it -- 2,200 against 1,400 -- because the shift is
+    // what lets the energy leave in a cheaply weighted snapshot. On `link-delay`
+    // the same omission was eighteen times too cheap.
+    assertEqualsDouble(solved(setColumn(_, "delay", "0")), 2200.0, 1e-4,
+      "dropping the delay reproduces the delayed answer")
+  }
+
+  test("the delays PyPSA's own consistency check refuses are refused here") {
+    assume(available, "goldens missing")
+    // `n.optimize` runs `consistency_check` first and `check_dispatch_delays` is
+    // strict, so PyPSA has no answer for either of these. Its optimiser would
+    // not refuse them on its own -- a negative delay is grouped as immediate and
+    // one longer than the horizon leaves every target invalid -- so the link
+    // would silently become instantaneous or inert.
+    def refusal(edit: String => String): String =
+      intercept[Lopf.UnsupportedNetwork](
+        Lopf.build(mutate("link-delay-wrap", "links.csv", edit))
+      ).getMessage
+
+    val negative = refusal(setColumn(_, "delay", (id, d) => if id == "wrap" then "-1" else d))
+    assert(negative.contains("wrap") && negative.contains("-1"), negative)
+
+    // The horizon is 8 weighting units, not 4 snapshots -- so this is refused for
+    // being too long while a delay of 5 is not, which a snapshot-counting reading
+    // has backwards.
+    val long = refusal(setColumn(_, "delay", (id, d) => if id == "lag" then "8" else d))
+    assert(long.contains("lag") && long.contains("horizon"), long)
+
+    val fits = Lopf.solve(
+      mutate("link-delay-wrap", "links.csv",
+             setColumn(_, "delay", (id, d) => if id == "lag" then "5" else d)),
+      params,
+    )
+    assertEquals(fits.status, SolveStatus.Optimal,
+      s"a delay of 5 is inside an 8-unit horizon and should solve: ${fits.solution}")
   }

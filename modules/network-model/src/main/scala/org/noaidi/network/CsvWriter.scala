@@ -26,6 +26,7 @@ object CsvWriter:
   def write(network: Network, directory: Path): Unit =
     Files.createDirectories(directory)
     writeSnapshots(network, directory)
+    writeInvestmentPeriods(network, directory)
     network.tables.values.foreach { table =>
       writeStatic(table, directory)
       writeSeries(table, network, directory)
@@ -35,14 +36,42 @@ object CsvWriter:
     if network.snapshots.nonEmpty then
       // `,snapshot,objective,stores,generators`: PyPSA writes a blank index
       // header, then the label, then whatever weightings the network carries.
-      val kinds  = network.snapshotWeightings.keys.toIndexedSeq
-      val header = ("" +: "snapshot" +: kinds).map(escape).mkString(",")
+      //
+      // A multi-period network's index is two columns rather than one --
+      // `,period,timestep,...` and no `snapshot` at all -- because its snapshots
+      // are `(period, timestep)` pairs and the timestep half repeats across
+      // periods. Writing a single `snapshot` column for one would produce a file
+      // that reads back with the periods gone.
+      val kinds = network.snapshotWeightings.keys.toIndexedSeq
+      val index = if network.isMultiPeriod then IndexedSeq("period", "timestep")
+                  else IndexedSeq("snapshot")
+      val header = ("" +: index ++: kinds).map(escape).mkString(",")
       val rows = network.snapshots.indices.map { i =>
-        val cells = i.toString +: network.snapshots(i) +:
-          kinds.map(k => render(network.weighting(k, i)))
+        val label =
+          if network.isMultiPeriod then IndexedSeq(network.snapshotPeriods(i), network.snapshots(i))
+          else IndexedSeq(network.snapshots(i))
+        val cells = i.toString +: label ++: kinds.map(k => render(network.weighting(k, i)))
         cells.map(escape).mkString(",")
       }
       Files.write(directory.resolve("snapshots.csv"), asBytes(header +: rows))
+
+  /** `investment_periods.csv`, which only a multi-period network has.
+    *
+    * Written from the same fields the reader fills, so the file survives a
+    * round trip. Before periods were modelled the reader took the labels and
+    * dropped the weightings, which made this file unwritable without inventing
+    * numbers -- so it was not written at all, and a round-tripped multi-period
+    * network silently lost its periods.
+    */
+  private def writeInvestmentPeriods(network: Network, directory: Path): Unit =
+    if network.investmentPeriods.nonEmpty then
+      val kinds  = network.investmentPeriodWeightings.keys.toIndexedSeq
+      val header = ("period" +: kinds).map(escape).mkString(",")
+      val rows = network.investmentPeriods.map { period =>
+        val cells = period +: kinds.map(k => render(network.periodWeighting(k, period)))
+        cells.map(escape).mkString(",")
+      }
+      Files.write(directory.resolve("investment_periods.csv"), asBytes(header +: rows))
 
   private def writeStatic(table: ComponentTable, directory: Path): Unit =
     if table.size == 0 then return

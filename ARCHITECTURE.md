@@ -5,8 +5,11 @@ How this codebase is put together and why. Read
 [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) has the numerical
 detail this document deliberately skips.
 
-Only Prima, the LP solver, exists today. The layers above it are drawn here
-because the shape of Prima was chosen to serve them.
+Prima, the LP solver, came first, and L0 through L2 are built on it: the network
+data model, PyPSA's CSV and netCDF readers, linear and Newton-Raphson AC power
+flow, and dispatch LOPF with storage, capacity expansion, security constraints
+and unit commitment. L3 upwards is drawn here because the shape of Prima was
+chosen to serve it.
 
 ## The governing constraint
 
@@ -299,12 +302,21 @@ graph TD
     class l1,l2 partial;
 ```
 
-Green is complete, amber partial. L1 reads and writes PyPSA's CSV directory format
-and round-trips it; netCDF and HDF5 are not started. L2 has linear power flow and
-Newton-Raphson AC power flow (both matching PyPSA's angles to 1e-9) and dispatch
-LOPF with Kirchhoff cycle constraints; SCLOPF and unit commitment are not. The DC
-half of "Newton-Raphson AC/DC" is absent because the pinned PyPSA does not
-implement it either, so there is nothing to validate it against.
+Green is complete, amber partial. L1 reads and writes PyPSA's CSV directory
+format and round-trips it byte-for-byte, and reads PyPSA's netCDF export into the
+same model; `.h5` is not read, because PyPSA's is pandas' PyTables layout with
+pickled column metadata (see NOTES). L2 has linear power flow and Newton-Raphson
+AC power flow (both matching PyPSA's angles to 1e-9) and dispatch LOPF with
+Kirchhoff cycle constraints, storage and stores, capacity expansion, delayed
+links, multi-investment periods, SCLOPF via outage distribution factors, and unit
+commitment through Prima's own branch-and-bound. The DC half of "Newton-Raphson
+AC/DC" is absent because the pinned PyPSA does not implement it either, so there
+is nothing to validate it against.
+
+What each of those does *not* cover is recorded in
+[`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md), and refused in code
+rather than left to this list — a gap is only honest if it is loud, which is what
+`GapRefusalSuite` and `SchemaSweepSuite` exist to keep true.
 
 Prima came first, ahead of the foundation layer, because it is the highest-risk
 piece and the one nothing else could substitute for: a GPU-accelerated
@@ -313,11 +325,12 @@ over well-understood libraries; if it had been built first, the project's
 riskiest assumption would still be untested.
 
 From L1 onward every module is gated on golden-file comparison against a pinned
-PyPSA run, and that harness now exists: `reference/generate_goldens.py` pins
-PyPSA 1.2.4 and captures schema, exported tables, sub-network decomposition, LPF
-and optimisation results for each reference network. Prima itself is validated
-against ojAlgo and the Netlib corpus instead, which are the right oracles for an
-LP solver and the wrong ones for a network model.
+PyPSA run, and that harness now exists: `reference/generate_goldens.py` pins the
+version `reference/goldens/manifest.json` records, and captures schema, exported
+tables, sub-network decomposition, LPF and optimisation results for each
+reference network. Prima itself is validated against ojAlgo and the Netlib
+corpus instead, which are the right oracles for an LP solver and the wrong ones
+for a network model.
 
 Generating the goldens '''before''' designing anything that consumes them has paid
 for itself repeatedly. Three PyPSA conventions that documentation does not state,

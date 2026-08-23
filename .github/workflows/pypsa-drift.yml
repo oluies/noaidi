@@ -1,0 +1,464 @@
+name: PyPSA drift
+
+# The goldens are pinned, so they cannot drift. Upstream can.
+#
+# Everything in CI reads `reference/goldens`, which was generated from a pinned
+# PyPSA and will keep saying the port is correct long after PyPSA has moved. The
+# pinned version is read from `manifest.json` at run time rather than written
+# here, so this comment does not go stale on a bump. The
+# only way to see that is to go and look at a version this repository is not
+# pinned to, which is what this does: install the newest PyPSA, ask it for its
+# component registry, and diff.
+#
+# It deliberately does not regenerate the goldens. A schema from an unpinned
+# version is not a golden, it is the thing a golden gets compared against, and a
+# workflow that quietly rewrote the pinned files would destroy the one artefact
+# that makes a version bump reviewable.
+
+on:
+  schedule:
+    # Mondays at 07:00 UTC, an hour after Scala Steward. Same cadence and the
+    # same argument: weekly is often enough to catch a release within days and
+    # rare enough that the result still gets read. PyPSA releases every few
+    # months, so most runs will find nothing, which is the intended state.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+# Only what opening the drift issue needs.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: pypsa-drift
+  cancel-in-progress: false
+
+jobs:
+  schema-drift:
+    name: Schema against the newest PyPSA
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: sbt
+
+      - uses: sbt/setup-sbt@v1
+
+      # The checker before the check, as with the dependabot job. `schema_drift.py`
+      # is a set comparison whose failure mode is reporting "no drift" while a
+      # default moved, and a green run here is taken as evidence that upstream is
+      # unchanged -- so a broken comparator is worse than no comparator at all.
+      #
+      # Stdlib only, so this needs nothing installed and runs before the venv
+      # below has a chance to fail.
+      - name: Test the drift comparator
+        run: python3 reference/test_schema_drift.py
+
+      # Unpinned on purpose -- "the newest one" is the question being asked. The
+      # solver and HDF5 extras that `reference/README.md` lists are omitted:
+      # `--schema-only` reads the component registry and writes JSON, so it
+      # neither solves nor exports, and installing highspy here would only add
+      # ways for the job to fail for reasons that are not drift.
+      - name: Install the newest PyPSA
+        id: install
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pypsa
+          latest=$("$RUNNER_TEMP/venv/bin/python" -c "import pypsa; print(pypsa.__version__)")
+          pinned=$(python3 -c "import json; print(json.load(open('reference/goldens/manifest.json'))['versions']['pypsa'])")
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "pinned $pinned, latest $latest"
+
+      # A failure here is the loudest drift signal available and must not be
+      # confused with an infrastructure problem: it means the registry API this
+      # repository reads the schema *through* has changed, so there is no schema
+      # to compare and the generator itself needs rewriting before the goldens
+      # can be regenerated at all.
+      - name: Read the newest schema
+        id: capture
+        run: |
+          set -euo pipefail
+          if ! "$RUNNER_TEMP/venv/bin/python" reference/generate_goldens.py \
+                --schema-only "$RUNNER_TEMP/latest/schema.json" 2>&1 | tee capture.log; then
+            {
+              echo "## PyPSA ${{ steps.install.outputs.latest }} — the schema could not be read"
+              echo
+              echo "\`generate_goldens.py --schema-only\` failed. This is not a flake: the"
+              echo "generator reads \`pypsa.components.types\`, so a failure means the API the"
+              echo "schema is derived from has changed shape. The generator needs fixing before"
+              echo "the goldens can be regenerated."
+              echo
+              echo '```'
+              cat capture.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Diff against the pinned schema
+        id: drift
+        run: |
+          set -euo pipefail
+          # `|| true` so the non-zero exit that *means drift* does not abort the
+          # step before the report can be published. The status is captured
+          # instead and drives the steps below.
+          status=0
+          python3 reference/schema_drift.py \
+            reference/goldens/schema.json "$RUNNER_TEMP/latest/schema.json" > drift.md || status=$?
+          [ "$status" -le 1 ] || { cat drift.md; exit "$status"; }
+          echo "drifted=$([ "$status" -eq 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          cat drift.md
+
+      # The sweep, pointed at the newest schema instead of the pinned one.
+      #
+      # This is the half the diff cannot do. `schema_drift.py` reports that
+      # `Generator.foo` was added; only the sweep knows whether anything in this
+      # port names it, and it applies the ledger -- so an upstream attribute that
+      # some existing code already reads passes quietly, and one that nothing
+      # reads and no ruling covers fails by name. That is the same question the
+      # original sweep asked by hand, asked automatically against a version
+      # nobody has pinned yet.
+      #
+      # Only this suite runs. The rest of the tree reads golden networks and
+      # results that were generated from the pinned version, and running them
+      # against a foreign schema would produce failures about tolerances rather
+      # than about drift.
+      #
+      # The schema path goes in as an sbt `set` rather than an environment
+      # variable. sbt 2's thin client does not share its environment with the
+      # build server, so `NOAIDI_GOLDENS=... sbt ...` reaches neither the build
+      # nor the forked test JVM -- the suite would fall back to the pinned schema
+      # and pass, reporting no drift for a schema it never opened. A `set`
+      # travels with the command line.
+      - name: Sweep the newest schema for unaccounted attributes
+        id: sweep
+        if: always() && steps.capture.outcome == 'success'
+        run: |
+          set -euo pipefail
+          status=0
+          sbt --batch \
+            "set networkModel/Test/envVars += (\"NOAIDI_GOLDENS\" -> \"$RUNNER_TEMP/latest\"); networkModel/testOnly org.noaidi.network.SchemaSweepSuite" \
+            2>&1 | tee sweep.log || status=$?
+
+          # Every guard below leaves through here rather than through a bare
+          # `exit 1`, and the reason is the one failure mode where silence is
+          # indistinguishable from a clean run.
+          #
+          # `clean` used to be written *after* the guards. So a sweep that died
+          # before munit reported -- a compile error, an
+          # `ExceptionInInitializerError`, an OOM -- hit a guard, exited, and left
+          # `steps.sweep.outputs.clean` unset. The `Open or update the drift
+          # issue` step is conditioned on `drifted == 'true' || clean == 'false'`,
+          # and an unset output is neither, so the hardest failure this job can
+          # have opened nothing at all. A red cross on a weekly cron is exactly
+          # what nobody is watching.
+          #
+          # `harness`, not `clean=false`. Those mean different things and the
+          # first attempt at this conflated them: `clean=false` is the signal for
+          # "the newest schema has something this port does not account for",
+          # which is a statement about *upstream*. Reusing it for a local build
+          # failure opened an issue titled "PyPSA <latest>: schema drift" whose
+          # body asserted upstream had changed the registry, directly above a
+          # `drift.md` reading "No schema drift: the component registries are
+          # identical." Which is this harness reporting its own failure as the
+          # thing it watches for -- the defect three commits have now been spent
+          # removing from the Python side, reintroduced one layer up.
+          #
+          # The report is written here too, so the issue carries a reason rather
+          # than an empty fence.
+          fail_hard() {
+            echo "harness=broken" >> "$GITHUB_OUTPUT"
+            {
+              echo "$1"
+              echo
+              echo "The sweep did not get far enough to report per-case results, so there is"
+              echo "no attribute list here. The full log is in the workflow run."
+            } > sweep-report.txt
+            exit 1
+          }
+
+          # A `set` that failed to parse would leave the suite reading the pinned
+          # schema and passing, which is the same output as no drift. The suite
+          # prints the schema it opened for exactly this reason.
+          grep -qF "$RUNNER_TEMP/latest" sweep.log || {
+            echo "::error::the sweep did not read the generated schema -- the set command did not take"
+            fail_hard "The sweep did not read the generated schema: the sbt \`set\` command did not take."
+          }
+          # The same guard ci.yml applies to `testFull`: a green sbt run is not
+          # evidence that anything executed, and a sweep that ran zero tests
+          # would report exactly the same "no unaccounted attributes" as one that
+          # ran some and found none.
+          #
+          # The count is parsed rather than pinned. Asserting the literal `Total 5`
+          # would break this job every time a case is added to the suite, with an
+          # error saying the sweep did not run -- which is both wrong and the kind
+          # of false alarm that gets a weekly cron muted.
+          #
+          # `ignored` is checked too, and on its own it does not do what its
+          # comment claimed. Every case begins `assume(available)`, and munit
+          # reports a failed assume as **skipped**, not ignored -- a suite that
+          # skipped all five prints `0 failed, 0 ignored, 5 total` and exits 0,
+          # which is byte-identical to a clean run. The path grep above is what
+          # actually catches that case, because `assume` fires before the println
+          # it greps for; `skipped` is parsed here as well so the two guards do
+          # not both depend on that one ordering.
+          summary=$(grep -E '^Test run .* finished:' sweep.log | tail -1 || true)
+          total=$(sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p' <<<"$summary")
+          ignored=$(sed -nE 's/.*[^0-9]([0-9]+) ignored.*/\1/p' <<<"$summary")
+          # No line anchor, and a character class rather than a bare space: this
+          # file already records that an ANSI-coloured `==> X` slips past the
+          # `sed` range below, and an ANSI-coloured `==> s` would slip past this
+          # identically -- returning 0, which reads as "nothing skipped". That is
+          # the same guard-that-does-not-guard this check was added to replace.
+          skipped=$(grep -cE '==> s [A-Za-z]' sweep.log || true)
+          echo "sweep: ${summary:-<no summary line>}"
+          if [ -z "${total:-}" ] || [ "$total" -lt 1 ]; then
+            echo "::error::the sweep reported no cases -- it did not run"
+            fail_hard "The sweep emitted no munit summary line, so it never ran its cases."
+          fi
+          if [ "${ignored:-0}" -ne 0 ] || [ "${skipped:-0}" -ne 0 ]; then
+            echo "::error::$((${ignored:-0} + ${skipped:-0})) sweep case(s) did not run; the schema was not readable"
+            fail_hard "$((${ignored:-0} + ${skipped:-0})) sweep case(s) did not run, so the generated schema was not readable."
+          fi
+          echo "clean=$([ "$status" -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+          # The failures, once, for both the summary and the issue to read. Built
+          # here rather than twice below so the two cannot report different
+          # things. Every rule the suite has is picked up, not just the first:
+          # a removed attribute orphans its ruling and is as much drift as an
+          # added one. Stack frames are dropped -- the assertion messages name
+          # the attributes, which is the whole content.
+          #
+          # These lines carry no `[error]` prefix because `Test / fork := true`
+          # sends the forked JVM's output straight through, so the range anchors
+          # and the stack-frame filter match as written. Dropping the fork would
+          # break both.
+          if [ "$status" -ne 0 ]; then
+            # `|| true` because `grep -v` exits 1 when it emits nothing, which
+            # under `pipefail` would abort the step before `exit 0` and leave the
+            # issue below with an empty fence.
+            #
+            # Reaching here at all means munit reported, so this is *not* the
+            # suite-level failure `fail_hard` covers -- everything in
+            # `SchemaSweepSuite` is a `lazy val` forced inside a test, so even a
+            # schema that will not parse surfaces as a per-case `==> X` that the
+            # range below catches. What is left is the start anchor missing a
+            # failure that is there: an ANSI-coloured `==> X`, a renamed suite.
+            sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/^Test run .* finished/p' sweep.log \
+              | grep -vE '^\s+at |^[0-9]+:' > sweep-full.txt || true
+            # Truncation is stated rather than silent. It matters most in exactly
+            # the case with the most new attributes, which is the one where a
+            # quietly clipped list reads as a complete one.
+            head -80 sweep-full.txt > sweep-report.txt
+            cut=$(( $(wc -l < sweep-full.txt) - 80 ))
+            if [ "$cut" -gt 0 ]; then
+              echo "... $cut more line(s); the full list is in the workflow run log" >> sweep-report.txt
+            fi
+            # And an empty extraction says so. Silence here reads as "the sweep
+            # had nothing to report", which is the opposite of what a non-zero
+            # status means. Stated as what was observed rather than as a
+            # diagnosis: the script knows the pattern did not match, and not why.
+            if [ ! -s sweep-report.txt ]; then
+              {
+                echo "The sweep failed with status $status, but no per-case failure line matched"
+                echo "in its log. The full log is in the workflow run."
+              } > sweep-report.txt
+            fi
+          fi
+          exit 0
+
+      - name: Publish the report
+        if: always()
+        run: |
+          {
+            echo "## PyPSA drift"
+            echo
+            echo "| | version |"
+            echo "| --- | --- |"
+            echo "| pinned | \`${{ steps.install.outputs.pinned }}\` |"
+            echo "| latest | \`${{ steps.install.outputs.latest }}\` |"
+            echo
+            if [ -f drift.md ]; then cat drift.md; fi
+            if [ -f sweep-report.txt ]; then
+              echo
+              # The same two-way split the issue makes. This is the artefact a
+              # reader reaches *first*, and it was heading a local build failure
+              # with "The sweep failed against the newest schema" above a
+              # paragraph about added input attributes -- the exact conflation
+              # the issue step was fixed to stop making, left standing one step
+              # earlier.
+              if [ "${{ steps.sweep.outputs.harness }}" = "broken" ]; then
+                echo "## Why the sweep could not run"
+                echo
+                echo "This is a failure of this repository's own harness. The sweep did not run,"
+                echo "so nothing here says whether the newest schema declares anything unaccounted"
+                echo "for."
+              else
+                echo "## The sweep failed against the newest schema"
+                echo
+                echo "\`SchemaSweepSuite\` names what is unaccounted for. An added input"
+                echo "attribute is one a network may now set that nothing in this port reads —"
+                echo "the shape of every silent wrong answer the original sweep turned up. A"
+                echo "removed one orphans the ruling that explained why it was safe to ignore."
+              fi
+              echo
+              echo '```'
+              cat sweep-report.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One issue per drifting version, commented on rather than duplicated, so a
+      # release that sits unaddressed for a month produces one thread instead of
+      # four identical ones.
+      - name: Open or update the drift issue
+        if: >-
+          always() &&
+          (steps.drift.outputs.drifted == 'true' ||
+           steps.sweep.outputs.clean == 'false' ||
+           steps.sweep.outputs.harness == 'broken')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFTED: ${{ steps.drift.outputs.drifted }}
+          CLEAN: ${{ steps.sweep.outputs.clean }}
+          HARNESS: ${{ steps.sweep.outputs.harness }}
+          LATEST: ${{ steps.install.outputs.latest }}
+          PINNED: ${{ steps.install.outputs.pinned }}
+        run: |
+          set -euo pipefail
+
+          # Two different things reach this step and they must not wear the same
+          # title. Upstream moving is a statement about PyPSA; this job failing to
+          # build is a statement about this repository, and an issue that says the
+          # first when it means the second is worse than no issue -- it is a bug
+          # report filed against somebody else's project.
+          #
+          # Separate titles also keep the threads apart. `gh issue list --search`
+          # matches on the title, so a harness failure that borrowed the drift
+          # title would become the thread that real drift for that same version
+          # later comments into, burying it under an unrelated build error.
+          if [ "${DRIFTED:-}" = "true" ] || [ "${CLEAN:-}" = "false" ]; then
+            TITLE="PyPSA $LATEST: schema drift against the pinned $PINNED"
+            upstream=true
+          else
+            TITLE="PyPSA drift job broke before it could compare (PyPSA $LATEST)"
+            upstream=false
+          fi
+
+          {
+            echo "Found by \`.github/workflows/pypsa-drift.yml\` ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))."
+            echo
+            if [ "$upstream" = true ]; then
+              echo "This repository is pinned to PyPSA \`$PINNED\`."
+              echo "PyPSA \`$LATEST\` declares a different component registry."
+              echo
+              echo "Nothing is broken by this on its own — the port agrees with the version it is"
+              echo "pinned to, which is the whole contract. What it means is that bumping the pin"
+              echo "is no longer free, and the changes below are what it would cost."
+              echo
+              if [ -f drift.md ]; then cat drift.md; fi
+            else
+              # Says exactly what is and is not known, which is the whole point
+              # of splitting this branch off. The registry comparison and the
+              # sweep are separate steps and only the second one broke, so
+              # claiming the job "did not compare the registries" would be a
+              # second overclaim in place of the first.
+              echo "**This is a failure of this repository's own harness, not a report about"
+              echo "PyPSA.** The sweep — which asks whether the newest schema declares any input"
+              echo "attribute nothing in this port reads — did not run, so there is no answer to"
+              echo "that question this week, either way."
+              echo
+              # Gated on the *step's* own signal, not on the file existing.
+              # `drift.md` is created by the redirection at the top of the diff
+              # step, so it exists even when `schema_drift.py` exits 2 and writes
+              # its reason to stderr -- and the claim "it did complete" would then
+              # sit above an empty region. `drifted` is written only after the
+              # status is known to be 0 or 1, which is exactly the condition under
+              # which the comparison produced an answer.
+              if [ -s drift.md ] && { [ "${DRIFTED:-}" = "true" ] || [ "${DRIFTED:-}" = "false" ]; }; then
+                echo "The registry comparison is a separate step and it did complete:"
+                echo
+                cat drift.md
+              else
+                echo "The registry comparison produced no result either."
+              fi
+            fi
+            if [ -f sweep-report.txt ]; then
+              echo
+              # On `HARNESS`, not on `upstream`. The two can hold at once -- and a
+              # new release is arguably the most likely week for the sweep to
+              # break, since it is what changes the inputs. Headed by `upstream`,
+              # a run that both drifted and broke printed the harness reason under
+              # "The sweep failed against the newest schema", which says the sweep
+              # answered when it never ran.
+              if [ "${HARNESS:-}" = "broken" ]; then
+                echo "## Why the sweep could not run"
+              else
+                echo "## The sweep failed against the newest schema"
+              fi
+              echo
+              echo '```'
+              cat sweep-report.txt
+              echo '```'
+            fi
+            echo
+            if [ "$upstream" = true ]; then
+              echo "To act on it: regenerate the goldens against the new pin as"
+              echo "\`reference/README.md\` describes, and review the diff — a change in the"
+              echo "goldens *is* the compatibility break."
+              # Only claim the sweep has something to act on when it ran. A run
+              # that drifted *and* broke would otherwise be told to go and read a
+              # sweep result that does not exist.
+              if [ "${HARNESS:-}" = "broken" ]; then
+                echo
+                echo "The sweep did not run on this attempt, so no new input attribute has been"
+                echo "checked against \`SchemaSweepSuite\` — fix the harness and re-run before"
+                echo "treating the list above as complete."
+              else
+                echo "Any new input attribute needs the sweep's question asked of it and a line"
+                echo "in \`SchemaSweepSuite\`."
+              fi
+            else
+              echo "To act on it: fix the build or the workflow, then re-run the job. Until it"
+              echo "runs, this repository has no weekly evidence either way about upstream."
+            fi
+          } > issue.md
+
+          existing=$(gh issue list --state open --search "$TITLE in:title" \
+            --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file issue.md
+            echo "commented on #$existing"
+          else
+            gh issue create --title "$TITLE" --body-file issue.md
+          fi
+
+      # Reported, not failed. A new PyPSA release is not a defect in this
+      # repository and a red cross on a weekly cron trains people to ignore it;
+      # the issue is the artefact that survives. A *broken generator* does fail,
+      # above, because that one means the schema cannot be read at all.
+      - name: Summarise
+        if: always()
+        run: |
+          if [ "${{ steps.drift.outputs.drifted }}" = "true" ] \
+            || [ "${{ steps.sweep.outputs.clean }}" = "false" ]; then
+            echo "Drift found; see the job summary and the issue."
+          elif [ "${{ steps.sweep.outputs.harness }}" = "broken" ]; then
+            # Not "no drift", which would be a claim, and not "drift found",
+            # which would be the wrong one. The comparison did not happen.
+            echo "The sweep could not run, so this job has no verdict on PyPSA ${{ steps.install.outputs.latest }}; see the issue."
+          else
+            echo "No drift: PyPSA ${{ steps.install.outputs.latest }} declares the same registry as the pinned ${{ steps.install.outputs.pinned }}."
+          fi

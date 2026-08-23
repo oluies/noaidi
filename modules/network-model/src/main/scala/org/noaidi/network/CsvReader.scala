@@ -38,13 +38,36 @@ object CsvReader:
     val files = Files.list(directory).iterator.asScala.toIndexedSeq.map(_.getFileName.toString).sorted
     val csvs  = files.filter(_.endsWith(".csv"))
 
-    val (snapshots, weightings) = readSnapshots(directory.resolve("snapshots.csv"))
+    val (snapshots, snapshotPeriods, weightings) = readSnapshots(directory.resolve("snapshots.csv"))
+    val (periods, periodWeightings) = readInvestmentPeriods(
+      directory.resolve("investment_periods.csv")
+    )
 
     // Split `generators.csv` from `generators-p_max_pu.csv`. Component list
     // names contain underscores but not hyphens, and PyPSA uses the hyphen
     // precisely as this separator.
     val staticFiles = csvs.filterNot(_.contains("-")).filterNot(reserved.contains)
     val seriesFiles = csvs.filter(f => f.contains("-") && !reserved.contains(f))
+
+    // Piecewise breakpoints are not a time series, and taking them for one is
+    // how the first version of this refusal came to be unreachable.
+    //
+    // PyPSA 1.3.0 writes a piecewise cost curve beside its component as
+    // `<list>-<attr>-pw.csv`. That matches the `<list>-<attr>.csv` shape this
+    // reader takes for a series, but nothing else about it fits: the frame is
+    // indexed by *breakpoint* rather than snapshot, and it carries a two-row
+    // header (`name` over `attribute`) because the columns are a MultiIndex. Read
+    // as a series it fails on whichever comes first -- a row count that has no
+    // reason to match the snapshots, or `p_pu` where a float belongs -- and both
+    // messages blame the snapshots for a file that was never about them.
+    //
+    // Refused here rather than in `Lopf`, which is where it started. The reader
+    // is what meets the file, and a model-layer guard keyed off a loaded series
+    // could only ever fire on a file this reader had already failed to parse.
+    // `NetCdfReader` carries the same refusal against the other spelling, because
+    // moving it out of `Lopf` cost the coverage of both readers that one site had.
+    val piecewise = csvs.filter(_.endsWith("-pw.csv")).sorted
+    if piecewise.nonEmpty then throw UnsupportedNetworkFile.piecewise(piecewise)
 
     val seriesByComponent = seriesFiles.groupBy { f =>
       val stem = f.stripSuffix(".csv")
@@ -72,7 +95,9 @@ object CsvReader:
       snapshots = snapshots,
       tables = ListMap.from(tables.map(t => t.spec.name -> t)),
       snapshotWeightings = weightings,
-      investmentPeriods = readInvestmentPeriods(directory.resolve("investment_periods.csv")),
+      snapshotPeriods = snapshotPeriods,
+      investmentPeriods = periods,
+      investmentPeriodWeightings = periodWeightings,
     )
 
   /** Files that are not component tables.
@@ -84,51 +109,86 @@ object CsvReader:
     */
   private val reserved = Set("snapshots.csv", "network.csv", "investment_periods.csv")
 
-  /** The investment periods, or empty where the file is absent.
+  /** The investment periods and their weightings, or empty where absent.
     *
-    * Only the period labels are taken. The `objective` and `years` weightings
-    * beside them matter only to a model that builds multi-period costs, and
-    * this port refuses those networks rather than pricing them — reading the
-    * numbers would suggest otherwise.
+    * `objective` and `years` are read now rather than dropped. They used to be
+    * skipped on the grounds that only a model pricing multi-period costs needs
+    * them — which was true while such a network was refused, and stopped being
+    * true when it stopped being refused. `objective` is the discount factor
+    * applied to everything in the period; `years` is what a global constraint
+    * sums against.
     */
-  private def readInvestmentPeriods(path: Path): IndexedSeq[String] =
-    if !Files.exists(path) then IndexedSeq.empty
-    else
-      val rows = parse(path)
-      if rows.isEmpty then IndexedSeq.empty
-      else
-        val header = rows.head
-        val at     = math.max(0, header.indexOf("period"))
-        rows.tail.collect { case r if at < r.length && r(at).trim.nonEmpty => r(at).trim }
-
-  /** Snapshot labels and their weightings.
-    *
-    * The file is `,snapshot,objective,stores,generators`: a blank index column,
-    * the label, then the weightings. Taking the first field would read the
-    * positional index rather than the timestamp, which happens to look
-    * plausible and is wrong.
-    */
-  private def readSnapshots(path: Path): (IndexedSeq[String], ListMap[String, IArray[Double]]) =
+  private def readInvestmentPeriods(
+      path: Path
+  ): (IndexedSeq[String], ListMap[String, IArray[Double]]) =
     if !Files.exists(path) then (IndexedSeq.empty, ListMap.empty)
     else
       val rows = parse(path)
       if rows.isEmpty then (IndexedSeq.empty, ListMap.empty)
       else
-        val header = rows.head
-        val body   = rows.tail
-        val labelAt = header.indexOf("snapshot") match
-          case -1 => if header.length > 1 then 1 else 0
-          case i  => i
-        val labels = body.map(r => if labelAt < r.length then r(labelAt) else "")
+        val header  = rows.head
+        val at      = math.max(0, header.indexOf("period"))
+        val body    = rows.tail.filter(r => at < r.length && r(at).trim.nonEmpty)
+        val periods = body.map(_(at).trim)
 
         val weightings = header.zipWithIndex
-          .filter((name, i) => i != labelAt && name.nonEmpty)
+          .filter((name, i) => i != at && name.nonEmpty)
           .map { (name, i) =>
             name -> IArray.from(body.map { r =>
               if i < r.length then r(i).trim.toDoubleOption.getOrElse(1.0) else 1.0
             })
           }
-        (labels, ListMap.from(weightings))
+        (periods, ListMap.from(weightings))
+
+  /** Snapshot labels, their periods where there are any, and their weightings.
+    *
+    * A single-period file is `,snapshot,objective,stores,generators`: a blank
+    * index column, the label, then the weightings. Taking the first field would
+    * read the positional index rather than the timestamp, which happens to look
+    * plausible and is wrong.
+    *
+    * A '''multi-period''' file has no `snapshot` column at all. It is
+    * `,period,timestep,objective,stores,generators`, and the two halves of the
+    * index are two columns. The fallback above -- take column 1 when there is no
+    * `snapshot` -- then took `period` for the label, so `investment-periods`
+    * read back as `2030, 2030, 2040, 2040`: two pairs of duplicates, with
+    * `timestep` picked up as a fourth weighting because it was simply "some
+    * other named column". Both halves are read properly now, and neither is a
+    * weighting.
+    */
+  private def readSnapshots(
+      path: Path
+  ): (IndexedSeq[String], IndexedSeq[String], ListMap[String, IArray[Double]]) =
+    if !Files.exists(path) then (IndexedSeq.empty, IndexedSeq.empty, ListMap.empty)
+    else
+      val rows = parse(path)
+      if rows.isEmpty then (IndexedSeq.empty, IndexedSeq.empty, ListMap.empty)
+      else
+        val header  = rows.head
+        val body    = rows.tail
+        val periodAt = header.indexOf("period")
+        // `timestep` is the label only when it is the other half of a pair. A
+        // single-period file could in principle carry a column of that name and
+        // it would not be the index.
+        val labelAt = header.indexOf("snapshot") match
+          case -1 if periodAt >= 0 && header.indexOf("timestep") >= 0 => header.indexOf("timestep")
+          case -1 => if header.length > 1 then 1 else 0
+          case i  => i
+
+        val labels = body.map(r => if labelAt < r.length then r(labelAt) else "")
+        val periods =
+          if periodAt < 0 || periodAt == labelAt then IndexedSeq.empty
+          else body.map(r => if periodAt < r.length then r(periodAt).trim else "")
+
+        val indexColumns = Set(labelAt, if periods.isEmpty then labelAt else periodAt)
+        val weightings = header.zipWithIndex
+          .filter((name, i) => !indexColumns.contains(i) && name.nonEmpty)
+          .map { (name, i) =>
+            name -> IArray.from(body.map { r =>
+              if i < r.length then r(i).trim.toDoubleOption.getOrElse(1.0) else 1.0
+            })
+          }
+        (labels, periods, ListMap.from(weightings))
 
   private def readStatic(path: Path, spec: ComponentSpec): ComponentTable =
     staticTable(parse(path), spec)

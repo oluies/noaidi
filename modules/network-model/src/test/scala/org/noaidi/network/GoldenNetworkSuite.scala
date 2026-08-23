@@ -29,7 +29,72 @@ class GoldenNetworkSuite extends munit.FunSuite:
     // Both numbers come from the pinned install's registry. If a version bump
     // changes them, this failing is the signal to look at the diff.
     assertEquals(schema.components.size, 16)
-    assertEquals(schema.attributeCount, 422)
+    // 422 until PyPSA 1.3.0, which added 32: maintenance scheduling on Generator,
+    // Link and Process, piecewise cost breakpoints, and an optimisable phase
+    // shift range on Transformer.
+    assertEquals(schema.attributeCount, 454)
+  }
+
+  test("a piecewise cost curve is refused by the CSV reader, from PyPSA's own export") {
+    assume(available, "goldens missing")
+    // Against `unsupported/piecewise-cost`, written by `export_to_csv_folder` and
+    // `export_to_netcdf` rather than by hand. That distinction is the whole reason
+    // the fixture exists: the first version of this refusal matched a
+    // `_piecewise` suffix read out of PyPSA's Excel sheet-name table, and the
+    // hand-written CSV in the test agreed with it and passed, while
+    // `_CSVExporter.save_piecewise` writes `<list>-<attr>-pw.csv`.
+    //
+    // The CSV half only, and named that way after a review caught the name
+    // claiming both. `network-model` does not depend on `network-io`, so
+    // `NetCdfReader` is not on this suite's classpath and deleting its guard left
+    // this case green -- while `GapRefusalSuite`'s doc cited it, by that name, as
+    // one of the two covering the gap. The netCDF half is
+    // `NetCdfReaderSuite`'s "a piecewise cost curve is refused rather than read as
+    // a static column"; the two spellings share nothing beyond the exception type,
+    // `generators-marginal_cost-pw.csv` against a `generators_pw_marginal_cost`
+    // variable.
+    val directory = goldens.resolve("unsupported").resolve("piecewise-cost")
+    assert(Files.isDirectory(directory), s"no unsupported fixture at $directory")
+    assert(
+      Files.exists(directory.resolve("generators-marginal_cost-pw.csv")),
+      "the fixture does not carry the CSV file this refusal is keyed to",
+    )
+
+    val fromCsv =
+      intercept[UnsupportedNetworkFile](CsvReader.read(directory, schema, "piecewise-cost"))
+    assert(
+      fromCsv.getMessage.contains("piecewise"),
+      s"refused, but not as a piecewise curve: ${fromCsv.getMessage}",
+    )
+    // Not a row count. Read as a time series the file fails on its header or its
+    // length, and both messages blame the snapshots for a file that is indexed by
+    // breakpoint -- which is the diagnostic this refusal exists to replace.
+    assert(
+      !fromCsv.getMessage.contains("snapshots"),
+      s"refused as a malformed time series rather than as a curve: ${fromCsv.getMessage}",
+    )
+  }
+
+  test("a piecewise-capable attribute is still read as static-or-series") {
+    assume(available, "goldens missing")
+    // PyPSA 1.3.0 widened nine attributes to `static or piecewise or series`, and
+    // the shape they carry is unchanged: a static value with per-entity snapshot
+    // overrides. Reading the new word as a third shape -- or failing to match the
+    // string at all and falling back to `varying` -- is how the overrides would
+    // go missing on a network that sets them.
+    val generator = schema("Generator")
+    assertEquals(generator.require("marginal_cost").variability, Variability.StaticOrSeries)
+    assertEquals(generator.require("efficiency").variability, Variability.StaticOrSeries)
+    assertEquals(generator.require("marginal_cost").valueType, AttributeType.Float)
+    // And the type string really is the new one, read from the file rather than
+    // through `AttributeSpec`, which keeps the parsed shape and not the words.
+    // Without this the assertions above would keep passing against a schema whose
+    // `marginal_cost` had gone back to plain `static or series`, and the parse
+    // they are checking would no longer be exercised by anything.
+    val declared = ujson
+      .read(Files.readString(goldens.resolve("schema.json")))("Generator")("attributes")
+    assertEquals(declared("marginal_cost")("type").str, "static or piecewise or series")
+    assertEquals(declared("efficiency")("type").str, "static or piecewise or series")
   }
 
   test("attribute variability is read as three distinct cases") {
@@ -70,23 +135,16 @@ class GoldenNetworkSuite extends munit.FunSuite:
     *
     * The manifest is the authority for which networks exist, so a fixture added
     * to `generate_goldens.py` is covered here without anyone remembering to.
-    */
-  /** Every golden network except the multi-period ones.
     *
-    * A multi-period network's snapshots are `(period, timestep)` pairs, and
-    * `Network` carries a flat list of labels — so the reader takes the `period`
-    * column and produces duplicates. Excluding them here is not a suppressed
-    * failure: it is the model-layer statement of the same limitation
-    * `Periods.reject` enforces at the solve layer, and the fixture exists to
-    * hold PyPSA's answer for the network this port declines to model.
-    *
-    * Read off the manifest's `multi_period` flag rather than a name, so a second
-    * such fixture is covered without anyone remembering to add it.
+    * The multi-period networks are included. They used to be excluded on the
+    * manifest's `multi_period` flag, because `Network` held a flat list of
+    * snapshot labels and a `(period, timestep)` index read back as duplicates.
+    * `Network` carries both halves now, so the exclusion went with the
+    * limitation — the flag stays in the manifest as a description of the
+    * fixture, and nothing reads it here.
     */
   private lazy val goldenNetworks: List[String] =
-    manifest("networks").obj.collect {
-      case (name, entry) if !entry.obj.get("multi_period").exists(_.bool) => name
-    }.toList.sorted
+    manifest("networks").obj.keys.toList.sorted
 
   goldenNetworks.foreach { name =>
     test(s"$name loads with the component counts PyPSA reported") {
@@ -105,7 +163,15 @@ class GoldenNetworkSuite extends munit.FunSuite:
       // because a snapshot label need not be a timestamp at all. `ac-pf-pv` uses
       // plain integers, and rendering those as JSON numbers described the
       // in-memory index rather than the file.
-      assertEquals(n.snapshots, expectedSnapshots, s"$name: snapshot labels")
+      // Through `snapshotLabel` rather than `snapshots` directly, because a
+      // multi-period index has two halves and the manifest records the pair as
+      // Python prints it. On a flat index this is the label unchanged, so the
+      // check is no weaker for the twenty-one networks that have one.
+      assertEquals(
+        n.snapshots.indices.map(n.snapshotLabel).toIndexedSeq,
+        expectedSnapshots,
+        s"$name: snapshot labels",
+      )
 
       expected("components").obj.foreach { (componentName, info) =>
         val table = n.table(componentName)

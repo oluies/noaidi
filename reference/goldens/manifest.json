@@ -132,6 +132,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -144,7 +148,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p": [
@@ -234,6 +239,7 @@
       "x_pu_eff",
       "r_pu_eff",
       "s_nom_opt",
+      "capital_cost_piecewise_opt",
       "v_nom"
      ],
      "varying": {
@@ -299,6 +305,10 @@
       "length",
       "terrain_factor",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "min_up_time",
@@ -311,7 +321,8 @@
       "ramp_limit_shut_down",
       "delay",
       "cyclic_delay",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p": [
@@ -564,6 +575,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -576,7 +591,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p": [
@@ -666,6 +682,7 @@
       "x_pu_eff",
       "r_pu_eff",
       "s_nom_opt",
+      "capital_cost_piecewise_opt",
       "v_nom"
      ],
      "varying": {
@@ -731,6 +748,10 @@
       "length",
       "terrain_factor",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "min_up_time",
@@ -743,7 +764,8 @@
       "ramp_limit_shut_down",
       "delay",
       "cyclic_delay",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p": [
@@ -963,6 +985,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -975,7 +1001,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p_max_pu": [
@@ -1052,7 +1079,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -1098,6 +1126,10 @@
       "length",
       "terrain_factor",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "min_up_time",
@@ -1110,7 +1142,8 @@
       "ramp_limit_shut_down",
       "delay",
       "cyclic_delay",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -1274,6 +1307,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -1286,7 +1323,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p_set": [
@@ -1341,7 +1379,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -1472,6 +1511,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -1484,7 +1527,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "marginal_cost": [
@@ -1615,6 +1659,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -1627,7 +1675,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -1679,7 +1728,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -1756,6 +1806,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -1861,6 +1913,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -1873,7 +1929,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -1923,7 +1980,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2000,6 +2058,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -2107,6 +2167,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -2119,7 +2183,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2244,6 +2309,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -2256,7 +2325,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2299,6 +2369,10 @@
       "length",
       "terrain_factor",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "min_up_time",
@@ -2311,7 +2385,8 @@
       "ramp_limit_shut_down",
       "delay",
       "cyclic_delay",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2373,6 +2448,234 @@
      ],
      "carrier": "AC",
      "slack_bus": "b"
+    }
+   ]
+  },
+  "link-delay-wrap": {
+   "components": {
+    "Bus": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "marginal_cost"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Link": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "p_nom",
+      "delay",
+      "cyclic_delay"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "carrier",
+      "efficiency",
+      "active",
+      "build_year",
+      "lifetime",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_set",
+      "p_init",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "stand_by_cost",
+      "length",
+      "terrain_factor",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "delay",
+      "cyclic_delay",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {
+      "efficiency": [
+       "wrap"
+      ]
+     }
+    },
+    "Load": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "bus"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "dw",
+       "dl"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "multi_period": false,
+   "name": "link-delay-wrap",
+   "snapshots": [
+    "0",
+    "1",
+    "2",
+    "3"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "a"
+     ],
+     "carrier": "AC",
+     "slack_bus": "a"
+    },
+    {
+     "buses": [
+      "b"
+     ],
+     "carrier": "AC",
+     "slack_bus": "b"
+    },
+    {
+     "buses": [
+      "c"
+     ],
+     "carrier": "AC",
+     "slack_bus": "c"
+    },
+    {
+     "buses": [
+      "d"
+     ],
+     "carrier": "AC",
+     "slack_bus": "d"
     }
    ]
   },
@@ -2443,6 +2746,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -2455,7 +2762,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2504,7 +2812,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2630,6 +2939,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -2642,7 +2955,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2691,7 +3005,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -2768,6 +3083,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -2879,6 +3196,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -2891,7 +3212,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "ramp_limit_up": [
@@ -2940,6 +3262,10 @@
       "length",
       "terrain_factor",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "min_up_time",
@@ -2952,7 +3278,8 @@
       "ramp_limit_shut_down",
       "delay",
       "cyclic_delay",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -3118,6 +3445,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -3130,7 +3461,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p_max_pu": [
@@ -4130,20 +4462,20 @@
       "length",
       "num_parallel",
       "sub_network",
-      "wkt_srid_4326",
       "voltage",
       "from_relation",
       "r_ohmkm",
-      "ref",
       "cables",
       "x_ohmkm",
       "wires",
-      "osm_name",
-      "operator",
       "c_nfkm",
       "frequency",
       "length_m",
-      "i_th_max_a"
+      "i_th_max_a",
+      "wkt_srid_4326",
+      "ref",
+      "osm_name",
+      "operator"
      ],
      "in_memory_columns": [
       "bus0",
@@ -4181,20 +4513,21 @@
       "x_pu_eff",
       "r_pu_eff",
       "s_nom_opt",
-      "wkt_srid_4326",
+      "capital_cost_piecewise_opt",
       "voltage",
       "from_relation",
       "r_ohmkm",
-      "ref",
       "cables",
       "x_ohmkm",
       "wires",
-      "osm_name",
-      "operator",
       "c_nfkm",
       "frequency",
       "length_m",
-      "i_th_max_a"
+      "i_th_max_a",
+      "wkt_srid_4326",
+      "ref",
+      "osm_name",
+      "operator"
      ],
      "varying": {}
     },
@@ -4754,7 +5087,8 @@
       "efficiency_dispatch",
       "standing_loss",
       "inflow",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -4807,6 +5141,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -5513,6 +5849,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -5525,7 +5865,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -5574,7 +5915,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -5701,6 +6043,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -5713,7 +6059,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -5764,7 +6111,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -5841,6 +6189,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -5946,6 +6296,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -5958,7 +6312,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "marginal_cost": [
@@ -6040,7 +6395,8 @@
       "efficiency_dispatch",
       "standing_loss",
       "inflow",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "inflow": [
@@ -6172,6 +6528,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -6184,7 +6544,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "p_max_pu": [
@@ -6262,7 +6623,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -6307,6 +6669,10 @@
       "length",
       "terrain_factor",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "min_up_time",
@@ -6319,7 +6685,8 @@
       "ramp_limit_shut_down",
       "delay",
       "cyclic_delay",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -6404,7 +6771,8 @@
       "efficiency_dispatch",
       "standing_loss",
       "inflow",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "inflow": [
@@ -6535,6 +6903,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -6547,7 +6919,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {
       "marginal_cost": [
@@ -6624,7 +6997,8 @@
       "active",
       "build_year",
       "lifetime",
-      "e_nom_opt"
+      "e_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -6730,6 +7104,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -6742,7 +7120,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -6791,7 +7170,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -6867,6 +7247,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -6971,6 +7353,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -6983,7 +7369,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -7033,7 +7420,8 @@
       "b_pu",
       "x_pu_eff",
       "r_pu_eff",
-      "s_nom_opt"
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -7115,6 +7503,8 @@
       "tap_side",
       "tap_position",
       "phase_shift",
+      "phase_shift_min",
+      "phase_shift_max",
       "active",
       "build_year",
       "lifetime",
@@ -7225,6 +7615,10 @@
       "fom_cost",
       "efficiency",
       "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
       "start_up_cost",
       "shut_down_cost",
       "stand_by_cost",
@@ -7237,7 +7631,8 @@
       "ramp_limit_start_up",
       "ramp_limit_shut_down",
       "weight",
-      "p_nom_opt"
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
      ],
      "varying": {}
     },
@@ -7337,10 +7732,34 @@
    "count": 14
   }
  },
+ "unsupported": {
+  "piecewise-cost": {
+   "csv": [
+    "buses-marginal_price.csv",
+    "buses.csv",
+    "crs.json",
+    "generators-marginal_cost-pw.csv",
+    "generators-p.csv",
+    "generators.csv",
+    "loads-p.csv",
+    "loads-p_set.csv",
+    "loads.csv",
+    "meta.json",
+    "network.csv",
+    "snapshots.csv",
+    "sub_networks.csv"
+   ],
+   "netcdf": "piecewise-cost.nc"
+  },
+  "piecewise-index-only": {
+   "netcdf": "piecewise-index-only.nc",
+   "synthetic": "no exporter writes this; it pins the detection filter, not the format"
+  }
+ },
  "versions": {
   "numpy": "2.5.1",
   "pandas": "3.0.5",
-  "pypsa": "1.2.4",
+  "pypsa": "1.3.0",
   "python": "3.13.14"
  }
 }

@@ -157,7 +157,7 @@ def ac_pf_pv():
 # starts succeeding is reported too -- which is how a PyPSA upgrade that fixed the
 # limitation would announce itself instead of going unnoticed.
 KNOWN_UNSUPPORTED = {
-    ("ac-dc-meshed", "pf"): "PyPSA 1.2.4 raises AttributeError inside its own sub-network handling",
+    ("ac-dc-meshed", "pf"): "PyPSA raises AttributeError inside its own sub-network handling",
     ("ac-dc-dispatch", "pf"): "same as ac-dc-meshed, from which it is derived",
     ("ac-dc-co2", "pf"): "same as ac-dc-meshed, from which it is derived",
 }
@@ -290,8 +290,15 @@ def transformer_taps():
           s_nom=400.0, model="pi", tap_ratio=0.94, tap_side=1)
     n.add("Transformer", "tt", bus0="hv1", bus1="lv2", x=0.15, r=0.006,
           s_nom=300.0, model="t", g=0.004, b=0.02)
+    # 8 degrees, not the 12 this carried until PyPSA 1.3.0. The shift entered the
+    # LOPF's Kirchhoff row in that release, and 12 forces a circulating flow the
+    # network cannot carry -- the linear flow puts -431 MW through `tshift`,
+    # which is rated 350, and the optimisation has nowhere else to put it. The
+    # network is infeasible from 10.007 degrees up, so the fixture stopped having
+    # a dispatch to compare at all. At 8 the shift still reverses `tshift` --
+    # +57 MW at zero against -268 here -- with 82 MW of headroom on the rating.
     n.add("Transformer", "tshift", bus0="hv2", bus1="lv1", x=0.11, r=0.005,
-          s_nom=350.0, model="pi", tap_ratio=1.03, tap_side=0, phase_shift=12.0)
+          s_nom=350.0, model="pi", tap_ratio=1.03, tap_side=0, phase_shift=8.0)
 
     n.add("Generator", "g", bus="hv1", control="Slack", p_nom=900.0, marginal_cost=10.0)
     n.add("Generator", "gl", bus="lv2", p_nom=300.0, marginal_cost=60.0)
@@ -427,33 +434,114 @@ def inactive_removed():
     return n
 
 
-def phase_shift():
-    """A phase-shifting transformer, which the linear flow and the LOPF disagree about.
+def piecewise_cost():
+    """A generator whose marginal cost is a piecewise curve, new in PyPSA 1.3.0.
 
-    `transformer-levels` with 30 degrees on one of its two transformers, and the
+    Exported under `unsupported/` rather than `networks/`: `CsvReader` refuses a
+    network carrying breakpoints, so this is a fixture for a *refusal* to read,
+    not a network any L1 suite can load.
+
+    It exists for its file name and its shape, both of which were guessed wrong
+    the first time. The refusal originally matched a `_piecewise` suffix taken
+    from PyPSA's *Excel* sheet-name table, which maps long sheet names to short
+    ones for Excel's 31-character limit and describes neither end of the CSV
+    path. `_CSVExporter.save_piecewise` writes ``f"{list_name}-{attr}-pw.csv"``,
+    so the real file is `generators-marginal_cost-pw.csv` -- and it carries a
+    **two-row header**, `name` over `attribute`, because the breakpoints are a
+    MultiIndex-columned frame indexed by breakpoint rather than by snapshot:
+
+        name,curved,curved
+        attribute,p_pu,marginal_cost
+        breakpoint,,
+        0,0.0,0.0
+        1,0.5,300.0
+        2,1.0,1200.0
+
+    A hand-written fixture agreed with the misreading and passed. This one comes
+    from PyPSA, and `n.optimize()` is run on it here so the frame is known to be
+    one PyPSA accepts rather than merely one it will write back out.
+
+    `x` is `p_pu` and `y` is `marginal_cost`, per `piecewise_attrs("Generator")`.
+    `curved` is cheaper than `flat` on its static `marginal_cost` and dearer over
+    most of the curve, so a model that dropped the breakpoints and priced the
+    static column would dispatch it and come out below the truth.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "b")
+    n.add("Load", "d", bus="b", p_set=[100.0, 140.0, 90.0])
+    n.add("Generator", "flat", bus="b", control="Slack", p_nom=200.0, marginal_cost=40.0)
+    n.add("Generator", "curved", bus="b", p_nom=200.0, marginal_cost=5.0)
+
+    columns = pd.MultiIndex.from_product(
+        [["curved"], ["p_pu", "marginal_cost"]], names=["name", "attribute"]
+    )
+    breakpoints = pd.DataFrame(
+        [[0.0, 0.0], [0.5, 300.0], [1.0, 1200.0]], columns=columns
+    )
+    breakpoints.index.name = "breakpoint"
+    n.c.Generator.piecewise["marginal_cost"] = breakpoints
+
+    # Solved here and nowhere else. This fixture records no results -- the port
+    # refuses the network -- so the only check that the frame is well formed is
+    # that PyPSA's own optimiser accepts it. Built wrong, it raises a KeyError
+    # about an index level and still exports a file that looks plausible.
+    n.optimize(solver_name="highs")
+    return n
+
+
+def phase_shift():
+    """A phase-shifting transformer, which both L2 models honour.
+
+    `transformer-levels` with 9 degrees on one of its two transformers, and the
     cycle that fixture was built around is what makes the shift observable: it
     enters the flow as a constant injection, so a radial network would absorb it
     into the slack and show nothing.
 
-    ==The two L2 models genuinely differ, in PyPSA==
+    ==This fixture used to pin a disagreement, and no longer can==
 
-    Worth stating because it looks like a bug in whichever one is read second.
-    `n.lpf()` applies the shift -- `calculate_B_H` builds
+    Until PyPSA 1.3.0 the two L2 models differed, and the difference was the
+    point of the fixture. `n.lpf()` applied the shift -- `calculate_B_H` builds
     `p_branch_shift = -b * phase_shift` in radians and solves
-    `B theta = p - K p_branch_shift` -- so t1 goes from +150.66 MW to
-    **-840.53 MW**, reversing direction and carrying 5.6 times the power.
-
-    `n.optimize()` does not. Its Kirchhoff row is `sum(x_l s_l) == 0` with no
-    shift term at all, so the optimised flows are **identical** at 0 and 30
-    degrees. That is PyPSA's own inconsistency, not an approximation this port
-    chose, and reproducing it means the LOPF golden here must match the
+    `B theta = p - K p_branch_shift`. `n.optimize()` did not: its Kirchhoff row
+    was `sum(x_l s_l) == 0` with no shift term, so the optimised flows were
+    *identical* at 0 and 30 degrees, and the LOPF golden here matched the
     unshifted one exactly.
 
-    So this fixture pins two different things at once: that the linear flow
-    honours the shift, and that the optimisation does not.
+    1.3.0 closed that gap. `define_kirchhoff_voltage_constraints` now builds
+    `sum_l C_lk (x_l s_l + phase_shift_l) = 0` with the shift in radians, so the
+    optimisation honours it too. What this fixture pins is that the shift is in
+    the row at all: dropping the term leaves a model that balances every bus and
+    returns `Optimal` on a dispatch that no phase shifter would produce.
+
+    The two models are still not interchangeable, and at 9 degrees this fixture
+    shows why. They agree exactly at the first snapshot. At the other two the
+    linear flow puts 402.4 and 403.8 MW through `t2`, which is rated 400, and the
+    LOPF -- which has the rating and a choice -- turns on the 60/MWh generator at
+    `lv2` rather than overload it. That is the difference between an optimisation
+    and a flow calculation, not a disagreement about phase shifters.
+
+    ==Why 9 degrees and not 30==
+
+    30 is now infeasible. The shift forces a circulating flow around the cycle,
+    and past 10.044 degrees that flow exceeds `t2`'s 400 MW rating with nowhere
+    else for it to go -- so the fixture would have had no dispatch to compare,
+    only a status.
+
+    10 is feasible and 9 is used anyway: 10 sits 0.04 degrees from the edge,
+    which is a fixture that a change in nothing more than solver tolerance could
+    turn into an `Infeasible` nobody asked for. 9 leaves a whole degree.
+
+    It is a better fixture than 30 was even setting feasibility aside. At 9 the
+    rating on `t2` binds, so the shift can no longer be absorbed by re-routing
+    alone and the *objective* moves with it -- 8,524.43 against 7,800 unshifted.
+    At 8 degrees and below nothing binds and the shift is pure re-routing at
+    constant cost -- 7,800 at 0, 2, 4, 6, 7 and 8 alike -- which an
+    objective-only comparison cannot see. `t1` reverses
+    as well, +150.66 MW at zero against -146.70 here.
     """
     n = transformer_levels()
-    n.transformers.loc["t1", "phase_shift"] = 30.0
+    n.transformers.loc["t1", "phase_shift"] = 9.0
     return n
 
 
@@ -635,8 +723,12 @@ def link_delay():
     returned the 500 either way.
 
     `cyclic_delay` is off, so energy still in flight at the end of the horizon
-    is lost rather than wrapping to the beginning. With it on, the model would
-    have a second thing to get right, and the refusal covers both.
+    is lost rather than wrapping to the beginning.
+
+    What this fixture cannot gate is the shift itself. The delay here makes the
+    link *useless*, so an implementation that deleted the link outright would
+    reproduce every number in it. `link-delay-wrap` is the one that makes the
+    shift carry something.
     """
     n = pypsa.Network()
     n.set_snapshots(range(4))
@@ -648,6 +740,90 @@ def link_delay():
     n.add("Link", "tie", bus0="a", bus1="b", p_nom=150.0, efficiency=1.0,
           delay=1, cyclic_delay=False)
     n.add("Load", "d", bus="b", p_set=[100.0, 0.0, 0.0, 0.0])
+    return n
+
+
+def link_delay_wrap():
+    """A delay that is used rather than merely blocking, and the wrap.
+
+    `link-delay` proves the refusal was worth having and nothing more: its delay
+    makes the only route to the load useless, so every number in it is
+    reproduced by an implementation that deletes the link. Four things have to
+    bind before the shift itself is gated, and each is a separate wrong reading
+    that would otherwise pass.
+
+    ==The delay is elapsed time, not a snapshot count==
+
+    `delay` is declared in "snapshot weighting units" and measured against
+    `snapshot_weightings.generators` -- the same column the energy budgets read,
+    not the `objective` one beside it. Here `generators` is 2.0, so both links'
+    delays are half what they look like: `wrap` at 2 reaches back one snapshot
+    and `lag` at 4 reaches back two. An implementation counting snapshots reaches
+    back two and four instead.
+
+    The `objective` weighting is 1, 1, 3, 1 rather than flat, so *when* the cheap
+    unit runs changes what it costs. Without that, reaching back the wrong number
+    of snapshots lands on the same objective and only the dispatch frames can see
+    it.
+
+    ==`cyclic_delay` wraps, and the mask is not a zero==
+
+    `wrap` is cyclic. Its load sits at the first snapshot and the only source of
+    energy for it is the *last* one, which is a snapshot that has not happened
+    yet in every reading but PyPSA's -- 500 against the 9,000 of running the
+    local unit instead.
+
+    `lag` is not cyclic, and its first two snapshots have no source at all. PyPSA
+    still computes an index for them and discards it through a validity mask; the
+    index it discards is 0. Keeping it makes the link instantaneous at the first
+    snapshot, and since nothing at `d` can absorb the arrival, that pins the
+    link's flow to zero and the load at the third snapshot falls to `local2`:
+    24,000 rather than 400.
+
+    ==Efficiency is read at the arrival snapshot==
+
+    `wrap`'s efficiency is 0.5 at the first snapshot and 1.0 elsewhere, and the
+    constraint multiplies the *shifted* flow by the efficiency of the snapshot it
+    arrives in -- so 200 MW must leave at the fourth snapshot for 100 MW to
+    arrive at the first. Reading the departure snapshot's efficiency instead
+    sends 100 and pays 500 where PyPSA pays 1,000.
+
+    PyPSA disagrees with itself here, which is worth recording rather than
+    smoothing over. `_apply_delay_shift` shifts `-p0 * efficiency` as a product
+    when it writes the results back, so `links_t.p1` reports -200 at the first
+    snapshot against the 100 its own balance row received. The constraint is what
+    the objective and the dispatch come from, and it is what this port matches;
+    nothing here reads `p1`.
+
+    The two links sit on disjoint sub-networks so that neither can serve the
+    other's load. Both loads are single-snapshot, which leaves the whole schedule
+    forced rather than merely optimal: the arrival at a bus with no load has to be
+    zero, so every other flow is pinned at zero too.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    n.snapshot_weightings.loc[:, "generators"] = 2.0
+    n.snapshot_weightings.loc[:, "objective"] = [1.0, 1.0, 3.0, 1.0]
+    n.snapshot_weightings.loc[:, "stores"] = 1.0
+
+    # Cyclic: the load at the first snapshot is served from the last one.
+    n.add("Bus", "a", v_nom=110.0)
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Generator", "cheap", bus="a", p_nom=400.0, marginal_cost=5.0)
+    n.add("Generator", "local", bus="b", p_nom=400.0, marginal_cost=90.0)
+    n.add("Link", "wrap", bus0="a", bus1="b", p_nom=250.0, delay=2,
+          cyclic_delay=True, efficiency=[0.5, 1.0, 1.0, 1.0])
+    n.add("Load", "dw", bus="b", p_set=[100.0, 0.0, 0.0, 0.0])
+
+    # Non-cyclic: the first two snapshots have no source, and the load at the
+    # third is served from the first.
+    n.add("Bus", "c", v_nom=110.0)
+    n.add("Bus", "d", v_nom=110.0)
+    n.add("Generator", "cheap2", bus="c", p_nom=400.0, marginal_cost=4.0)
+    n.add("Generator", "local2", bus="d", p_nom=400.0, marginal_cost=80.0)
+    n.add("Link", "lag", bus0="c", bus1="d", p_nom=150.0, delay=4,
+          cyclic_delay=False)
+    n.add("Load", "dl", bus="d", p_set=[0.0, 0.0, 100.0, 0.0])
     return n
 
 
@@ -934,6 +1110,7 @@ NETWORKS = {
     "energy-budget": energy_budget,
     "investment-periods": investment_periods,
     "link-delay": link_delay,
+    "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
@@ -1125,17 +1302,18 @@ def capture_network(name: str, build) -> dict:
         # in-memory index rather than the file it is supposed to be checked
         # against.
         "snapshots": [str(s) for s in n.snapshots],
-        # Multi-period networks are marked so the model-level suites can skip
-        # them by data rather than by name. Their snapshots are `(period,
-        # timestep)` pairs, which the port's `Network` does not represent: it
-        # carries a flat list of labels, so the CSV reader takes the `period`
-        # column and produces duplicates, the writer cannot reproduce the file,
-        # and the netCDF export has no `snapshots_snapshot` dataset to read.
+        # Multi-period networks are marked. This used to be a *skip* flag: their
+        # snapshots are `(period, timestep)` pairs and the port's `Network` held
+        # a flat list of labels, so the CSV reader took the `period` column and
+        # produced duplicates, the writer could not reproduce the file, and the
+        # netCDF export has no `snapshots_snapshot` dataset at all. Three suites
+        # excluded them on this flag.
         #
-        # That is not an oversight the fixture should paper over. It is the
-        # reason `Periods.reject` refuses these networks, and the marker keeps
-        # the refusal's evidence -- PyPSA's own answer -- in the goldens without
-        # claiming the model layer can hold one.
+        # `Network.snapshotPeriods` carries the other half now and all three
+        # suites cover these fixtures, so nothing skips on it. Kept because it is
+        # a true and useful description of the fixture, and because a reader of
+        # the manifest should be able to tell which networks have periods without
+        # parsing snapshots.csv.
         "multi_period": len(getattr(n, "investment_periods", [])) > 0,
         "components": {},
     }
@@ -1282,7 +1460,7 @@ def capture_network(name: str, build) -> dict:
     except _Diverged:
         pass  # already recorded above
     except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
-        # ac-dc-meshed lands here: PyPSA 1.2.4 raises AttributeError inside its
+        # ac-dc-meshed lands here: PyPSA raises AttributeError inside its
         # own sub-network handling. Recorded so the absence is visibly PyPSA's
         # rather than an oversight in this script.
         results["pf"] = {"error": f"{type(exc).__name__}: {exc}"}
@@ -1430,6 +1608,105 @@ def write_standard_types(out: Path) -> dict:
     return written
 
 
+def write_unsupported(out: Path) -> dict:
+    """CSV and netCDF exports of networks the port refuses, for the refusals to read.
+
+    Not under `networks/`, and the distinction is the point. Everything there is
+    a network `CsvReader` must load; these are networks it must **turn away**, so
+    enumerating them alongside the others would fail every L1 suite that walks
+    the manifest.
+
+    They are generated rather than hand-written for the reason the goldens exist
+    at all: a hand-written CSV only confirms agreement with your reading of the
+    format. This directory exists because that failed. The first version of the
+    piecewise refusal matched a `_piecewise` suffix taken from PyPSA's *Excel*
+    sheet-name table, and the test hand-wrote a file with that name and passed --
+    while `_CSVExporter.save_piecewise` writes ``f"{list_name}-{attr}-pw.csv"``
+    with a two-row header, which the refusal did not match and the reader could
+    not parse.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    written = {}
+    for name, build in UNSUPPORTED_NETWORKS.items():
+        target = out / name
+        if target.exists():
+            shutil.rmtree(target)
+        n = build()
+        print(f"  {name}: CSV (unsupported)")
+        n.export_to_csv_folder(str(target))
+        # And netCDF, because this port has two readers and both feed the same
+        # model. The refusal these fixtures exist for was first written against
+        # one of them, which is the same mistake as writing it against a filename
+        # read out of the source: a guard that covers the format you happened to
+        # look at. The two spellings are not alike -- CSV gets
+        # `<list>-<attr>-pw.csv`, netCDF gets a `<list>_pw_<attr>` variable with
+        # its own breakpoint dimension -- so each reader needs its own, and each
+        # needs a real file to be tested against.
+        print(f"  {name}: netCDF (unsupported)")
+        n.export_to_netcdf(str(out / f"{name}.nc"))
+        # Recorded as two artefacts rather than one flat list. The netCDF file is
+        # a *sibling* of the CSV directory, so appending its name to that
+        # directory's listing asserted `unsupported/<name>/<name>.nc`, a path that
+        # does not exist -- and left the list unsorted, unlike every other file
+        # list in the manifest.
+        written[name] = {
+            "csv": sorted(f.name for f in target.iterdir()),
+            "netcdf": f"{name}.nc",
+        }
+    written.update(write_synthetic_unsupported(out))
+    return written
+
+
+def write_synthetic_unsupported(out: Path) -> dict:
+    """Shapes no exporter produces, for the refusals that must survive them.
+
+    Separate from `write_malformed` on purpose, and the reason is the distinction
+    `UnsupportedNetworkFile` exists to draw. `binary/malformed` is what three
+    places -- that type's scaladoc, NOTES, and `write_malformed`'s own docstring
+    -- point at to *define* "broken file", and everything in it raises
+    `MalformedNetwork`. A file that is perfectly well formed and merely unmodelled
+    raises the other type, so putting one there would make the directory a
+    counterexample to the boundary it anchors.
+
+    Separate from the exports above too, and labelled `synthetic` in the manifest,
+    because it is not evidence about what PyPSA writes. It is a hypothesis about
+    what PyPSA might one day write, and the goldens' whole argument is that those
+    two are not interchangeable.
+    """
+    import xarray as xr
+
+    # A piecewise curve carrying only its index variables.
+    #
+    # `save_piecewise` always writes the value variable beside its indices, so
+    # nothing PyPSA produces reaches this branch -- and `NetCdfReader` detects on
+    # the whole `<list>_pw_<attr>` family rather than on the value variable alone
+    # precisely so that a renamed value variable, a partial export or a future
+    # spelling still refuses instead of falling through to the static-column
+    # length check. The alternative to a synthetic fixture is an unexercised
+    # guard.
+    xr.Dataset(
+        {
+            "snapshots_snapshot": ("snapshots", np.array([0, 1])),
+            "generators_pw_marginal_cost_i": (
+                "breakpoint",
+                np.array(["curved"], dtype=object),
+            ),
+        },
+        coords={"snapshots": np.array([0, 1]), "breakpoint": np.array([0])},
+    ).to_netcdf(out / "piecewise-index-only.nc")
+
+    return {
+        "piecewise-index-only": {
+            "netcdf": "piecewise-index-only.nc",
+            "synthetic": "no exporter writes this; it pins the detection filter, not the format",
+        }
+    }
+
+
+UNSUPPORTED_NETWORKS = {
+    "piecewise-cost": piecewise_cost,
+}
+
 def write_malformed(out: Path) -> None:
     """Deliberately broken netCDF files, for the reader's error paths.
 
@@ -1472,10 +1749,55 @@ def write_malformed(out: Path) -> None:
         coords={"snapshots": np.array([0, 1])},
     ).to_netcdf(out / "bad-time-unit.nc")
 
+
     print(f"  wrote malformed fixtures to {out}")
 
 
+def write_schema_only(target: Path) -> int:
+    """Just `schema.json`, for checking a PyPSA this repository is not pinned to.
+
+    The drift workflow installs the *latest* PyPSA and needs the component
+    registry out of it, and nothing else: the networks take minutes and several
+    of them call a solver, none of which says anything about whether upstream
+    moved an attribute. It also must not touch `goldens/`, because a schema from
+    an unpinned version is not a golden -- it is the thing a golden gets compared
+    against.
+
+    Writing the same shape as `main` does, so `schema_drift.py` and the Scala
+    sweep read one format regardless of which produced the file.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(capture_reference_schema(), indent=1, sort_keys=True))
+    print(f"wrote {target}")
+    print(f"pypsa {pypsa.__version__}, pandas {pd.__version__}, python {sys.version.split()[0]}")
+    return 0
+
+
+USAGE = "usage: generate_goldens.py [--schema-only PATH]"
+
+
 def main() -> int:
+    # Deliberately hand-rolled rather than argparse: there is exactly one flag,
+    # and it exists to make the file usable by the drift workflow without giving
+    # anyone a way to half-regenerate the goldens.
+    #
+    # PATH is required rather than defaulting into `goldens/`. A default there
+    # would be exactly the half-regeneration this comment claims to prevent:
+    # `schema.json` rewritten from whatever PyPSA the invoking venv happens to
+    # hold while `manifest.json` still records the pinned one, so the schema and
+    # the recorded pin disagree and every schema-driven suite reads an unpinned
+    # schema believing it is the golden. Regenerating the goldens is the no-flag
+    # path, which rewrites the manifest alongside them.
+    argv = sys.argv[1:]
+    if argv[:1] == ["--schema-only"]:
+        if len(argv) == 2:
+            return write_schema_only(Path(argv[1]))
+        print(USAGE, file=sys.stderr)
+        return 2
+    if argv:
+        print(USAGE, file=sys.stderr)
+        return 2
+
     OUT.mkdir(parents=True, exist_ok=True)
 
     manifest = {
@@ -1506,6 +1828,7 @@ def main() -> int:
                 unexpected_successes.append(f"{name}/{stage} succeeded, but is listed in KNOWN_UNSUPPORTED")
 
     write_malformed(OUT / "binary" / "malformed")
+    manifest["unsupported"] = write_unsupported(OUT / "unsupported")
     manifest["standard_types"] = write_standard_types(OUT / "standard_types")
 
     reference = capture_reference_schema()

@@ -887,20 +887,33 @@ gap here was found at the moment some code had to decide what to do with a value
 this one had no such moment. Searching for attributes the schema declares and the
 port never mentions would have found it, and nothing else in the process would.
 
-### PyPSA's own two models disagree
+### PyPSA's own two models disagreed, until 1.3.0
 
-Worth knowing before concluding either is broken. `n.lpf()` applies the shift.
-`n.optimize()` does not: its Kirchhoff row is `Σ x_l s_l = 0` with no shift term,
-so the optimised flows are **identical** at 0° and 30°.
+Worth knowing before concluding either is broken. Through 1.2.4 `n.lpf()` applied
+the shift and `n.optimize()` did not: its Kirchhoff row was `Σ x_l s_l = 0` with
+no shift term, so the optimised flows were **identical** at 0° and 30°.
 
-So the LOPF here was never wrong — it matches PyPSA including this omission — and
-`phase-shift` pins both halves: that the linear flow honours the shift, and that
-the optimisation does not.
+So the LOPF here was never wrong — it matched PyPSA including this omission — and
+`phase-shift` pinned both halves: that the linear flow honours the shift, and
+that the optimisation does not.
 
-The AC path refused it for a long time — `Y` needs `exp(jφ)` on one off-diagonal
-and its conjugate on the other, which is asymmetry rather than scaling — and the
-golden recorded an answer the port declined to compute. It is now modelled; see
-*The AC transformer model* below for what that turned out to cost.
+**PyPSA 1.3.0 closed it**, and the pin bump is where this port had to follow.
+`define_kirchhoff_voltage_constraints` now builds
+
+```
+Σ_l C_lk (x_l s_l + φ_l) = 0        (φ in radians, transformers only)
+```
+
+so the shift moved from being absent to being a constant on the right-hand side,
+and a port that kept the old row would have gone on returning the unshifted
+dispatch against a golden that no longer holds it. That is the whole compatibility
+break of the release for this repository — see *PyPSA 1.3.0* below.
+
+The AC path refused the shift for a long time — `Y` needs `exp(jφ)` on one
+off-diagonal and its conjugate on the other, which is asymmetry rather than
+scaling — and the golden recorded an answer the port declined to compute. It is
+now modelled; see *The AC transformer model* below for what that turned out to
+cost.
 
 ## Ramp limits and energy budgets: the same shape, twice more
 
@@ -1068,27 +1081,440 @@ restriction, which makes the answer cheaper, while the discounting and period
 weightings push the other way — the error does not even have a reliable sign.
 Multi-period is a feature with its own goldens, not a fix.
 
-`Network` now carries `investmentPeriods`, read from the file that was being
-skipped, and `Periods.reject` refuses on it from both `Lopf` and
-`UnitCommitment` — a single-bus multi-period network reaches the second entry
-point and not the first. Delayed links are refused in `Lopf`, which is the only
-model that builds a Link at all.
+`Network` gained `investmentPeriods`, read from the file that was being skipped,
+and `Periods.reject` refused on it from both `Lopf` and `UnitCommitment` — a
+single-bus multi-period network reaches the second entry point and not the first.
+Delayed links were refused in `Lopf`, which is the only model that builds a Link
+at all. Both refusals have since narrowed: `Lopf` models multi-period dispatch,
+and `UnitCommitment` carries its own refusal rather than sharing that one, since
+what it refuses is now a network `Lopf` accepts.
 
 Both fixtures keep PyPSA's own answer in the goldens, so the refusals are
 evidenced rather than asserted, and both refusals have a test that they are *not
 gratuitous*: solving each network the way the port used to gives an answer below
 PyPSA's, which is the benefit the refusal buys.
 
-### The model layer cannot hold a multi-period network, and now says so
+Both have since been implemented — `Link.delay` in *Delays, and the one refusal
+that was cheaper to lift than to keep*, and multi-period in *Investment periods,
+and a ledger entry that became a gap* below.
 
-`investment-periods` is the first golden the model-level suites skip. Its
-snapshots are `(period, timestep)` pairs; `Network` holds a flat list of labels,
-so the CSV cannot round-trip and the netCDF export has no `snapshots_snapshot`
+### The model layer could not hold a multi-period network, and said so
+
+`investment-periods` was the first golden the model-level suites skipped. Its
+snapshots are `(period, timestep)` pairs; `Network` held a flat list of labels,
+so the CSV could not round-trip and the netCDF export has no `snapshots_snapshot`
 dataset to read. The manifest carries a `multi_period` flag and `GoldenNetwork`,
-`RoundTrip` and `NetCdfReader` skip on it — by data, so a second such fixture is
-covered automatically, and with the reason stated in each rather than a name in a
-list. That skip is the model-layer half of the same limitation `Periods.reject`
-enforces at the solve layer.
+`RoundTrip` and `NetCdfReader` skipped on it — by data, so a second such fixture
+would be covered automatically, and with the reason stated in each rather than a
+name in a list. That skip was the model-layer half of the same limitation
+`Periods.reject` enforced at the solve layer.
+
+All three cover it now; see below. The flag stays in the manifest as a
+description of the fixture, but nothing skips on it.
+
+## The sweep itself, made permanent
+
+Everything in the three sections above came out of one procedure — enumerate the
+attributes the schema declares as input, subtract the ones the sources ever name,
+and look hard at what is left. Six confirmed silent wrong answers, the largest
+under-pricing an objective by 23,280 while reporting `Optimal`.
+
+It was a throwaway grep, run twice. Which is precisely the position
+`GapRefusalSuite` was written to fix one level down: an audit that proved the
+state of the tree on one afternoon and left nothing behind. Nobody is going to
+remember to re-run it when PyPSA 1.3 adds a column, and *an attribute nobody has
+looked at* is the shape of all six.
+
+`SchemaSweepSuite` is that sweep as a test. It fails on three things:
+
+- an input attribute no source names and no ruling covers;
+- a ruling whose attribute the sources have started naming, which means it was
+  implemented or refused and the ruling now asserts the opposite;
+- a ruling naming an attribute the schema no longer declares.
+
+### The residue is committed, with reasons
+
+*Counted against PyPSA 1.2.4, which was pinned when this was written. The 1.3.0
+bump moved every figure here and narrowed the interpolation rule; see* PyPSA
+1.3.0, and a pin that stopped being free *below. The shape of the argument is
+what this section is for, and that did not change.*
+
+323 of the 422 attributes are inputs. 253 are named outright and another 24 are
+built by interpolation — `Expansion` reads capacity bounds as
+`s"${attribute}_max"`, so `p_nom_max` is read by code that never writes it down.
+Resolving those in the sweep rather than the ledger matters: filing the
+mechanism's blind spot as a human judgement is how a check starts lying.
+
+That leaves **46**, each with a line saying why it cannot change an answer.
+Nine belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
+attributes are unreachable rather than ignored — the distinction that made
+`investment_periods.csv` a bug and makes this not one. `Process.discount_rate` is
+one of those nine, ruled on the group's grounds; the other **six**
+`discount_rate` entries are ruled separately, read only when an annuitised
+`overnight_cost` is, which `Expansion.reject` refuses on every network. The
+remaining thirty-one are inert in PyPSA's own optimiser, reached under a name
+that arrives in the data — `Carrier.co2_emissions` is read through
+`GlobalConstraint.carrier_attribute` and appears nowhere in this port — or
+descriptive.
+
+The counts move when the port does: implementing multi-period took seventeen
+entries out of the ledger and into the named set, because `Periods` now reads
+`build_year` and `lifetime` rather than the refusal covering them. A count in
+prose beside a check that computes it is a claim with a short shelf life, which
+is the reason this paragraph names the numbers and the suite prints them.
+
+### What it does not do, and one attribute it misses
+
+It checks that some code *names* an attribute, not that it handles it correctly.
+That is what the goldens are for, and being named is a far weaker claim.
+
+It matches bare attribute names rather than `(component, attribute)` pairs,
+because the sources refer to attributes by bare name: `table.float("x", id)`
+reads a Line's reactance and nothing in the call says so. One attribute is masked
+by that today. `Bus.x` is a map coordinate, and it is invisible to the sweep
+because `Line.x` is a reactance the sources quote constantly — it cannot even be
+ruled on, because the stale-ruling rule would fire the moment the line was added.
+`ShuntImpedance` is masked wholesale for the same reason, and survives it only
+because `Lopf.rejectUnhandled` refuses the component outright.
+
+### `Link.cyclic_delay`, and a comment that overclaimed
+
+Writing the ledger turned up one thing the sweep alone would not have. The
+docstring on `rejectDelayedLinks` said `delay` and `cyclic_delay` were "both
+checked", and that `cyclic_delay = false` was the default. Neither is true: only
+`delay` is checked, and the default is `True`.
+
+It is not a wrong answer. `cyclic_delay` decides what happens to energy still in
+flight at the end of the horizon, nothing is ever in flight while `delay` is
+zero, and every network that could observe it is refused. But the comment
+asserted a check that does not exist, which is the same failure as a gap on a
+list with no code site — and it survived precisely because no procedure ever
+asked the question of that attribute by name.
+
+Its ruling is now gone rather than reworded: `Delays` reads the attribute, so the
+sweep's stale-ruling rule would have fired on it. That is the rule working — the
+ledger entry that said "unreachable, because refused" stopped being true in the
+commit that made it reachable.
+
+## Delays, and the one refusal that was cheaper to lift than to keep
+
+`Link.delay` was refused on the grounds that the bus balances pair `bus0` and
+`bus1` inside one snapshot. That is a description of the code, not of the
+difficulty: shifting the receiving term changes which *column* a balance row
+references and nothing else. No new variable, no new row, no change to the row
+ordering `Sclopf`'s copy depends on. It came to one new file and eleven lines in
+`Lopf`.
+
+`Delays` implements it. `Delays.reject` survives, but only for the two shapes
+PyPSA's own consistency check refuses.
+
+### Three things the transcription turned on
+
+**The delay is elapsed time, not a snapshot count.** The declared unit is
+"snapshot weighting units" and the weighting is `snapshot_weightings.generators`
+— the same column the energy budgets read, and neither the `objective` one
+beside it in the file nor the `stores` one the storage balances use. Writing
+`tau(t)` for the time at which snapshot `t` begins, the source of `t` is the
+latest `s` with `tau(s) <= tau(t) - delay`, so a delay landing between two
+boundaries rounds *down* to one. PyPSA logs a warning and rounds the same way;
+this follows it rather than refusing, since the contract is to agree with that
+implementation.
+
+**The arrival mask is not a zero.** Without `cyclic_delay`, the first targets
+have no source at all. PyPSA still computes an index for them — it clips the
+`searchsorted` result into range — and then discards it through a boolean mask.
+The index it discards is `0`. An implementation that dropped the mask and kept
+the index would deliver the *first* snapshot's inflow to every target before the
+delay elapsed, which on `link-delay-wrap` costs 24,000 against 400.
+
+**Efficiency is read at the arrival snapshot.** In
+`define_nodal_balance_constraints` only `p` is shifted; `coeff` stays indexed by
+the target. So a time-varying `efficiency` applies at the snapshot the energy
+arrives in, not the one it left in.
+
+### PyPSA disagrees with itself about `p1`, and it does not matter here
+
+`_apply_delay_shift` shifts `-p0 * efficiency` as a *product* when the results
+are written back, so `links_t.p1` uses the departure snapshot's efficiency while
+the constraint used the arrival's. On `link-delay-wrap` the balance row at bus
+`b` receives 100 MW and PyPSA reports `p1 = -200` for the same snapshot.
+
+Recorded rather than smoothed over, because it decides which of the two to copy.
+The constraint is where the objective and the dispatch come from, and
+`LopfResult.dispatch` returns `p0` — nothing in this port reads `p1` at all. If
+something ever does, this is the paragraph that says the two conventions are not
+interchangeable.
+
+### `link-delay` could not gate any of it
+
+The fixture that justified the refusal proves the refusal and nothing more. Its
+delay makes the only route to the load useless, so every number in it is
+reproduced by an implementation that deletes the link outright — the objective,
+the dispatch, and a link flow of zero at all four snapshots.
+
+`link-delay-wrap` is built so that each of the three readings above is a separate
+visible failure. Two links on disjoint sub-networks: `wrap` is cyclic and serves a
+load at the first snapshot from the *last* one, and `lag` is not, and serves a
+load at the third from the first. `generators` is weighted 2.0 against an
+`objective` of 1, 1, 3, 1 — so a snapshot-counting reading reaches the wrong way
+back *and* pays a different price for it, 3,400 rather than 1,400. `wrap`'s
+efficiency is 0.5 at the arrival snapshot alone, so 200 MW leaves for 100 to
+arrive and a departure-efficiency reading sends 100 and pays half.
+
+Both loads are single-snapshot, which leaves the whole schedule forced rather
+than merely optimal: an arrival at a bus with no load has to be zero, so every
+flow the fixture does not want is pinned at zero too.
+
+### The error had no reliable sign, which is why it was a feature
+
+On `link-delay`, ignoring the delay was eighteen times too cheap — 500 against
+9,000. On `link-delay-wrap` it is too *dear*: 2,200 against 1,400, because the
+shift is what lets the energy leave in a cheaply weighted snapshot. So there was
+never a conservative reading to fall back on, and "solve it as instantaneous and
+note the caveat" would have been wrong in both directions on two fixtures of the
+same feature.
+
+### Two refusals kept, and why they are not gaps
+
+`n.optimize` runs `consistency_check` before it builds, and
+`check_dispatch_delays` is strict by default, so PyPSA has no answer for a
+negative delay or for one at least as long as the horizon. `Delays.reject`
+refuses both, which keeps the two implementations agreeing about which networks
+*have* an answer — the same contract as agreeing about the answer.
+
+PyPSA's optimiser would not refuse either on its own, which is what makes the
+check worth transcribing rather than assuming: `_iter_balance_args` groups a
+negative delay as immediate, and one longer than the horizon leaves every target
+invalid. Silently instantaneous and silently inert, respectively.
+
+The horizon is measured in weighting units too. On `link-delay-wrap` it is 8, not
+4, so a delay of 5 solves and one of 8 is refused — backwards under a
+snapshot-counting reading, and asserted in `LopfSuite` for that reason.
+
+### The power flow deliberately does not shift, and nothing guards that
+
+PyPSA's `lpf` and `pf` write `p{i} = -p0 * efficiency` within one snapshot and
+never read `delay`; only the optimiser shifts it. So `LinearPowerFlow` and
+`NewtonRaphson` go on ignoring it, and both say so at the call site. Applying it
+there would agree with PyPSA's optimiser and disagree with PyPSA's power flow,
+and the contract is the latter.
+
+The first version of that comment claimed the two delay fixtures' `lpf` blocks
+would fail if this changed. **They would not**, on two counts: neither fixture is
+in `LinearPowerFlowSuite`'s network list, and — the decisive one — neither carries
+a link `p_set`, so the injection is zero at every snapshot and shifting a zero
+somewhere else changes nothing. A comment asserting a check that does not exist
+is the same failure as a gap on a list with no code site, which this file already
+names as a failure mode two sections up.
+
+Guarding it needs a delayed link with a non-zero `p_set`, and that is **blocked
+behind a gap found while trying to build one** — see below. Recorded as unguarded
+rather than quietly left claiming otherwise.
+
+### `<attr>_set` fixes dispatch, and this port reads none of it
+
+Trying to give a delay fixture a link `p_set` turned the LOPF answer from 500
+into 3,900. `define_fixed_operation_constraints` fixes a component's dispatch
+variable to its `_set` attribute, and its docstring lists **Generator (p), Line
+(s), Transformer (s), Link (p), Store (e), StorageUnit** — not just the two this
+port refuses.
+
+So `Generator.p_set`, `Link.p_set`, `Line.s_set` and `Transformer.s_set` are read
+by PyPSA's optimiser and by nothing here: on the two-bus probe above PyPSA fixes
+the link at 60 and pays 3,900, where this port leaves it free and pays 500. Same
+shape as the six the schema sweep found, and the sweep cannot see it — `p_set` is
+quoted in these sources for `Load` and for the StorageUnit refusal, so the
+bare-name match reads it as handled everywhere. The documented masking limitation,
+hiding a live defect rather than a harmless one.
+
+Not fixed here. It wants its own fixture and its own golden, like every other one
+of these, rather than being folded into a review-fix commit.
+
+### A third port's delay crashed rather than being read
+
+`delay2` and later are custom columns, not schema attributes — the same as
+`efficiency2` — and `CsvReader` infers every numeric custom column as `Floats`.
+`table.int` therefore threw `delay2 is Float, not an int` on an ordinary
+three-port link. Loud rather than silent, but a crash where PyPSA has an answer.
+
+Found by `DelaysSuite`, which exists because the multi-port suffix rule was
+written against PyPSA's source and then exercised by nothing: both goldens are
+two-port links, so `delayAttribute` was only ever driven with `bus1`. The suite
+builds three-port networks through `CsvReader` and checks that `delay2` is read
+under its own name, that `cyclic_delay2` defaults to wrapping when absent, and
+that an unsuffixed `delay` still belongs to `bus1` alone.
+
+## Investment periods, and a ledger entry that became a gap
+
+Multi-period was the other half of what the schema sweep found, and the one that
+stayed refused when `Link.delay` was implemented. It is modelled now: the model
+layer holds a `(period, timestep)` index, and `Lopf` masks assets by build year
+and weights costs by period.
+
+### The index is two halves, kept as two fields
+
+`Network.snapshots` holds the timestep labels and `snapshotPeriods` holds the
+period each belongs to, one entry per snapshot, with the length invariant checked
+in the constructor rather than assumed. That is the shape `snapshotWeightings`
+already had, which is why it was chosen over a `Snapshot` case class: fifteen
+call sites index snapshots positionally through `.snapshots.indices` and none of
+them had to change.
+
+The timestep half is **not unique** — `investment-periods` has timesteps
+`0, 1, 0, 1` — so anything that treated `snapshots` as a key would now be wrong.
+Keeping the halves in separate fields is what makes that a non-question; a joined
+`"(2030, 0)"` string would invite parsing it back apart. `snapshotLabel` renders
+the joined form for the one consumer that needs it, the manifest comparison,
+because `str()` on a pandas MultiIndex entry is Python's tuple repr and that is
+what the goldens record.
+
+### The reader had two bugs, and the second hid behind the first
+
+`readSnapshots` looked for a `snapshot` column and fell back to *column 1* when
+there wasn't one. A multi-period file is `,period,timestep,objective,...` with no
+`snapshot` column at all, so column 1 is `period`: four snapshots read back as
+`2030, 2030, 2040, 2040`. And because the weighting scan took every other named
+column, `timestep` was picked up as a fourth weighting — a column of `0, 1, 0, 1`
+sitting alongside `objective`, `stores` and `generators`, ready to scale
+something.
+
+`investment_periods.csv` had the mirror problem: the labels were read and the
+`objective` and `years` columns beside them dropped, on the stated grounds that
+only a model pricing multi-period costs needs them. True while such a network was
+refused; false the moment it wasn't.
+
+### `objective` and `years` are not interchangeable
+
+Two columns in one small file, and they do different jobs. `objective` is the
+discount factor and multiplies the snapshot's own objective weighting — every
+cost, and the nodal price is divided by the same product. `years` is how many
+years the period stands for and scales a global constraint's emissions sum, which
+is a quantity of gas rather than a cost to discount.
+
+This repository has already been caught confusing `snapshots.csv`'s three
+weightings with each other, twice. `Periods.objectiveWeight` exists so the LP
+build and the price recovery cannot disagree about the first one: they were two
+multiplications in two files, and a mismatch between them is invisible in the
+objective and visible only in prices nobody was asserting.
+
+### An inactive asset is pinned, not dropped
+
+PyPSA masks an asset's variables outside `build_year <= period < build_year +
+lifetime`. Here the column is bounded to `[0, 0]` instead of being removed, which
+is the same restriction and keeps the column layout every other part of the model
+— and `Sclopf`'s row-by-row copy — already agrees on. The bound replaces
+`p_min_pu` as well as `p_max_pu`: a must-run unit that does not exist yet has to
+be off, not sitting at its floor.
+
+Storage units and stores are masked the same way, and this had to be said out
+loud because they were not: `activeBounds` reached generators and branches only,
+so a `StorageUnit` with `build_year = 2040` charged and discharged freely in
+2030 and the objective came out *below* PyPSA's, reporting `Optimal`. PyPSA
+masks all four storage variables and both store variables by `c.da.active` —
+`define_operational_variables` and `define_spillage_variables` both pass the
+mask — and the schema declares `build_year` and `lifetime` on seven components,
+not two.
+
+Pinning a column to zero is equivalent to PyPSA dropping a row only where the
+row reads zero anyway, and the storage energy balance does not. It is a chain of
+equalities across the horizon, and emitting one at every snapshot while masking
+only the columns says two things PyPSA never says. At the first snapshot after a
+unit *retires*, every column in the row is pinned, so it collapses to
+`eff_stand · soc(t-1) = 0` — the unit is forced empty at its last active
+snapshot, which is dearer or infeasible with nothing to say why. At the *start*
+of a window the same row carries `state_of_charge_initial` and `inflow` on a
+right-hand side whose left is all zeros.
+
+So the rows are emitted over each asset's active snapshots, with the previous
+state taken from the previous *active* one. That is
+`m.add_constraints(..., mask=active)` and
+`soc.where(active).ffill.roll(1).ffill` written out, and it is why the first
+attempt at this — refusing the three cases where the collapse is visible — was
+the wrong shape: two of the three are start-of-window, so a retiring unit went
+unrefused *and* unmasked, and the third refused a network this port answers
+correctly. `state_of_charge_set` moved inside the same loop, because
+`define_fixed_operation_constraints` masks it by `active & ~isnull` and an
+unmasked row against a pinned column reads `0 = target`.
+
+`lifetime` defaults to infinity and a `NaN` is handled explicitly, because every
+comparison against `NaN` is false and the window would close in every period —
+retiring an asset the file meant to keep.
+
+### What the fixture pins, and what it cannot
+
+`investment-periods` reproduces PyPSA's 17,000 exactly, with `old` carrying 2030
+and `new` — `build_year = 2040` — carrying 2040, and both nodal prices matching.
+Its period weightings are both 1.0, which is precisely where reading them or not
+cannot be told apart, so three mutations do the rest: building `new` a period
+early gives the 2,000 this port used to return; retiring `old` with a lifetime of
+1 makes 2030 infeasible, which is how `lifetime` is shown to be read at all; and
+halving 2040's `objective` weighting gives 16,500 rather than 8,500, with the
+price at that period still 5.0 rather than 2.5.
+
+### The ledger entry that turned into a gap
+
+`GlobalConstraint.investment_period` was **ruled safe** by `SchemaSweepSuite`, on
+the grounds that a multi-period network was refused outright. Narrowing that
+refusal turned the ruling into a live gap in the same change: a CO2 cap scoped to
+2040 alone would have been applied to the whole horizon, with no defensible sign
+to the error. It is refused now.
+
+That is the sweep doing the job it was built for, one step further along than
+before — not catching an attribute nobody had looked at, but catching a ruling
+whose *justification* expired. Eighteen `build_year`/`lifetime` entries left the
+ledger the same way, and `Carrier.max_growth` and `max_relative_growth` with
+them.
+
+`Process.build_year` and `Process.lifetime` had to leave too, for a different
+reason: the sweep matches bare names, and `Periods` quotes both for the
+components it does model. Masked exactly as `Bus.x` is by `Line.x`, and safe for
+the same reason — `Lopf.rejectUnhandled` refuses any network carrying a Process.
+
+### Delays became period-aware rather than re-refused
+
+`Delays` documented that a multi-period network never reached it, because
+`Periods.reject` ran first. That stopped being true here. PyPSA applies a delay
+*within* each period — energy leaving the last snapshot of 2030 does not arrive
+in the first of 2040, ten years later — so each period is its own horizon with its
+own `tau`, wrap and validity mask, and the indices are offset back into the flat
+array. The same walk, run once per period instead of once. `check_dispatch_delays`
+takes the horizon as the **shortest** period's, which the refusal now matches.
+
+### What is still refused, and why each is a formulation rather than a factor
+
+Capacity expansion across periods is a different model: PyPSA gives each build
+year its own asset, and *when* to build interacts with the activity window and the
+discounting. Growth limits between periods only bind on that. Per-period storage
+cycling closes the wrap at each period's last snapshot rather than the horizon's,
+which is a different set of energy-balance rows. And unit commitment is refused on
+a multi-period network specifically — `Lopf` accepts one and `UnitCommitment` does
+not — because commitment chains minimum up and down times across a flat horizon,
+and a unit outside its build year has no status there. Pinning its dispatch to
+zero, which is what `Lopf` does, would leave the status variable free to sit at 1
+and collect a start-up cost for a unit that was never built.
+
+Two row families are built once over the whole horizon rather than once per
+period, and an asset whose activity window is not the whole horizon changes rows
+this model does not rebuild — which is where pinning a column stops being enough.
+The **cycle basis** is computed on the whole-horizon topology, while PyPSA calls
+`n.cycle_matrix(investment_period=period)` per period: a line built in 2040 has
+its flow correctly pinned to zero in 2030 and its 2040 cycle row still imposed
+there, collapsing to `x_A·f_A + x_B·f_B = 0` over what is really a radial path.
+**Ramp rows** are masked by `c.da.active` in PyPSA and not here, so a unit would
+enter the period it is built in at a ramp from zero. A partly-built asset in
+either is refused; a partly-built passive branch in *no* cycle is not, because
+then the pinned column is the whole of its masking.
+
+The storage energy balance is the third family of this kind and is **not**
+refused — its rows are emitted over the active snapshots instead, as described
+above. That distinction is the whole of the judgement here: refuse where the
+faithful version is a different model, implement where it is the same model with
+its rows in the right places.
+
+The staged line build is the canonical multi-investment case, so this is not a
+corner. `investment-periods` is single-bus because it is the one fixture, not
+because branches are unusual — which is exactly why the gap cases are mutations
+of it that add the second bus rather than a note that nothing exercises it.
 
 ## The AC transformer model, and an assumption that was never made
 
@@ -1415,6 +1841,144 @@ phase shift is not modelled anywhere in this port. The fixture uses
 today if it is a transmission-level unit declared `pi`. The T model and phase
 shift are the next two pieces, and both need goldens of their own.
 
+## PyPSA 1.3.0, and a pin that stopped being free
+
+The goldens are pinned, so they cannot drift; upstream can, and
+`.github/workflows/pypsa-drift.yml` exists to notice. PyPSA 1.3.0 landed on
+2026-08-19, a day before this bump, so the weekly cron had not yet run — the
+release was found by running the drift process by hand against it.
+
+`schema_drift.py` reported **43 changes that can move an answer**, all of them
+from three upstream features, and the sweep reported **14 new input attributes**.
+The attribute count went 422 → 454; the component set did not change.
+
+### Only two networks moved, and both for the same reason
+
+Solving all 22 golden networks under 1.3.0 before changing anything is what made
+this a small change rather than a guess. Twenty of them returned the pinned
+objective to 1e-6. The two that did not — `phase-shift` and `transformer-taps` —
+were the two carrying a phase shift, and both came back **Infeasible**.
+
+That is the release's one real compatibility break for this port, and it is
+described under *Phase shift, and a bug with nowhere to live* above: the shift is
+now a constant in the Kirchhoff row rather than absent from it. This port's row
+gained the same term.
+
+Both fixtures also had to have their shifts reduced, which is worth stating
+because it is a fixture change rather than a code one. A shift forces a
+circulating flow around the cycle, and past **10.044°** on `phase-shift` and
+**10.007°** on `transformer-taps` that flow exceeds a transformer rating with
+nowhere else to go. The old 30° and 12° are simply not solvable networks any
+more.
+
+`phase-shift` went to **9°** rather than the 10° that is also feasible, because
+10° sits 0.04° from the edge and a fixture that close to infeasibility is one
+solver tolerance away from failing for no reason. 9° is also a better fixture
+than 30° was even setting feasibility aside: `t2` binds at its 400 MW rating, so the shift can no longer be
+absorbed by re-routing alone and the **objective** moves with it — 8,524.43
+against 7,800 unshifted. Every smaller shift is pure re-routing at constant cost,
+which an objective-only comparison cannot see. `transformer-taps` went to **8°**,
+where nothing binds and the flows still reverse; no shift moves that network's
+objective before it becomes infeasible.
+
+### The other two features are refused, not modelled
+
+Both are inert at their defaults, which is exactly why nothing existing caught
+them and why they need a refusal rather than a ruling alone.
+
+**Maintenance scheduling.** `maintainable` turns an entity's availability into a
+binary schedule — `maintenance_events` outages of `maintenance_duration`
+snapshots, capped at `maintenance_pu`. Placing them is an integer decision, so it
+is the same shape as commitment one attribute over, and `Commitment.reject`
+refuses it on every component declaring the flag. Ignoring it errs **cheap**: the
+entity stays available at every snapshot.
+
+**Piecewise costs.** `marginal_cost`, `capital_cost` and `efficiency` may now be
+piecewise-linear, which the schema records by widening their type to `static or
+piecewise or series`. The breakpoints are not in that column — they are a file
+beside the component — so a model that read only the column would price the
+curve at a number the network does not use. Both readers refuse the file.
+
+That refusal was wrong three times before it was right, and the three are one
+mistake wearing different clothes: **it was written against what was in front of
+me rather than against what PyPSA produces.** A name read out of the source, a
+layer chosen without checking where the file is met, a format guarded because it
+was the one I had looked at.
+
+The first version matched a `_piecewise` suffix, taken from the sheet-name table
+in `network/io.py` that maps `generators-marginal_cost_piecewise` to
+`generators-marginal_cost_pw`. That table exists for Excel's 31-character sheet
+limit and describes neither end of the CSV path; `_CSVExporter.save_piecewise`
+writes `f"{list_name}-{attr}-pw.csv"`. The hand-written CSV in the test agreed
+with the misreading and passed, which is precisely what
+`GoldenNetworkSuite`'s opening paragraph says a hand-written fixture can only
+ever do.
+
+The second version had the name right and the *layer* wrong. It sat in `Lopf`,
+keyed off a loaded series — but a piecewise file is indexed by breakpoint and
+carries a two-row header (`name` over `attribute`), so `CsvReader` never gets far
+enough to produce that series. It fails on the header or on a row count that has
+no reason to match the snapshots, and both messages blame the snapshots for a
+file that was never about them. The guard could not fire on any real export.
+
+It now lives in `CsvReader`, which is what meets the file, and the fixture it is
+tested against is written by `export_to_csv_folder` into `goldens/unsupported/` —
+a directory for networks the reader must *turn away*, so that walking
+`manifest["networks"]` does not try to load one. `piecewise_cost()` also runs
+`n.optimize()` on the network before exporting it, because a badly built
+breakpoint frame raises a `KeyError` about an index level while still writing a
+file that looks perfectly plausible.
+
+**And there was a third mistake, which is the second one again.** Moving the
+guard out of `Lopf` cost something that site had for free: `Lopf` is downstream
+of *both* readers, so one check covered both. A refusal in `CsvReader` alone
+covers one of this port's two entry points, and `NetCdfReader` would have taken
+PyPSA's `generators_pw_marginal_cost` — which is neither `<list>_i` nor
+`<list>_t_*` — for a static column and failed on a length check blaming the
+entity count for a frame indexed by breakpoint. The same misdirected diagnostic
+the CSV refusal was written to remove, in the other reader. Both readers carry it
+now, and `goldens/unsupported/` holds a real export in each format, because the
+two spellings share nothing: `generators-marginal_cost-pw.csv` against a
+`generators_pw_marginal_cost` variable over its own `breakpoint` dimension.
+
+It holds one synthetic file besides, labelled as such in the manifest. The netCDF
+guard detects on the whole `_pw_` family and reports only the value variables, so
+that a renamed value variable or a partial export still refuses instead of falling
+back into the length check — and `save_piecewise` always writes the value
+variable, so nothing PyPSA produces reaches that branch. The alternative to a
+fixture that says "no exporter writes this" was a guard nothing exercised.
+
+The refusal is `UnsupportedNetworkFile`, not either reader's `MalformedNetwork`.
+`goldens/binary/malformed` is what that type is for — a column shorter than its
+index, a time unit CF does not define — and a piecewise export is none of those.
+It is exactly what PyPSA meant to write; the reason it is refused is a fact about
+this port. It is deliberately not a subclass, since that would keep every
+existing `catch` working and let the two go on being confused.
+
+**Optimisable phase shifts** are refused for the same class of reason: when
+`phase_shift_min < phase_shift_max` the shift is a per-snapshot *variable* in the
+row, not the constant this model puts there.
+
+### Two things the release broke quietly
+
+Neither is upstream's fault and both were found by the bump rather than by
+review.
+
+The sweep was **manufacturing** `Transformer.phase_shift_min` and
+`phase_shift_max` and reporting them accounted for. `interpolated` was the
+cross-product of every quoted identifier with `{_extendable, _max, _min, _mod}`,
+the port quotes `"phase_shift"` for the linear flow, and the two new attributes
+fell straight out of it. Its own scaladoc had recorded that this can only ever
+mask, never report — invisible until the week upstream ships a name the
+cross-product happens to have invented. The stems now come from
+`Expansion.nominalAttribute`, which is the map that actually binds them.
+
+`Variability.parse` tested `startsWith("static or series")`, which
+`static or piecewise or series` does not satisfy. All nine widened attributes
+carry `varying = true` so the fallback kept them right — but the fallback is the
+weaker signal, and a piecewise attribute that did not vary by snapshot would have
+been read as `Static` with its overrides silently dropped.
+
 ## Known gaps
 
 **Why the float32 warm start hurts on dense instances is unexplained.** The
@@ -1503,9 +2067,39 @@ certificates against the reduced problem, which is the one the solver actually
 proved infeasible — sound, because every reduction here is exact, so an
 infeasible reduced problem implies an infeasible original.
 
-**No MILP.** Unit commitment needs branch-and-bound around the LP. Nothing here
-is specific to continuous problems, but the warm-start path a tree needs does
-not exist yet.
+**The MILP search is the naive one.** This entry used to read "No MILP … the
+warm-start path a tree needs does not exist yet", and both halves had been false
+for some time: `BranchAndBound` is 21K of it, `warmStart` defaults to `true`, and
+unit commitment is built on it and gated on a PyPSA golden. A gap list that keeps
+claiming a feature is missing is the same failure as one that keeps quiet about a
+feature being wrong, and this one survived only because nothing re-reads a list of
+things that are absent.
+
+What is actually missing is everything that makes a tree *fast*: no cutting
+planes, no pseudocost or strong branching, no best-first search, no node
+presolve. The search is depth-first — chosen so a child warm-starts from its
+parent, which is the whole reason a first-order method is attractive inside
+branch-and-bound — branching on the most fractional variable, which is a separate
+choice with a separate reason: a variable at 0.5 splits the feasible set in two
+where one at 0.999 makes a child almost identical to its parent. On top of that
+the pruning margin — necessary, see above, because the bound is inexact —
+deliberately explores nodes an exact solver would cut.
+
+The consequence that bites is the interaction with the entry below. A node whose
+LP hits `maxIterations` is not a bound, so it cannot be pruned on and is counted
+in `unprovenNodes`, and an incumbent found while any exist is reported `Feasible`
+rather than `Optimal`.
+
+**"Feasible" is weaker than "the optimum without a certificate", and the
+difference matters.** Two paths lose a subtree outright rather than merely leaving
+it unproven: a node whose relaxation is integral but never converged records no
+incumbent *and* branches nothing, since `mostFractional` returns `None`; and a
+node below the root reporting dual infeasibility drops its subtree with only an
+`unproven` increment, because a spurious Farkas certificate is a real possibility
+for a numerical method. So the answer returned can be genuinely suboptimal, which
+is precisely what the downgrade to `Feasible` is recording — a reader who takes it
+for "correct, pending proof" will trust it too far. The fix is the adaptive
+iteration limit below, not the tree.
 
 **Iteration limit is not adaptive.** `maxIterations` defaults to 100k, which the
 600-variable random instance nearly reaches. Anything larger needs the limit
@@ -1530,7 +2124,16 @@ can be loose by up to `sqrt(min(m,n))`, which costs a conservative first step
 that the adaptive rule grows away — the safe direction to err in, since an
 underestimate would start the method outside the region where it converges.
 
-**No golden files from PyPSA yet.** That gate belongs to the layers above this
-one — this module has no power-system concepts in it. The `economic-dispatch`
-fixture is shaped like a PyPSA LOPF and its congestion prices are asserted, but
-it was constructed here rather than exported from a PyPSA run.
+**No golden files from PyPSA in *this* module.** The heading used to read "No
+golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
+there are twenty-two golden networks and every *network* module, L1 onward, is
+gated on them. Not "every module above this one": the modules above `prima-core`
+in the build graph are the other Prima ones, and none of them reads
+`NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which
+are the right oracles for an LP solver and the wrong ones for a network model.
+`ARCHITECTURE.md` already had that distinction right.
+
+The scoped claim is the one that holds: this module has no power-system concepts
+in it, so the gate belongs to the network layer. The `economic-dispatch` fixture
+is shaped like a PyPSA LOPF and its congestion prices are asserted, but it was
+constructed here rather than exported from a PyPSA run.

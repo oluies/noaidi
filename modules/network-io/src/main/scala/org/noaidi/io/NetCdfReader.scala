@@ -60,7 +60,30 @@ object NetCdfReader:
   private def readFrom(hdf: HdfFile, schema: Schema, name: String): Network =
     val datasets = hdf.getChildren.asScala.collect { case (n, d: Dataset) => n -> d }.toMap
 
-    val snapshots = readSnapshots(datasets)
+    // Two shapes of index. A multi-period file has `period` and `timestep` and
+    // no `snapshot`, so it is detected by what it carries rather than by a flag:
+    // the flag PyPSA writes into `network.csv` reads `_multi_invest = 0` even on
+    // `investment-periods`, so trusting it would refuse the file that has one.
+    val snapshotPeriods = readSnapshotPeriods(datasets)
+    val snapshots =
+      if snapshotPeriods.isEmpty then readSnapshots(datasets)
+      else readSnapshotTimesteps(datasets)
+
+    if snapshotPeriods.nonEmpty && snapshots.length != snapshotPeriods.length then
+      throw new MalformedNetwork(
+        s"snapshots_timestep has ${snapshots.length} entries against " +
+          s"${snapshotPeriods.length} in snapshots_period; they index the same axis"
+      )
+
+    val periods = datasets.get("investment_periods").map(labels).getOrElse(IndexedSeq.empty)
+    val periodWeightings = ListMap.from(
+      datasets.toIndexedSeq
+        .collect {
+          case (n, d) if n.startsWith("investment_periods_") =>
+            n.drop("investment_periods_".length) -> IArray.from(doubles(d))
+        }
+        .sortBy(_._1)
+    )
     // Discovered, not enumerated. `CsvReader` reads every non-label column of
     // snapshots.csv as a weighting, so hardcoding three names here would drop a
     // fourth that PyPSA adds -- and the two readers would then disagree about a
@@ -80,6 +103,39 @@ object NetCdfReader:
         }
         .sortBy(_._1)
     )
+
+    // The netCDF spelling of the refusal `CsvReader` makes against
+    // `<list>-<attr>-pw.csv`. Both readers feed the same model, so a guard in one
+    // of them is half a guard -- which is what moving this out of `Lopf` cost,
+    // since that one site sat downstream of both.
+    //
+    // Here rather than in `readTable`, so that the two guards ask the same
+    // question. `readTable` runs only for a spec the schema knows *and* whose
+    // `<list>_i` exists, so a curve on any other list would have been ignored and
+    // the network loaded -- while the CSV check, which runs before any component
+    // table is built, refuses a `-pw.csv` whatever it belongs to. It also
+    // re-scanned every dataset name once per component, sixteen passes to answer a
+    // question about the file.
+    //
+    // PyPSA writes a curve as `<list>_pw_<attr>`, dimensioned by its own
+    // `breakpoint` axis, alongside `<list>_pw_<attr>_i` and
+    // `<list>_pw_<attr>_attr_i`. None of the three is a static column, and
+    // `readTable` excludes only `<list>_i` and `<list>_t_*`, so without this all
+    // three would be read as columns and the first would fail a length check
+    // blaming `<list>_i`'s entity count for a frame indexed by breakpoint.
+    //
+    // Detected on the whole family and *reported* as the value variables alone.
+    // Those are two questions and they were being answered by one expression:
+    // excluding the indices from the filter meant the refusal fired only when a
+    // non-`_i` sibling was present, so a renamed value variable, a partial export
+    // or a future spelling would carry the indices past the guard and back into
+    // the length check this exists to replace. The fallback keeps the message
+    // honest in that case -- naming an index is worse than nothing only when
+    // something better was available.
+    val curves  = datasets.keys.toIndexedSeq.filter(_.contains("_pw_")).sorted
+    val bearing = curves.filterNot(_.endsWith("_i"))
+    if curves.nonEmpty then
+      throw UnsupportedNetworkFile.piecewise(if bearing.isEmpty then curves else bearing)
 
     // Driven off the schema's list names. Splitting a dataset name on
     // underscores could not tell `sub_networks_carrier` apart from a `networks`
@@ -102,6 +158,9 @@ object NetCdfReader:
       snapshots = snapshots,
       tables = ListMap.from(tables.sortBy(_._1)),
       snapshotWeightings = weightings,
+      snapshotPeriods = snapshotPeriods,
+      investmentPeriods = periods,
+      investmentPeriodWeightings = periodWeightings,
     )
 
   private def readTable(
@@ -168,6 +227,29 @@ object NetCdfReader:
       "snapshots_snapshot",
       throw new MalformedNetwork("the file has no snapshots_snapshot dataset"),
     )
+    decodeSnapshots(d)
+
+  /** The period half of a multi-period index, or empty.
+    *
+    * A multi-period export carries `snapshots_period` and `snapshots_timestep`
+    * and '''no''' `snapshots_snapshot` at all, which is why the reader used to
+    * refuse these files outright rather than mis-read them. Both halves are
+    * plain values here -- no CF units -- since a period is a year and a timestep
+    * is whatever the caller indexed by.
+    */
+  private def readSnapshotPeriods(datasets: Map[String, Dataset]): IndexedSeq[String] =
+    datasets.get("snapshots_period").map(labels).getOrElse(IndexedSeq.empty)
+
+  private def readSnapshotTimesteps(datasets: Map[String, Dataset]): IndexedSeq[String] =
+    datasets.get("snapshots_timestep").map(decodeSnapshots).getOrElse(IndexedSeq.empty)
+
+  /** Values as text, without CF decoding — for an axis that is not time. */
+  private def labels(d: Dataset): IndexedSeq[String] =
+    d.getData match
+      case a: Array[String] => a.toIndexedSeq
+      case _                => longs(d).map(_.toString)
+
+  private def decodeSnapshots(d: Dataset): IndexedSeq[String] =
     val units = attribute(d, "units")
 
     units match

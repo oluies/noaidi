@@ -66,12 +66,15 @@ object Stores:
         )
     }
 
+    // The same pair as `Storage.reject`, and for the same reason: the wrap
+    // closes at each period's last snapshot instead of the horizon's, and PyPSA
+    // treats a store as per-period when either flag is set.
     Seq("e_cyclic_per_period", "e_initial_per_period").foreach { attribute =>
       val set = table.ids.filter(id => table.static.contains(attribute) && table.bool(attribute, id))
       if set.nonEmpty then
         refuse(
-          s"Store '${set.head}' sets $attribute, which is a multi-investment-period concept; this " +
-            "model has a single horizon"
+          s"Store '${set.head}' sets $attribute, so its energy wraps within each investment " +
+            "period rather than across the horizon; only the horizon-wide cycle is modelled"
         )
     }
 

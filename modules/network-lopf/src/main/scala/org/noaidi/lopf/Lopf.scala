@@ -2,6 +2,7 @@ package org.noaidi.lopf
 
 import org.noaidi.prima.{LpProblem, LpSolution, Pdhg, PdhgParams, RowTranslation, SolveStatus, Unsafe}
 import org.noaidi.network.*
+import org.noaidi.pf.Branches
 import scala.collection.mutable
 
 /** Linear optimal power flow: economic dispatch over a network's snapshots.
@@ -26,6 +27,12 @@ import scala.collection.mutable
   * variable rather than four, no efficiencies, and no power rating at all. Each
   * refuses its own remaining gaps — set points, per-period cycling and
   * quadratic costs.
+  *
+  * '''A controllable branch may deliver late.''' `delay` shifts a link's output
+  * into a later snapshot, measured in elapsed time rather than in snapshots —
+  * see [[Delays]], which also covers the wrap `cyclic_delay` controls and why
+  * the arrival mask is not the same as a zero. It is the only thing in this
+  * model that puts the two ends of one component in two different bus balances.
   *
   * '''Kirchhoff voltage law is enforced''' over a cycle basis of the passive
   * branches, which is PyPSA's own formulation rather than a bus-angle DC-OPF —
@@ -70,7 +77,8 @@ object Lopf:
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
-    val network = Active.only(StandardTypes.expand(input))
+    val expanded = StandardTypes.expand(input)
+    val network  = Active.only(expanded)
     rejectUnhandled(network)
     rejectDanglingBuses(network)
     // Before everything else that reads a snapshot. A multi-period network's
@@ -79,7 +87,16 @@ object Lopf:
     // duplicated labels for a network whose real problem is that this model does
     // not have periods at all.
     Periods.reject(network, m => throw new UnsupportedNetwork(m))
-    rejectDelayedLinks(network)
+    // Only the delays PyPSA's own consistency check refuses. The rest are
+    // modelled -- see `Delays`, and the shift applied in the balance rows below.
+    //
+    // On `expanded`, before `Active.only`. `check_dispatch_delays` reads
+    // `component.static` with no activity filter, so PyPSA raises on an inactive
+    // link with a negative or over-long delay while this port, given the filtered
+    // network, dropped the row and returned `Optimal`. The point of reproducing
+    // the check is to agree about which networks *have* an answer, and that
+    // agreement has to hold for the rows PyPSA actually looks at.
+    Delays.reject(expanded, m => throw new UnsupportedNetwork(m))
     // Ahead of `Expansion.reject`, which used to carry the committable half of
     // this itself for the extendable case only. One refusal rather than three
     // partial ones: the narrower checks each described a different fragment of
@@ -87,6 +104,11 @@ object Lopf:
     // merely committable -- was the one that returned a number.
     Commitment.reject(network, m => throw new UnsupportedNetwork(m))
     Expansion.reject(network)
+    // New in PyPSA 1.3.0, and invisible to every check above because its default
+    // is inert: a pair of columns left at 0.0 is not a range. The other 1.3.0
+    // refusal, piecewise costs, is in `CsvReader` -- that one is a file rather
+    // than a value, and the reader is what meets it.
+    Cycles.rejectOptimisableShift(network, m => throw new UnsupportedNetwork(m))
 
     val snapshots = network.snapshots.indices
     if snapshots.isEmpty then throw new UnsupportedNetwork("network has no snapshots")
@@ -160,11 +182,28 @@ object Lopf:
     /** Whether this entity's operational bounds come from a variable. */
     def extendable(table: ComponentTable, id: String): Boolean = Expansion.isExtendable(table, id)
 
+    /** Zero bounds for an asset that does not exist at this snapshot.
+      *
+      * A multi-period asset is present only between its `build_year` and the
+      * end of its `lifetime`. PyPSA masks its variables outside that window;
+      * pinning the column to `[0, 0]` is the same restriction without a second
+      * column layout, which matters because `Sclopf` copies this model's rows
+      * one for one. The bound replaces `p_min_pu` as well as `p_max_pu` -- a
+      * must-run unit that does not exist yet must be off, not at its floor.
+      */
+    def activeBounds(table: ComponentTable, id: String, t: Int, lo: Double, hi: Double)
+        : (Double, Double) =
+      if Periods.activeAt(network, table, id, t) then (math.min(lo, hi), math.max(lo, hi))
+      else (0.0, 0.0)
+
     snapshots.foreach { t =>
       // The objective weighting scales this snapshot's cost. It is not
       // decoration: a representative-period study expresses itself entirely
       // through these, and ignoring them silently rescales the objective.
-      val weight = network.weighting("objective", t)
+      //
+      // On a multi-period network it carries the period's discount factor too --
+      // see `Periods.objectiveWeight`, which the price recovery divides by.
+      val weight = Periods.objectiveWeight(network, t)
 
       // An extendable entity's limits move out of its column and into two rows
       // per snapshot, against the capacity variable. So the column itself is
@@ -177,10 +216,10 @@ object Lopf:
           if extendable(g, id) then
             declare(g.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
           else
-            val pNom = g.float("p_nom", id)
-            val lo   = pNom * g.valueAt("p_min_pu", id, t)
-            val hi   = pNom * g.valueAt("p_max_pu", id, t)
-            declare(g.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+            val pNom     = g.float("p_nom", id)
+            val (lo, hi) = activeBounds(g, id, t, pNom * g.valueAt("p_min_pu", id, t),
+                                  pNom * g.valueAt("p_max_pu", id, t))
+            declare(g.spec.name, id, t, lo, hi, cost): Unit
         }
       }
 
@@ -195,8 +234,9 @@ object Lopf:
           if extendable(branch, id) then
             declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, 0.0): Unit
           else
-            val limit = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
-            declare(branch.spec.name, id, t, -limit, limit, 0.0): Unit
+            val limit    = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
+            val (lo, hi) = activeBounds(branch, id, t, -limit, limit)
+            declare(branch.spec.name, id, t, lo, hi, 0.0): Unit
         }
       }
 
@@ -206,10 +246,10 @@ object Lopf:
           if extendable(branch, id) then
             declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
           else
-            val pNom = branch.float("p_nom", id)
-            val lo   = pNom * branch.valueAt("p_min_pu", id, t)
-            val hi   = pNom * branch.valueAt("p_max_pu", id, t)
-            declare(branch.spec.name, id, t, math.min(lo, hi), math.max(lo, hi), cost): Unit
+            val pNom     = branch.float("p_nom", id)
+            val (lo, hi) = activeBounds(branch, id, t, pNom * branch.valueAt("p_min_pu", id, t),
+                                  pNom * branch.valueAt("p_max_pu", id, t))
+            declare(branch.spec.name, id, t, lo, hi, cost): Unit
         }
       }
 
@@ -238,18 +278,29 @@ object Lopf:
           def upper(perUnit: => Double): Double =
             if extendableUnit then Double.PositiveInfinity else pNom * perUnit
 
-          declare(Storage.Dispatch, id, t, 0.0, upper(s.valueAt("p_max_pu", id, t)),
-                  s.valueAt("marginal_cost", id, t) * weight): Unit
+          // Through `activeBounds` like every other column. PyPSA masks *all*
+          // four by `c.da.active` -- `define_operational_variables` and
+          // `define_spillage_variables` both pass the mask -- and `StorageUnit`
+          // declares `build_year` and `lifetime` the same as a generator does.
+          // Left unmasked, a unit with `build_year = 2040` discharged freely in
+          // 2030 and the objective came out *below* PyPSA's, reporting
+          // `Optimal`: the silent-under-price shape this module exists against.
+          def bounded(component: String, hi: Double, cost: Double): Unit =
+            val (lo, up) = activeBounds(s, id, t, 0.0, hi)
+            declare(component, id, t, lo, up, cost): Unit
+
+          bounded(Storage.Dispatch, upper(s.valueAt("p_max_pu", id, t)),
+                  s.valueAt("marginal_cost", id, t) * weight)
           // `p_min_pu` is negative for a storage unit -- it is how far the unit
           // may run *backwards* -- so the charging bound is its negation.
-          declare(Storage.Store, id, t, 0.0, upper(-s.valueAt("p_min_pu", id, t)), 0.0): Unit
-          declare(Storage.SoC, id, t, 0.0, upper(s.float("max_hours", id)),
-                  s.valueAt("marginal_cost_storage", id, t) * weight): Unit
+          bounded(Storage.Store, upper(-s.valueAt("p_min_pu", id, t)), 0.0)
+          bounded(Storage.SoC, upper(s.float("max_hours", id)),
+                  s.valueAt("marginal_cost_storage", id, t) * weight)
           // Bounded by the inflow itself, so a snapshot with none gets [0, 0] --
           // which is what PyPSA's masking amounts to, without a second shape of
           // variable map to carry it.
-          declare(Storage.Spill, id, t, 0.0, math.max(0.0, s.valueAt("inflow", id, t)),
-                  s.valueAt("spill_cost", id, t) * weight): Unit
+          bounded(Storage.Spill, math.max(0.0, s.valueAt("inflow", id, t)),
+                  s.valueAt("spill_cost", id, t) * weight)
         }
       }
 
@@ -272,9 +323,17 @@ object Lopf:
                      else eNom * store.valueAt("e_min_pu", id, t)
           val hi   = if extendable(store, id) then Double.PositiveInfinity
                      else eNom * store.valueAt("e_max_pu", id, t)
-          declare(Stores.Energy, id, t, math.min(lo, hi), math.max(lo, hi),
+          // Both through `activeBounds`, for the reason given for the storage
+          // unit above: `Store` declares `build_year` and `lifetime` too, and
+          // PyPSA masks `Store-e` and `Store-p` by the activity window. The
+          // energy column is the one that matters -- an unmasked store carries
+          // charge across a boundary it does not exist over.
+          val (eLo, eHi) = activeBounds(store, id, t, math.min(lo, hi), math.max(lo, hi))
+          declare(Stores.Energy, id, t, eLo, eHi,
                   store.valueAt("marginal_cost_storage", id, t) * weight): Unit
-          declare(Stores.Power, id, t, Double.NegativeInfinity, Double.PositiveInfinity,
+          val (pLo, pHi) =
+            activeBounds(store, id, t, Double.NegativeInfinity, Double.PositiveInfinity)
+          declare(Stores.Power, id, t, pLo, pHi,
                   store.valueAt("marginal_cost", id, t) * weight): Unit
         }
       }
@@ -292,6 +351,14 @@ object Lopf:
     if expandable.nonEmpty then builder.objectiveOffset(-Expansion.objectiveConstant(network))
 
     // Bus balance: everything injected at a bus must equal everything withdrawn.
+    //
+    // Resolved once for the whole table rather than per bus per snapshot: the
+    // shift depends only on `(delay, cyclic_delay)` and the snapshot weightings,
+    // and computing it costs a walk over the horizon.
+    val delays = (passive ++ controllable)
+      .map(table => table.spec.name -> Delays.forTable(network, table))
+      .toMap
+
     val balanceRows = mutable.LinkedHashMap.empty[(String, Int), Int]
     var rowIndex    = 0
 
@@ -324,15 +391,30 @@ object Lopf:
 
         (passive ++ controllable).foreach { branch =>
           val ports = Topology.branchPorts(branch)
+          val shift = delays(branch.spec.name)
           branch.ids.foreach { id =>
-            val c = columns((branch.spec.name, id, t))
             ports.foreach { port =>
               if branch.string(port, id) == bus then
                 // bus0 is where flow enters the branch, so it leaves that bus.
                 // Every other port receives, scaled by that port's efficiency --
                 // the difference is conversion loss, not a balance violation.
-                if port == "bus0" then terms += ((c, -1.0))
-                else terms += ((c, Topology.portEfficiency(branch, id, port, t)))
+                if port == "bus0" then terms += ((columns((branch.spec.name, id, t)), -1.0))
+                else
+                  // A delayed port receives the flow that entered earlier, so the
+                  // column is the *source* snapshot's while the efficiency is
+                  // this one's -- PyPSA shifts `p` alone and leaves `coeff`
+                  // indexed by the arrival. An undelayed port has itself as its
+                  // source, which is how everything but two fixtures reads.
+                  //
+                  // No term at all when the source is outside the horizon: a
+                  // non-cyclic link has nothing in flight at the start, and
+                  // treating that as a zero-flow arrival from snapshot 0 is the
+                  // one wrong reading available -- see `Delays`.
+                  val source = shift.get((id, port)).fold(Some(t))(_.sourceOf(t))
+                  source.foreach { s =>
+                    terms += ((columns((branch.spec.name, id, s)),
+                               Topology.portEfficiency(branch, id, port, t)))
+                  }
             }
           }
         }
@@ -362,18 +444,36 @@ object Lopf:
     // with `eff_stand = (1 - standing_loss)^eh`. Written with every variable on
     // the left and the constants on the right, as an equality.
     //
-    // `soc(t-1)` is the previous snapshot's variable; at t = 0 it is either the
-    // *last* snapshot's variable (cyclic) or absent, with `state_of_charge_initial`
-    // moving to the right-hand side. Those are different constraint matrices, not
-    // different numbers, which is why `storage-cycle` carries one unit of each.
+    // `soc(t-1)` is the previous *active* snapshot's variable; at the first one
+    // it is either the last active snapshot's (cyclic) or absent, with
+    // `state_of_charge_initial` moving to the right-hand side. Those are
+    // different constraint matrices, not different numbers, which is why
+    // `storage-cycle` carries one unit of each.
+    //
+    // ==Rows over the active snapshots, not all of them==
+    //
+    // PyPSA adds this constraint with `mask=active` and takes the previous state
+    // from `soc.where(active).ffill.roll(1).ffill`, so an inactive snapshot gets
+    // no row at all and an active one reaches back past any gap. Emitting a row
+    // everywhere and relying on the pinned columns is *not* the same thing: at
+    // the first snapshot after a unit retires every column in the row is pinned
+    // to zero, so the row collapses to `eff_stand · soc(t-1) = 0` and forces the
+    // unit empty at its last active snapshot -- a constraint PyPSA does not
+    // impose, making the answer dearer or infeasible with nothing to say why.
+    // The same row at the *start* of a window carried `state_of_charge_initial`
+    // and `inflow` on a right-hand side whose left was all zeros.
+    def activeSnapshots(table: ComponentTable, id: String): IndexedSeq[Int] =
+      snapshots.filter(t => Periods.activeAt(network, table, id, t))
+
     storage.foreach { s =>
       s.ids.foreach { id =>
         val effDispatch = (t: Int) => s.valueAt("efficiency_dispatch", id, t)
         val effStore    = (t: Int) => s.valueAt("efficiency_store", id, t)
         val cyclic      = Storage.isCyclic(s, id)
         val initial     = s.float("state_of_charge_initial", id)
+        val active      = activeSnapshots(s, id)
 
-        snapshots.foreach { t =>
+        active.zipWithIndex.foreach { (t, i) =>
           val eh = elapsedHours(t)
           if !(effDispatch(t) > 0.0) then
             throw new UnsupportedNetwork(
@@ -390,7 +490,7 @@ object Lopf:
           terms += ((columns((Storage.Store, id, t)), -eh * effStore(t)))
           terms += ((columns((Storage.Spill, id, t)), eh))
 
-          val previous = if t > 0 then Some(t - 1) else if cyclic then Some(snapshots.last) else None
+          val previous = if i > 0 then Some(active(i - 1)) else if cyclic then Some(active.last) else None
           previous.foreach(p => terms += ((columns((Storage.SoC, id, p)), -effStand)))
 
           // Inflow is a rate, so it is energy only after multiplying by the
@@ -402,6 +502,13 @@ object Lopf:
           // by construction -- `storage-hvdc` sets two values across 6 units and
           // 12 snapshots -- and the absent entries are NaN rather than zero,
           // which is what distinguishes "not set" from "set to empty".
+          //
+          // Inside the active loop for the same reason as the balance:
+          // `define_fixed_operation_constraints` masks it by `active & ~isnull`,
+          // so a set point at a snapshot the unit does not exist at is dropped.
+          // Emitted against a column pinned to zero it would read `0 = target`
+          // and make the LP infeasible -- reported as the network's problem
+          // rather than as this model's.
           val target = s.valueAt("state_of_charge_set", id, t)
           if target.isFinite then
             builder.equalityConstraint(Seq(columns((Storage.SoC, id, t)) -> 1.0), target)
@@ -442,12 +549,52 @@ object Lopf:
         )
     }
 
+    // A phase shifter's angle enters the same row, and it is the shift that makes
+    // it a constant rather than a coefficient:
+    //
+    //   sum_l C_lk (x_l s_l + shift_l) = 0   ->   sum_l C_lk x_l s_l = -sum_l C_lk shift_l
+    //
+    // which is `define_kirchhoff_voltage_constraints` as PyPSA 1.3.0 writes it.
+    // Before that release the row was `sum(x_l s_l) == 0` with no shift term at
+    // all, so PyPSA's own optimisation ignored a shift its power flow applied,
+    // and this port reproduced the omission deliberately.
+    //
+    // Radians, because `x_l s_l` is a per-unit angle and `phase_shift` is
+    // degrees. PyPSA scales the whole row by 1e5 for conditioning; that is a
+    // uniform scaling of an equality and cancels, so it is not carried here --
+    // but the *ratio* between the two terms does not cancel, which is what makes
+    // the conversion the thing to get right rather than a presentation detail.
+    //
+    // Resolved once per branch, alongside `impedances` and for the reason stated
+    // there: a year-long network has 8760 snapshots, and a branch shared by two
+    // cycles would otherwise be looked up twice per snapshot. `phase_shift` is
+    // `static or series` in PyPSA 1.3.0, so the *value* cannot leave the snapshot
+    // loop -- but the table, the schema lookup and the row lookup can, which is
+    // all of the cost except the array index.
+    //
+    // Only a Transformer carries one. A Line has no `phase_shift` attribute at
+    // all, so asking for one would throw rather than read zero.
+    val shifters = cycles.flatMap { cycle =>
+      cycle.terms.collect {
+        case (component, id, _) if component == "Transformer" =>
+          (component, id) -> network.require(component)
+      }
+    }.toMap
+
+    def shiftOf(component: String, id: String, t: Int): Double =
+      shifters
+        .get((component, id))
+        .fold(0.0)(table => math.toRadians(Branches.optionalAt(table, "phase_shift", id, t)))
+
     snapshots.foreach { t =>
       cycles.foreach { cycle =>
         val terms = cycle.terms.map { (component, id, orientation) =>
           (columns((component, id, t)), orientation * impedances((component, id)))
         }
-        builder.equalityConstraint(terms, 0.0)
+        val shift = cycle.terms.map { (component, id, orientation) =>
+          orientation * shiftOf(component, id, t)
+        }.sum
+        builder.equalityConstraint(terms, -shift)
       }
     }
 
@@ -463,8 +610,12 @@ object Lopf:
       store.ids.foreach { id =>
         val cyclic  = Stores.isCyclic(store, id)
         val initial = store.float("e_initial", id)
+        // Over the active snapshots, for the reason the storage balance gives:
+        // `define_store_constraints` carries the identical `mask=active` and
+        // `e.where(active).ffill.roll(1).ffill` treatment.
+        val active  = activeSnapshots(store, id)
 
-        snapshots.foreach { t =>
+        active.zipWithIndex.foreach { (t, i) =>
           val eh       = elapsedHours(t)
           val effStand = math.pow(1.0 - store.valueAt("standing_loss", id, t), eh)
           val terms    = mutable.ArrayBuffer.empty[(Int, Double)]
@@ -472,7 +623,7 @@ object Lopf:
           terms += ((columns((Stores.Energy, id, t)), 1.0))
           terms += ((columns((Stores.Power, id, t)), eh))
 
-          val previous = if t > 0 then Some(t - 1) else if cyclic then Some(snapshots.last) else None
+          val previous = if i > 0 then Some(active(i - 1)) else if cyclic then Some(active.last) else None
           previous.foreach(p => terms += ((columns((Stores.Energy, id, p)), -effStand)))
 
           builder.equalityConstraint(terms.toSeq, if previous.isEmpty then initial else 0.0)
@@ -591,7 +742,13 @@ object Lopf:
         // comparison here can see the difference -- which is exactly why it has to
         // be read rather than assumed.
         val terms = snapshots.flatMap { t =>
-          val weight = network.weighting("generators", t)
+          // `years`, not `objective`, on the period half. PyPSA scales an
+          // emissions sum by how many years the period stands for -- it is a
+          // quantity of gas, not a cost to discount -- while every other
+          // per-period factor in this builder is the objective weighting. Two
+          // columns of one small file that are easy to swap.
+          val weight = network.weighting("generators", t) *
+            network.periodOf(t).map(network.periodWeighting("years", _)).getOrElse(1.0)
           generators.flatMap { g =>
             g.ids.flatMap { gid =>
               val intensity  = carrierAttribute(network, g.string("carrier", gid), attribute)
@@ -639,38 +796,6 @@ object Lopf:
         s"network contains unmodelled component(s): " +
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
-
-  /** Reject a link that delivers its energy in a later snapshot.
-    *
-    * PyPSA's `delay` shifts a link's output by whole snapshots: power entering
-    * at `t` leaves at `t + delay`, and `cyclic_delay` decides whether what is
-    * still in flight at the end of the horizon wraps to the beginning or is
-    * lost. The balance rows built here pair `bus0` and `bus1` within a single
-    * snapshot, so a delayed link is modelled as instantaneous.
-    *
-    * The default is 0 and the attribute reads as inert, which is why nothing
-    * caught it: no fixture sets one. On a two-bus network whose only load sits
-    * at the first snapshot, a delay of 1 makes the cheap import useless and
-    * PyPSA pays 9,000 for local generation; this model delivered the import
-    * instantly and reported 500. An eighteen-fold under-price, `Optimal`.
-    *
-    * `delay` is an `Int` and `cyclic_delay` a boolean, both static, and both are
-    * checked: a zero delay with `cyclic_delay = false` is the default behaviour
-    * and passes, since there is nothing in flight to wrap.
-    */
-  private def rejectDelayedLinks(network: Network): Unit =
-    network.tables.values.foreach { table =>
-      if table.spec.attribute("delay").isDefined && table.static.contains("delay") then
-        table.ids.foreach { id =>
-          val delay = table.int("delay", id)
-          if delay != 0 then
-            throw new UnsupportedNetwork(
-              s"${table.spec.name} '$id' has delay = $delay, so its energy arrives $delay " +
-                "snapshot(s) after it enters; the balance rows here pair both ends within one " +
-                "snapshot, which would deliver it instantly"
-            )
-        }
-    }
 
   /** Reject a component whose bus does not exist.
     *
@@ -796,4 +921,10 @@ final case class LopfResult(
     )
     // Recovered through the row translation, so the sign convention matches the
     // constraint as it was written rather than as the solver reordered it.
-    model.translation.originalDuals(solution.dual)(row) / network.weighting("objective", snapshot)
+    //
+    // Divided by the same weight the costs were multiplied by, period factor
+    // included -- PyPSA divides its own prices by `snapshot_weightings.objective`
+    // multiplied by the period weighting at level 0. Dividing by only the
+    // snapshot half would leave every price in a discounted period scaled by the
+    // discount factor, which looks like a plausible price.
+    model.translation.originalDuals(solution.dual)(row) / Periods.objectiveWeight(network, snapshot)

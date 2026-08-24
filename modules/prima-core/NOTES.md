@@ -1872,10 +1872,11 @@ that would flatter the dense share.
 The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
 three runs) and the shares are what to read; absolute times are context.
 
-### SIMD: about 1.2x at eight lanes, and nothing at four
+### SIMD: 1.2x per iteration everywhere, and a net loss at four lanes
 
-Three CI sweeps, and the thing that varies between them is not noise. It is the
-lane count, and it acts through *convergence* rather than through throughput.
+Measured with the harness and the reporter both repaired — the earlier revisions
+of this section were measuring an asymmetric warm-up, then a drift estimator that
+had the iteration confound folded into it. What follows comes out of the job.
 
 ==What C2 already does==
 
@@ -1885,81 +1886,76 @@ this — confirmed under `-XX:-UseSuperWord`, where the reference `axpby` slows
 from 7.0 to 8.6 µs. What C2 will not do is reassociate floating-point addition,
 so a reduction stays scalar however simple it looks. `dot` and `squaredNorm` are
 where the win is, and `primalStep` joins them because its clamp is a
-data-dependent branch per element. At eight lanes those run 6.09x and 5.77x.
+data-dependent branch per element.
 
-==The lane count decides the iteration count, deterministically==
+==The whole result, in one table==
+
+| width | per iteration | iterations against the reference | **end to end** |
+| --- | --- | --- | --- |
+| 2, aarch64 | 1.11x | same | **1.11x** |
+| 2, x86_64 | 0.33x | same | **0.33x** |
+| 4, x86_64 | 1.22x | **+25.4%** | **0.97x** |
+| 8, x86_64 | 1.19x | same | **1.19x** |
+
+The per-iteration column is remarkably flat away from two lanes: 1.19x to 1.24x
+across every arm, width and coverage the sweeps have run. The end-to-end column
+is not, and the difference between them is entirely the iteration count.
+
+==Four lanes costs 25.4% more iterations, and that is a real iteration count==
 
 Reassociating a sum changes its rounding, and the lane count decides how the
-partial sums are grouped. On `scigrid-de` that is not a last-bit curiosity — it
-moves the whole trajectory, by the same amount every time:
+partial sums are grouped, which moves the trajectory. Against the reference's
+14,848 iterations, four lanes takes **18,624** — reproduced in four sweeps, at
+native width and under `-XX:MaxVectorSize=32` on a machine whose native width was
+eight.
 
-| lanes | iterations | against the reference's 14,848 |
-| --- | --- | --- |
-| 2 | 14,849 | +1 |
-| 4 | **18,624** | **+25.4%** |
-| 8 | 14,848 | identical |
+This was in doubt for two commits. The harness printed `primalStep` calls under
+the heading `iterations`, and `Pdhg.step` calls it inside `while !accepted do`,
+so the figure could have been line-search trials — which would have made it a
+statement about the acceptance test rather than about convergence. It now prints
+both, and they are equal: 18,624 iterations and 18,624 trials. The line search
+accepts essentially every step here, and the extra work is genuinely extra
+iterations.
 
-Reproduced in all three sweeps, at each machine's native width *and* under
-`-XX:MaxVectorSize` on machines whose native width was different. Four lanes
-lands on a path that needs a quarter more steps; two and eight do not. Nothing
-here explains why four is the unlucky one.
+At 1.22x per iteration against 1.254x the iterations, the arithmetic is
+1.22/1.254 = 0.973 — and the measured end-to-end figure is 0.97x. **On a
+four-lane machine this backend is a net loss**, in every configuration the sweep
+ran: 0.97x at native width, 0.98x under `MaxVectorSize=32`, and 0.98x for the
+coverage that widens all six.
 
-==So the end-to-end result is bimodal==
+==Two lanes on x86_64 is 0.33x==
 
-| run | native width | three widened | six widened |
-| --- | --- | --- | --- |
-| 1 | 8 | 1.22x | 1.18x |
-| 3 | 8 | 1.19x | 1.21x |
-| 2 | 4 | 1.03x | 0.94x |
+Against a reference at the same width, with matching iteration counts: 31,025 ms
+against 10,328 ms, reproduced across sweeps. The same two lanes on aarch64 give
+1.11x. Whatever the Vector API costs per operation, x86's scalar and
+auto-vectorised paths absorb it and NEON's do not — so a lane count says nothing
+about an outcome without the architecture beside it.
 
-At eight lanes the per-iteration gain carries through and the solve is about
-**1.2x** faster. At four the convergence penalty consumes it. That is a
-discontinuity in the width, not a gradient: a machine with wider vectors is not
-reliably better here, it is better or it is not depending on where its lane count
-lands.
+==What the sweeps cannot settle==
 
-**And the two coverages are indistinguishable at eight lanes** — 1.22 against
-1.18, then 1.19 against 1.21, which is the ordering reversing between runs. An
-earlier revision of this section reported widening all six as *slower*; that was
-the four-lane run, where both coverages are dragged down by the same convergence
-penalty. There is no measurement here that prefers three operations to six. The
-delegation stands on there being three fewer hand-written loops.
+**The runner's width is not stable.** Four sweeps reported `SPECIES_PREFERRED` of
+8, 4, 8 and 4. Any figure from this job belongs to the machine that run landed
+on, which is why the width is swept explicitly rather than taken from whatever
+turned up.
 
-==Two lanes on x86_64 is 0.32x==
-
-The cleanest number in the sweeps and the only one needing no correction:
-matched iteration counts, control operations agreeing to within 1%. Forcing
-`-XX:MaxVectorSize=16` against a reference at the same width gives 34,383 ms
-against 12,319 ms — the vector backend is **2.8x slower**, reproduced in both
-sweeps that ran it.
-
-Two lanes on aarch64 gave 1.13x. The same width says nothing about the same
-outcome across architectures, and it is the one comparison where this backend is
-not merely unhelpful but actively expensive.
-
-==What CI cannot establish==
-
-**The runner's width is not stable.** The three sweeps reported
-`SPECIES_PREFERRED` of 8, 4 and 8 — different hardware behind one label. Any "at
-N lanes" claim from this job is about the machine that run landed on, which is
-why the width is now swept explicitly rather than taken from whatever turned up.
-
-**The drift correction is not always usable.** It is estimated from operations
-that are identical code in both backends and is defensible when they agree. On
-the four-lane run they scattered from 0.672 to 0.899, which by the criterion
-stated here means the run is too noisy to correct rather than an invitation to
-correct it by 20%. The end-to-end figures above are raw for that reason.
+**The drift correction is often not usable, and the reporter now says so rather
+than applying it anyway.** It compares the control operations' spread against the
+size of the correction and withholds the corrected figure when the spread
+dominates — which it does on the arms above where the raw ratio is quoted. An
+earlier revision published a corrected number from a run it simultaneously
+described as too noisy to correct, then withdrew it; this is that judgement made
+in code.
 
 ==Where this leaves it==
 
-Opt-in. It needs a JVM flag, it perturbs the iterate trajectory, and it is worth
-about 1.2x on a machine whose lane count suits the problem and nothing on one
-whose does not — with no way to know which without running it.
+Opt-in, and the case for anything more is weak. It needs a JVM flag, it perturbs
+the iterate trajectory, and across the machines measured it ranges from **0.33x
+to 1.19x end to end** with no way to know which without running it. The kernels
+are genuinely 1.2x faster per iteration and that is not the question a caller
+asks.
 
-`dot` and `squaredNorm` are about 12% of the time inside `Kernels`, so even a
-perfect result on them caps the solve near 1.14x on throughput alone; the 1.2x
-observed at eight lanes is that plus the reference's own trajectory being no
-better. `spmv` at 40–55% is the ceiling that matters.
+`dot` and `squaredNorm` are about 12% of the time inside `Kernels`. `spmv` at
+40–55% is the ceiling that matters, and it is untouched.
 
 ==What the shares are shares of==
 
@@ -1967,7 +1963,7 @@ Every percentage here is a share of time inside `Kernels`, measured rather than
 assumed: the timed operations are 96–97% of the solve, printed on every run.
 
 The 12.7 s recorded for this configuration in the table above is still not
-reproducible — about 5.5 s on aarch64 and 9.9–13.3 s across CI runners, same
+reproducible — about 5.4 s on aarch64 and 9.9–13.3 s across CI runners, same
 14,848 iterations. Cold-versus-warm was the obvious explanation and is not it,
 since the two come out within 1% of each other, so the discrepancy stays open.
 

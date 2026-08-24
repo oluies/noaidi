@@ -154,7 +154,13 @@ jobs:
     # the job red on every PR: a benchmark that can block a merge is a gate
     # whatever its comment says.
     continue-on-error: true
-    timeout-minutes: 30
+    # 50, not 30. The sweep grew from 8 sbt invocations to 14 and the four added
+    # ones are width-limited, which is the slowest kind -- a `MaxVectorSize=16`
+    # solve took 34 s, and each invocation runs a cold solve and a warm one. If
+    # the job times out, `continue-on-error` keeps the workflow green and the
+    # summary is the only thing this job produces, so the failure would present
+    # as the benchmark silently returning nothing.
+    timeout-minutes: 50
 
     steps:
       - uses: actions/checkout@v7

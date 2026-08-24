@@ -126,14 +126,51 @@ widths = ("=== pass 1 backend scala lanes default ===\n" +
 out = run(widths)
 check("a width with no matching reference refuses to compare",
       "No reference run at this width" in out, out)
+# Asserting `2.00x` alone cannot distinguish partitioning from merging -- the
+# merged case below produces it too. What only the partitioned case gives is the
+# width-limited arm getting a refusal rather than a ratio.
+vector2_block = out.split("`scala-vector-2`")[-1] if "`scala-vector-2`" in out else ""
 check("the default-width ratio excludes the width-limited run",
-      "**2.00x**" in out, out)
+      "**2.00x**" in out and "No reference run at this width" in vector2_block
+      and "Wall clock" not in vector2_block, out)
 
 # And the fallback, stated as a case so it cannot regress quietly: with no
 # markers everything is one group, which is the behaviour to notice.
 out = run(widths.replace("=== pass", "## pass"))
 check("without markers the arms merge, and the table says so",
       "| default |" in out and "No reference run at this width" not in out, out)
+
+# `controls_for` is what moved the default arm's drift off `spmv` and onto
+# `axpby`'s call volume, and the `-all` branch decides whether widened code is
+# mistaken for a control. Neither had a fixture.
+def coverage(backend):
+    return entry(backend, "100.0", "100.0", 100,
+                 {"spmv": ("50.0", 100), "copy": ("5.0", 100), "axpby": ("20.0", 100),
+                  "scale": ("2.0", 100), "dualStep": ("3.0", 100), "dot": ("20.0", 100)})
+
+out = run(coverage("scala-reference") + coverage("scala-vector-8"))
+check("the default coverage counts the delegated three as controls",
+      "`axpby`" in out and "`dualStep`" in out and "`scale`" in out, out)
+
+out = run(coverage("scala-reference") + coverage("scala-vector-8-all"))
+controls = next((l for l in out.splitlines() if l.startswith("- Controls")), "")
+check("the -all coverage does not, since it widens them",
+      "`axpby`" not in controls and "`spmv`" in controls, controls)
+
+# The per-operation table is what NOTES is meant to quote, and nothing asserted a
+# cell of it. 50.0 ms over 100 calls is 500 us.
+out = run(coverage("scala-reference") + coverage("scala-vector-8"))
+check("the per-operation table reports per-call microseconds",
+      "| `spmv` | 500.0 µs |" in out, [l for l in out.splitlines() if "spmv" in l])
+
+# An operation present but never called must not reach the drift arithmetic.
+zerocalls = (entry("scala-reference", "100.0", "100.0", 100,
+                   {"spmv": ("50.0", 100), "copy": ("5.0", 100), "scale": ("0.0", 0)}) +
+             entry("scala-vector-8", "50.0", "50.0", 100,
+                   {"spmv": ("50.0", 100), "copy": ("5.0", 100), "scale": ("0.0", 0)}))
+out = run(zerocalls)
+check("an uncalled operation does not crash the drift block",
+      "Traceback" not in out and "**2.00x**" in out, out)
 
 out = run("nothing useful here\n")
 check("says so when there are no runs", "No runs found" in out, out)

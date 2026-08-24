@@ -30,13 +30,19 @@ import re
 import sys
 from collections import defaultdict
 
-# Operations the vector backends delegate verbatim under at least one coverage.
-# Their cross-backend ratio is machine state by construction.
-CONTROLS = {"spmv", "copy"}
+# Operations every coverage delegates verbatim. `controls_for` widens this for
+# the default coverage, which delegates three more.
+ALWAYS_DELEGATED = {"spmv", "copy"}
 
 MARKER = re.compile(r"=== pass (\S+) backend (\S+) (?:lanes|MaxVectorSize) (\S+) ===")
 RUN = re.compile(r"backend: (\S+)")
 ITERS = re.compile(r"iterations (\d+)")
+# Kernel calls scale with line-search trials, not with iterations: `Pdhg.step`
+# calls `primalStep`, `dot` and `squaredNorm` once per trial. An arm with a
+# higher rejection rate therefore does more kernel work per iteration, and
+# charging that to the backend as slowness is the confound this figure exists to
+# expose.
+TRIALS = re.compile(r"line-search trials (\d+)")
 WALL = re.compile(r"wall clock ([\d.,]+) ms, in kernels ([\d.,]+) ms")
 OP = re.compile(r"^(?:\[info\] )?\s+([a-zA-Z]+) +([\d.,]+) ms +[\d.,]+% +(\d+) calls")
 
@@ -66,12 +72,14 @@ def parse(path: str) -> list[dict]:
             width = m.group(3)
         if m := RUN.search(line):
             current = {"backend": m.group(1), "ops": {}, "iterations": None,
-                       "wall": None, "width": width}
+                       "trials": None, "wall": None, "width": width}
             runs.append(current)
         if current is None:
             continue
         if m := ITERS.search(line):
             current["iterations"] = int(m.group(1))
+        if m := TRIALS.search(line):
+            current["trials"] = int(m.group(1))
         if m := WALL.search(line):
             current["wall"], current["kernels"] = number(m.group(1)), number(m.group(2))
         if m := OP.match(line.rstrip("\n")):
@@ -120,10 +128,20 @@ def controls_for(backend: str, ref: list[dict], rs: list[dict]) -> list[str]:
     the estimate resting almost entirely on `spmv`. The `-all` suffix is what
     distinguishes the coverages.
     """
-    shared = {"spmv", "copy"}
+    shared = set(ALWAYS_DELEGATED)
     if not backend.endswith("-all"):
         shared |= {"axpby", "scale", "dualStep"}
-    return sorted(o for o in shared if all(o in r["ops"] for r in ref + rs))
+    # Presence is not enough: `Instrumented.report()` prints all eight names
+    # unconditionally, so an operation the solve never reached appears as
+    # `0.0 ms / 0 calls`. `scale` is only used on the averaging path, so a short
+    # solve on a small network produces exactly that -- and `per_call` returns
+    # `None` for it, which used to reach an unguarded multiply.
+    def usable(o: str) -> bool:
+        if not all(o in r["ops"] for r in ref + rs):
+            return False
+        return per_call(ref, o) not in (None, 0.0) and per_call(rs, o) not in (None, 0.0)
+
+    return sorted(o for o in shared if usable(o))
 
 
 def report(runs: list[dict]) -> list[str]:
@@ -160,6 +178,26 @@ def report(runs: list[dict]) -> list[str]:
             out.append(f"- **Single-run reading** ({len(ref)} reference, {len(rs)} vector). "
                        "No spread, and nothing counterbalanced within this width.")
 
+        # Trials per iteration, per arm. This is the quantity the acceptance test
+        # moves: it runs on `dot` and `squaredNorm`, which the vector backend
+        # reassociates, so a backend can converge in the same iterations while
+        # rejecting more steps -- doing strictly more kernel work per iteration
+        # for reasons that are not its speed.
+        def trials_per_iter(rows: list[dict]) -> float | None:
+            return mean([r["trials"] / r["iterations"]
+                         for r in rows if r.get("trials") and r.get("iterations")])
+
+        tr, tv = trials_per_iter(ref), trials_per_iter(rs)
+        if tr and tv:
+            out.append(f"- Line-search trials per iteration: reference {tr:.3f}, "
+                       f"`{name}` {tv:.3f}.")
+            if abs(tv / tr - 1) > 0.01:
+                out.append(
+                    f"  **The per-iteration kernel ratio is confounded by this**: kernel calls "
+                    f"scale with trials, so {100 * (tv / tr - 1):+.1f}% more trials per iteration "
+                    "is more kernel work charged to the backend as slowness."
+                )
+
         ri = {r["iterations"] for r in ref if r["iterations"]}
         vi = {r["iterations"] for r in rs if r["iterations"]}
         if ri and vi and ri != vi:
@@ -192,12 +230,21 @@ def report(runs: list[dict]) -> list[str]:
             listed = ", ".join(f"`{o}` {v:.3f}" for o, v in sorted(each.items()))
             out.append(f"- Controls (identical code in both): {listed}.")
             if drift:
+                width_of_spread = max(each.values()) - min(each.values())
+                usable_drift = width_of_spread <= 2 * abs(drift - 1.0) or width_of_spread < 0.02
                 out.append(
                     f"- Time-weighted drift **{drift:.3f}**, controls spanning {spread} — "
                     "**below** 1.0 means the machine was slower during the "
-                    f"`{name}` runs. A spread much wider than the correction means the "
-                    "run is too noisy to correct rather than an invitation to correct it."
+                    f"`{name}` runs."
                 )
+                if not usable_drift:
+                    out.append(
+                        f"  The controls disagree by {width_of_spread:.3f} against a correction of "
+                        f"{abs(drift - 1.0):.3f}, so **the correction is not usable** and the raw "
+                        "ratios below are the reading. Judged rather than asserted in prose beside "
+                        "a bold corrected number, which is how one was published and withdrawn."
+                    )
+                    drift = None
 
         for label, r in (("Wall clock", wall_ratio), ("Time inside `Kernels`", kern_ratio)):
             if r is None:

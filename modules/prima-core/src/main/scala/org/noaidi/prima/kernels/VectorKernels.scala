@@ -33,25 +33,31 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * [[VectorKernels.widenEverything]] keeps the other coverage so it stays
   * measurable.
   *
-  * ==The lane count decides the iteration count==
+  * ==The lane count changes how long the solve takes to converge==
   *
   * Reassociating a sum changes its rounding, and the lane count decides how the
-  * partial sums are grouped -- which on `scigrid-de` moves the whole trajectory.
-  * Reproduced in three CI sweeps, at native widths and under
-  * `-XX:MaxVectorSize`: two lanes takes 14,849 iterations, eight takes 14,848,
-  * and **four takes 18,624** against the reference's 14,848.
+  * partial sums are grouped -- which on `scigrid-de` moves the trajectory, not
+  * just the last bits. Against the reference's 14,848, two lanes and eight lanes
+  * came out level while four took **18,624**, reproduced across three CI sweeps
+  * at native widths and under `-XX:MaxVectorSize`.
   *
-  * So the end-to-end result is bimodal rather than graded. At eight lanes the
+  * '''Those figures are counts of line-search trials, not of iterations, and
+  * await re-measurement.''' The harness printed `primalStep` calls under the
+  * heading `iterations`, and `Pdhg.step` calls it inside `while !accepted do`,
+  * so a rejected step costs another call. It now prints both. The distinction
+  * matters here rather than being pedantry: the acceptance test runs on `dot`
+  * and `squaredNorm`, which this backend reassociates, so a differing *rejection
+  * rate* is a thing this backend can cause -- and it would explain the number
+  * without any iteration count having changed at all.
+  *
+  * What is not in doubt is the shape of the consequence. At eight lanes the
   * per-iteration gain carries through and the solve is about **1.2x** faster; at
-  * four the extra quarter of the iterations consumes it and the solve is roughly
-  * even. A machine with wider vectors is not reliably better here -- it is better
-  * or it is not, depending where its lane count lands.
+  * four something consumes it and the solve is roughly even. `NOTES.md` carries
+  * the measurements, the confounds, and which of them are still open.
   *
   * Two lanes on x86_64 is worse than either: **0.32x** under
   * `-XX:MaxVectorSize=16` against a reference at the same width, where the same
   * two lanes on aarch64 gave 1.13x.
-  *
-  * `NOTES.md` carries the measurements and the confounds.
   *
   * `spmv` delegates unchanged: a CSR row is an indexed gather through a column
   * index buffer, which the Vector API can express but does not obviously win at,

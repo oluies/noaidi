@@ -73,8 +73,14 @@ weighted = (entry("scala-reference", "100.0", "100.0", 100,
                   {"spmv": ("100.0", 1000), "copy": ("2.0", 10)}))
 out = run(weighted)
 drift_line = next((l for l in out.splitlines() if "Time-weighted drift" in l), "")
+# `copy` is half the speed and a hundredth of the time, so it should move the
+# estimate a little and not much: weighting by time gives 101/102 = 0.990, where
+# an unweighted mean of the two ratios would give 0.75. Asserting a band rather
+# than a point, because the correct answer is *not* 1.000 -- an earlier version
+# of this case demanded 1.000 and so pinned an estimator that ignored weights.
+value = float(drift_line.split("drift **")[1].split("**")[0]) if "drift **" in drift_line else 0.0
 check("drift is time-weighted, not an unweighted mean",
-      "drift **0.999**" in drift_line or "drift **1.000**" in drift_line, drift_line)
+      0.98 <= value <= 0.995, f"{drift_line} (unweighted would be ~0.75)")
 
 # A log missing the wall-clock line must degrade rather than crash: a reporting
 # script that dies turns a non-gating benchmark into a failed step.
@@ -90,6 +96,44 @@ comma = (entry("scala-reference", "200,0", "200,0", 100,
                {"spmv": ("100,0", 100), "copy": ("10,0", 100)}))
 out = run(comma)
 check("parses a comma decimal separator", "2.00x" in out, out)
+
+# Drift must not absorb a call-count difference. Both controls are the same
+# speed per call; the vector arm simply makes 25% more calls. A drift estimator
+# that multiplies totals by counts reports ~0.8 here and then "corrects" the
+# headline by 20% -- which is what the first version did, and what made a clean
+# run look too noisy to read.
+countdrift = (entry("scala-reference", "100.0", "100.0", 100,
+                    {"spmv": ("100.0", 1000), "copy": ("10.0", 100)}) +
+              entry("scala-vector-8", "125.0", "125.0", 125,
+                    {"spmv": ("125.0", 1250), "copy": ("12.5", 125)}))
+out = run(countdrift)
+drift_line = next((l for l in out.splitlines() if "Time-weighted drift" in l), "")
+check("drift ignores a pure call-count difference",
+      "drift **1.000**" in drift_line, drift_line)
+
+# The width partitioning is the reason the reporter exists in its current form,
+# and it fails silently: if the marker stops matching, every run lands in one
+# group and width-limited arms get divided by a full-width reference again.
+widths = ("=== pass 1 backend scala lanes default ===\n" +
+          entry("scala-reference", "100.0", "100.0", 100,
+                {"spmv": ("50.0", 100), "copy": ("5.0", 100)}) +
+          "=== pass 1 backend vector lanes default ===\n" +
+          entry("scala-vector-8", "50.0", "50.0", 100,
+                {"spmv": ("50.0", 100), "copy": ("5.0", 100)}) +
+          "=== pass 2 backend vector lanes 16 ===\n" +
+          entry("scala-vector-2", "400.0", "400.0", 100,
+                {"spmv": ("50.0", 100), "copy": ("5.0", 100)}))
+out = run(widths)
+check("a width with no matching reference refuses to compare",
+      "No reference run at this width" in out, out)
+check("the default-width ratio excludes the width-limited run",
+      "**2.00x**" in out, out)
+
+# And the fallback, stated as a case so it cannot regress quietly: with no
+# markers everything is one group, which is the behaviour to notice.
+out = run(widths.replace("=== pass", "## pass"))
+check("without markers the arms merge, and the table says so",
+      "| default |" in out and "No reference run at this width" not in out, out)
 
 out = run("nothing useful here\n")
 check("says so when there are no runs", "No runs found" in out, out)

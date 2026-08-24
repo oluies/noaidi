@@ -378,3 +378,19 @@ class VectorKernelsSuite extends KernelContractSuite("scala-vector"):
       vector.close()
       ref.close()
   }
+
+/** The widened coverage against the whole contract, not just the tail cases.
+  *
+  * `VectorKernelsSuite` supplies `VectorKernels()`, under which `axpby`, `scale`
+  * and `dualStep` delegate to `ScalaKernels` -- so every behavioural case in
+  * `KernelContractSuite` was exercising the reference for those three, and the
+  * widened implementations had only the length sweep and the boundary test.
+  *
+  * The gap that matters is aliasing. `Pdhg` writes an output array it is also
+  * reading, in the hot loop and in the averaging accumulator, and none of the
+  * cases added for widening pass an aliased pair. One declaration runs the whole
+  * contract against the new paths instead.
+  */
+class VectorKernelsWidenedSuite extends KernelContractSuite("scala-vector-all"):
+  override def munitIgnore: Boolean = !VectorKernels.isAvailable
+  def newKernels(): kernels.Kernels = VectorKernels.widenEverything()

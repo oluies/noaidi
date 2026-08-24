@@ -96,8 +96,17 @@ object KernelSplit:
       java.util.Arrays.fill(nanos, 0L)
       java.util.Arrays.fill(calls, 0L)
 
-    /** One call per iteration, so this is the iteration count. */
-    def iterations: Long = calls(names.indexOf("primalStep"))
+    /** Line-search trials, which is not the iteration count.
+      *
+      * `Pdhg.step` calls `primalStep` inside `while !accepted do trials += 1`,
+      * so a rejected step costs another call. This was printed as `iterations`
+      * and used as the normalisation basis, which is wrong twice over: the
+      * figure is larger than the iteration count, and the acceptance test turns
+      * on `dot` and `squaredNorm` -- both reassociated by the vector backend --
+      * so the rejection *rate* can differ between backends independently of how
+      * many iterations either took. `LpSolution` carries the real number.
+      */
+    def trials: Long = calls(names.indexOf("primalStep"))
 
     def totalNanos: Long = nanos.sum
 
@@ -197,7 +206,11 @@ object KernelSplit:
     try
       println(s"status ${solution.status}, objective ${solution.objectiveValue}")
       println(f"cold solve ${cold}%.1f ms, warm solve ${wall}%.1f ms")
-      println(f"iterations ${k.iterations}%d")
+      // Both, and labelled. The reporter normalises on `iterations`; `trials`
+      // is here because a differing rejection rate is itself a result -- it is
+      // the reassociated reductions changing which steps the line search
+      // accepts.
+      println(f"iterations ${solution.iterations}%d (line-search trials ${k.trials}%d)")
       // Both quantities, and their ratio. Every share below is a share of the
       // kernel total, and how much of the solve that total *is* has to be stated
       // rather than assumed -- it is the difference between a claim about the

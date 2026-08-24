@@ -92,8 +92,16 @@ jobs:
           # the case being guarded against -- it exits 1, and under `pipefail`
           # plus `set -e` that would abort the step here, before the explicit
           # check below could report why.
-          total=$(grep -oE 'Passed: Total [0-9]+' sbt-test.log \
-            | grep -oE '[0-9]+$' \
+          # Summed from munit's per-suite lines, not from sbt's per-project
+          # `Passed: Total`. The aggregate undercounts when sbt's action cache is
+          # warm -- observed locally at 628 against a true 733, with `prima-core`
+          # reporting 76 where its suites total 181 -- and this job exists to
+          # notice tests *not* running, so a counter that silently loses a third
+          # of them is the wrong instrument. The per-suite lines come from the
+          # test framework and are one per suite that actually reported.
+          total=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-test.log \
+            | grep -oE '[0-9]+ total' \
+            | grep -oE '^[0-9]+' \
             | awk '{ sum += $1 } END { print sum + 0 }' || true)
           total=${total:-0}
           echo "Total tests run across all modules: $total"
@@ -168,7 +176,12 @@ jobs:
           # page cache filling, thermal state -- lands systematically on one arm
           # rather than cancelling.
           run() {
-            echo "=== pass $1 backend $2 lanes ${3:-default} ===" | tee -a split.log
+            # `MaxVectorSize`, not "lanes": $3 is the flag's value in *bytes*, so
+            # a two-lane run was logged as `lanes 16` and the reporter consumed
+            # the same capture under a `MaxVectorSize` heading -- one number
+            # labelled two incompatible ways, in a summary whose subject is not
+            # conflating width quantities.
+            echo "=== pass $1 backend $2 MaxVectorSize ${3:-default} ===" | tee -a split.log
             local opts=""
             [ -n "${3:-}" ] && opts="set networkLopf/Test/javaOptions += \"-XX:MaxVectorSize=$3\"; "
             sbt --batch \
@@ -192,8 +205,12 @@ jobs:
           # width-limited run.
           run 4 scala 16
           run 4 vector 16
-          run 5 vector 32
-          run 5 scala 32
+          run 5 vector 16
+          run 5 scala 16
+          run 6 scala 32
+          run 6 vector 32
+          run 7 vector 32
+          run 7 scala 32
 
       # The reporter before the report, as `action-pins` and the drift job both
       # do. Its failure mode is publishing a plausible number computed from the

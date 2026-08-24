@@ -34,7 +34,7 @@ from collections import defaultdict
 # Their cross-backend ratio is machine state by construction.
 CONTROLS = {"spmv", "copy"}
 
-MARKER = re.compile(r"=== pass (\S+) backend (\S+) lanes (\S+) ===")
+MARKER = re.compile(r"=== pass (\S+) backend (\S+) (?:lanes|MaxVectorSize) (\S+) ===")
 RUN = re.compile(r"backend: (\S+)")
 ITERS = re.compile(r"iterations (\d+)")
 WALL = re.compile(r"wall clock ([\d.,]+) ms, in kernels ([\d.,]+) ms")
@@ -93,6 +93,39 @@ def fmt(x: float | None, unit: str = "") -> str:
     return "n/a" if x is None else f"{x:.0f}{unit}"
 
 
+def per_call(rows: list[dict], op: str) -> float | None:
+    """Mean time for one call of `op`, normalised by that arm's own call count.
+
+    The whole point, and what the first version got wrong: it multiplied each
+    arm's *total* by the reference's call count, so the vector arm's totals were
+    weighted by counts that were not theirs and never divided by their own. With
+    per-call times a, b and a uniform count ratio f = Cb/Ca, that expression
+    equals (1/f) x the true ratio -- so a 25% difference in call counts moved the
+    "drift" by 20%, and the correction it fed was measuring the iteration
+    confound it exists to remove.
+    """
+    # Microseconds. The harness prints the total in ms and the count beside it,
+    # so the quotient is ms/call and was displayed under a "us" heading.
+    total_ms = mean([r["ops"][op][0] for r in rows if op in r["ops"]])
+    calls = mean([float(r["ops"][op][1]) for r in rows if op in r["ops"]])
+    return 1000.0 * total_ms / calls if total_ms is not None and calls else None
+
+
+def controls_for(backend: str, ref: list[dict], rs: list[dict]) -> list[str]:
+    """Operations that are byte-identical code in both arms.
+
+    `spmv` and `copy` are delegated under every coverage. The default coverage
+    also delegates `axpby`, `scale` and `dualStep`, and `axpby` alone carries
+    more calls than `copy` by two orders of magnitude -- so excluding them left
+    the estimate resting almost entirely on `spmv`. The `-all` suffix is what
+    distinguishes the coverages.
+    """
+    shared = {"spmv", "copy"}
+    if not backend.endswith("-all"):
+        shared |= {"axpby", "scale", "dualStep"}
+    return sorted(o for o in shared if all(o in r["ops"] for r in ref + rs))
+
+
 def report(runs: list[dict]) -> list[str]:
     out: list[str] = []
     by = defaultdict(list)
@@ -123,15 +156,18 @@ def report(runs: list[dict]) -> list[str]:
                        "crippling SuperWord on the other arm.")
             continue
         out.append(f"\n### `{name}` against the reference at MaxVectorSize {width}\n")
+        if len(ref) < 2 or len(rs) < 2:
+            out.append(f"- **Single-run reading** ({len(ref)} reference, {len(rs)} vector). "
+                       "No spread, and nothing counterbalanced within this width.")
 
-        # Iteration confound, stated before any ratio is shown.
         ri = {r["iterations"] for r in ref if r["iterations"]}
         vi = {r["iterations"] for r in rs if r["iterations"]}
         if ri and vi and ri != vi:
-            drift_pc = 100 * (mean(list(vi)) / mean(list(ri)) - 1)
+            pc = 100 * (mean(list(vi)) / mean(list(ri)) - 1)
             out.append(
                 f"- Iteration counts differ: {sorted(ri)} against {sorted(vi)} "
-                f"({drift_pc:+.1f}%). Ratios below are per iteration for that reason."
+                f"({pc:+.1f}%). Ratios below are per iteration for that reason, and the "
+                "end-to-end effect is the wall-clock ratio times that difference."
             )
 
         def per_iter(rows: list[dict], key: str) -> float | None:
@@ -144,24 +180,24 @@ def report(runs: list[dict]) -> list[str]:
 
         wall_ratio, kern_ratio = ratio("wall"), ratio("kernels")
 
-        # Drift, time-weighted over the operations that are the same code.
-        shared = [o for o in CONTROLS if all(o in r["ops"] for r in ref + rs)]
+        shared = controls_for(name, ref, rs)
         drift = None
         if shared:
-            ref_t = sum(mean([r["ops"][o][0] for r in ref]) * mean([r["ops"][o][1] for r in ref])
-                        for o in shared)
-            vec_t = sum(mean([r["ops"][o][0] for r in rs]) * mean([r["ops"][o][1] for r in ref])
-                        for o in shared)
-            drift = ref_t / vec_t
-            each = ", ".join(
-                f"`{o}` {mean([r['ops'][o][0] for r in ref]) / mean([r['ops'][o][0] for r in rs]):.3f}"
-                for o in sorted(shared)
-            )
-            out.append(
-                f"- Control operations (identical code in both): {each}. "
-                f"Time-weighted drift **{drift:.3f}** — above 1.0 means the machine was "
-                f"slower during the `{name}` runs."
-            )
+            weights = {o: mean([float(r["ops"][o][1]) for r in ref]) for o in shared}
+            ref_t = sum(per_call(ref, o) * weights[o] for o in shared)
+            vec_t = sum(per_call(rs, o) * weights[o] for o in shared)
+            drift = ref_t / vec_t if vec_t else None
+            each = {o: per_call(ref, o) / per_call(rs, o) for o in shared}
+            spread = f"{min(each.values()):.3f}–{max(each.values()):.3f}"
+            listed = ", ".join(f"`{o}` {v:.3f}" for o, v in sorted(each.items()))
+            out.append(f"- Controls (identical code in both): {listed}.")
+            if drift:
+                out.append(
+                    f"- Time-weighted drift **{drift:.3f}**, controls spanning {spread} — "
+                    "**below** 1.0 means the machine was slower during the "
+                    f"`{name}` runs. A spread much wider than the correction means the "
+                    "run is too noisy to correct rather than an invitation to correct it."
+                )
 
         for label, r in (("Wall clock", wall_ratio), ("Time inside `Kernels`", kern_ratio)):
             if r is None:
@@ -170,11 +206,33 @@ def report(runs: list[dict]) -> list[str]:
                 out.append(f"- {label}: **{r:.2f}x** raw, **{r / drift:.2f}x** drift-corrected.")
             else:
                 out.append(f"- {label}: **{r:.2f}x**.")
+
         share = mean([r["kernels"] / r["wall"] for r in ref if r.get("wall") and r.get("kernels")])
-        if share is not None:
+        if share is not None and share >= 0.9:
             out.append(f"- The timed operations are {100 * share:.0f}% of the reference solve, so "
                        "the two ratios should agree closely; a gap between them is time spent "
                        "outside `Kernels`.")
+        elif share is not None:
+            out.append(f"- The timed operations are only {100 * share:.0f}% of the reference "
+                       "solve, so the kernel ratio is not the end-to-end figure — the wall-clock "
+                       "ratio is, and the kernel one bounds it.")
+
+        # Per operation, computed here rather than by hand from the raw block.
+        # Every previously published per-operation figure was derived in a
+        # notebook, which is the practice this script exists to end.
+        ops = sorted({o for r in ref + rs for o in r["ops"]})
+        rows = []
+        for o in ops:
+            a, b = per_call(ref, o), per_call(rs, o)
+            if not a or not b:
+                continue
+            raw = a / b
+            corrected = f"{raw / drift:.2f}x" if drift else "—"
+            rows.append(f"| `{o}` | {a:.1f} µs | {b:.1f} µs | {raw:.2f}x | {corrected} |")
+        if rows:
+            out.append("\n| operation | reference | this backend | raw | drift-corrected |")
+            out.append("| --- | --- | --- | --- | --- |")
+            out.extend(rows)
     return out
 
 

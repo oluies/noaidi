@@ -1872,82 +1872,94 @@ that would flatter the dense share.
 The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
 three runs) and the shares are what to read; absolute times are context.
 
-### SIMD: fast per iteration, unreliable per solve
+### SIMD: about 1.2x at eight lanes, and nothing at four
 
-Four attempts to measure this have now produced four different headline numbers,
-and the last one is the one that matters: **the per-iteration speedup is real and
-the end-to-end benefit is not dependable.**
+Three CI sweeps, and the thing that varies between them is not noise. It is the
+lane count, and it acts through *convergence* rather than through throughput.
 
 ==What C2 already does==
 
 HotSpot's SuperWord pass auto-vectorises a plain `while` loop over contiguous
 arrays, so `axpby`, `scale` and `dualStep` were vector instructions before any of
-this. Confirmed under `-XX:-UseSuperWord`, where the reference `axpby` slows from
-7.0 to 8.6 µs. What C2 will not do is reassociate floating-point addition, since
-that changes the answer, so a reduction stays scalar however simple it looks.
-`dot` and `squaredNorm` are therefore where the whole win is, and `primalStep`
-joins them because its clamp is a data-dependent branch per element.
+this — confirmed under `-XX:-UseSuperWord`, where the reference `axpby` slows
+from 7.0 to 8.6 µs. What C2 will not do is reassociate floating-point addition,
+so a reduction stays scalar however simple it looks. `dot` and `squaredNorm` are
+where the win is, and `primalStep` joins them because its clamp is a
+data-dependent branch per element. At eight lanes those run 6.09x and 5.77x.
 
-Per operation, the win is large: 6.09x and 5.77x on the reductions at eight
-lanes, 1.65x and 1.64x at two.
+==The lane count decides the iteration count, deterministically==
 
-==And reassociation costs iterations==
+Reassociating a sum changes its rounding, and the lane count decides how the
+partial sums are grouped. On `scigrid-de` that is not a last-bit curiosity — it
+moves the whole trajectory, by the same amount every time:
 
-Changing the summation order changes the iterates, so the solve follows a
-different trajectory. On one CI runner both backends took exactly 14,848
-iterations and the per-iteration gain carried through end to end. On the next it
-did not:
+| lanes | iterations | against the reference's 14,848 |
+| --- | --- | --- |
+| 2 | 14,849 | +1 |
+| 4 | **18,624** | **+25.4%** |
+| 8 | 14,848 | identical |
 
-| | wall clock | iterations | end to end |
+Reproduced in all three sweeps, at each machine's native width *and* under
+`-XX:MaxVectorSize` on machines whose native width was different. Four lanes
+lands on a path that needs a quarter more steps; two and eight do not. Nothing
+here explains why four is the unlucky one.
+
+==So the end-to-end result is bimodal==
+
+| run | native width | three widened | six widened |
 | --- | --- | --- | --- |
-| `scala-reference` | 9,888 ms | 14,848 | — |
-| `scala-vector-4` | 9,591 ms | 18,624 | **1.03x** |
-| `scala-vector-4-all` | 10,494 ms | 18,624 | **0.95x** |
+| 1 | 8 | 1.22x | 1.18x |
+| 3 | 8 | 1.19x | 1.21x |
+| 2 | 4 | 1.03x | 0.94x |
 
-Per iteration the vector backend was 1.29x faster. It needed **25.4% more
-iterations**, and the two nearly cancel — leaving 3% for the coverage that wins
-and a *loss* for the one that widens everything. Both converged to `Optimal`
-within tolerance, at slightly different objectives (6,684,153 against
-6,684,114).
+At eight lanes the per-iteration gain carries through and the solve is about
+**1.2x** faster. At four the convergence penalty consumes it. That is a
+discontinuity in the width, not a gradient: a machine with wider vectors is not
+reliably better here, it is better or it is not depending on where its lane count
+lands.
 
-So per-iteration ratios measure the kernels and end-to-end wall clock measures
-the solve, and only the second is what a caller waits for. Every earlier figure
-in this section's history was the first kind reported as if it were the second.
+**And the two coverages are indistinguishable at eight lanes** — 1.22 against
+1.18, then 1.19 against 1.21, which is the ordering reversing between runs. An
+earlier revision of this section reported widening all six as *slower*; that was
+the four-lane run, where both coverages are dragged down by the same convergence
+penalty. There is no measurement here that prefers three operations to six. The
+delegation stands on there being three fewer hand-written loops.
 
-==Two lanes on x86_64 is a catastrophe==
+==Two lanes on x86_64 is 0.32x==
 
-The cleanest number this sweep produced, and the only one with matched iteration
-counts, agreeing control operations and no drift correction worth applying:
-forcing `-XX:MaxVectorSize=16` makes the vector backend **3.1x slower** than the
-scalar reference at the same width — 32,583 ms against 10,348 ms.
+The cleanest number in the sweeps and the only one needing no correction:
+matched iteration counts, control operations agreeing to within 1%. Forcing
+`-XX:MaxVectorSize=16` against a reference at the same width gives 34,383 ms
+against 12,319 ms — the vector backend is **2.8x slower**, reproduced in both
+sweeps that ran it.
 
-Two lanes on aarch64 gave 1.13x. Two lanes on x86_64 give 0.32x. Whatever the
-Vector API costs per operation, x86's scalar and auto-vectorised paths absorb it
-better, and the same lane count says nothing about the same outcome across
-architectures.
+Two lanes on aarch64 gave 1.13x. The same width says nothing about the same
+outcome across architectures, and it is the one comparison where this backend is
+not merely unhelpful but actively expensive.
 
-==What cannot be concluded from CI==
+==What CI cannot establish==
 
-**The runner's width is not stable.** One run reported `SPECIES_PREFERRED` of 8,
-the next 4 — different hardware behind the same label. Any "at N lanes" claim
-from this job is about the machine that run landed on.
+**The runner's width is not stable.** The three sweeps reported
+`SPECIES_PREFERRED` of 8, 4 and 8 — different hardware behind one label. Any "at
+N lanes" claim from this job is about the machine that run landed on, which is
+why the width is now swept explicitly rather than taken from whatever turned up.
 
 **The drift correction is not always usable.** It is estimated from operations
-that are identical code in both backends, and it is defensible when they agree.
-On the second run they scattered from 0.672 to 0.899, which by the criterion
+that are identical code in both backends and is defensible when they agree. On
+the four-lane run they scattered from 0.672 to 0.899, which by the criterion
 stated here means the run is too noisy to correct rather than an invitation to
-correct it by 20%.
+correct it by 20%. The end-to-end figures above are raw for that reason.
 
 ==Where this leaves it==
 
-`VectorKernels` stays opt-in, and the case for enabling it by default is weaker
-than any per-operation number suggests: it needs a JVM flag, it perturbs the
-iterate trajectory, and on the evidence here it buys between −5% and +14%
-depending on the machine and on whether the perturbation costs iterations.
+Opt-in. It needs a JVM flag, it perturbs the iterate trajectory, and it is worth
+about 1.2x on a machine whose lane count suits the problem and nothing on one
+whose does not — with no way to know which without running it.
 
-`dot` and `squaredNorm` are about 12% of the time inside `Kernels`. Even a
-perfect result on them caps the solve near 1.14x, and `spmv` at 40–55% is the
-ceiling that actually matters.
+`dot` and `squaredNorm` are about 12% of the time inside `Kernels`, so even a
+perfect result on them caps the solve near 1.14x on throughput alone; the 1.2x
+observed at eight lanes is that plus the reference's own trajectory being no
+better. `spmv` at 40–55% is the ceiling that matters.
 
 ==What the shares are shares of==
 
@@ -1955,9 +1967,9 @@ Every percentage here is a share of time inside `Kernels`, measured rather than
 assumed: the timed operations are 96–97% of the solve, printed on every run.
 
 The 12.7 s recorded for this configuration in the table above is still not
-reproducible — about 5.5 s on aarch64 and 9.9–12.5 s on CI runners, same 14,848
-iterations. Cold-versus-warm was the obvious explanation and is not it, since the
-two come out within 1% of each other, so the discrepancy stays open.
+reproducible — about 5.5 s on aarch64 and 9.9–13.3 s across CI runners, same
+14,848 iterations. Cold-versus-warm was the obvious explanation and is not it,
+since the two come out within 1% of each other, so the discrepancy stays open.
 
 ### What `scigrid-de` cannot gate
 

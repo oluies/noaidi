@@ -22,30 +22,36 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * and 5.77x at eight lanes, with `primalStep` at 1.23x because its clamp is a
   * data-dependent branch per element.
   *
-  * The other three are delegated on a tiebreak rather than a measurement. An
-  * earlier figure had them losing by 1.44x to 2.17x, which was an artifact of a
-  * harness that warmed up on the wrong backend; measured properly they lose by
-  * about 5%, and on one runner widening all six came out *slower end to end* than
-  * widening three. Three fewer hand-written loops decides it.
+  * The other three are delegated on a tiebreak rather than a measurement, and two
+  * successive figures said otherwise before this settled. A first had them losing
+  * by 1.44x to 2.17x, which was a harness that warmed up on the wrong backend. A
+  * second had widening all six coming out slower end to end, which was the
+  * four-lane run, where both coverages carry the same convergence penalty. At
+  * eight lanes the two are indistinguishable -- 1.22x against 1.18x, then 1.19x
+  * against 1.21x, the ordering reversing between runs. Nothing measured here
+  * prefers three to six; three fewer hand-written loops decides it.
   * [[VectorKernels.widenEverything]] keeps the other coverage so it stays
   * measurable.
   *
-  * ==Per iteration is not per solve==
+  * ==The lane count decides the iteration count==
   *
-  * Reassociating the reductions changes the iterates, so the solve takes a
-  * different path. On one CI runner both backends took exactly 14,848 iterations
-  * and a 1.14x per-iteration gain carried through. On the next, this backend was
-  * 1.29x faster per iteration and needed **25.4% more iterations**, which very
-  * nearly cancelled: 1.03x end to end, and 0.95x for the six-operation coverage.
+  * Reassociating a sum changes its rounding, and the lane count decides how the
+  * partial sums are grouped -- which on `scigrid-de` moves the whole trajectory.
+  * Reproduced in three CI sweeps, at native widths and under
+  * `-XX:MaxVectorSize`: two lanes takes 14,849 iterations, eight takes 14,848,
+  * and **four takes 18,624** against the reference's 14,848.
   *
-  * So the per-operation numbers above are about the kernels and not about the
-  * solve, and the end-to-end benefit is between -5% and +14% depending on the
-  * machine and on whether the perturbation costs iterations. That is the reason
-  * this is opt-in beyond the JVM flag it needs.
+  * So the end-to-end result is bimodal rather than graded. At eight lanes the
+  * per-iteration gain carries through and the solve is about **1.2x** faster; at
+  * four the extra quarter of the iterations consumes it and the solve is roughly
+  * even. A machine with wider vectors is not reliably better here -- it is better
+  * or it is not, depending where its lane count lands.
   *
-  * Two lanes is architecture-dependent in the same way and more sharply: 1.13x
-  * on aarch64, and **0.32x** on x86_64 under `-XX:MaxVectorSize=16` against a
-  * reference at the same width. `NOTES.md` carries the measurements.
+  * Two lanes on x86_64 is worse than either: **0.32x** under
+  * `-XX:MaxVectorSize=16` against a reference at the same width, where the same
+  * two lanes on aarch64 gave 1.13x.
+  *
+  * `NOTES.md` carries the measurements and the confounds.
   *
   * `spmv` delegates unchanged: a CSR row is an indexed gather through a column
   * index buffer, which the Vector API can express but does not obviously win at,

@@ -34,6 +34,7 @@ from collections import defaultdict
 # Their cross-backend ratio is machine state by construction.
 CONTROLS = {"spmv", "copy"}
 
+MARKER = re.compile(r"=== pass (\S+) backend (\S+) lanes (\S+) ===")
 RUN = re.compile(r"backend: (\S+)")
 ITERS = re.compile(r"iterations (\d+)")
 WALL = re.compile(r"wall clock ([\d.,]+) ms, in kernels ([\d.,]+) ms")
@@ -54,9 +55,18 @@ def number(text: str) -> float:
 def parse(path: str) -> list[dict]:
     runs: list[dict] = []
     current: dict | None = None
+    # `-XX:MaxVectorSize` bounds C2's auto-vectorisation as well as the Vector
+    # API, so a width-limited run is comparable only to another at the same
+    # width. The reference backend's name does not carry the setting -- it is
+    # `scala-reference` either way -- so it is taken from the marker the job
+    # prints before each run, and comparisons are made within a width.
+    width = "default"
     for line in open(path, encoding="utf-8", errors="replace"):
+        if m := MARKER.search(line):
+            width = m.group(3)
         if m := RUN.search(line):
-            current = {"backend": m.group(1), "ops": {}, "iterations": None, "wall": None}
+            current = {"backend": m.group(1), "ops": {}, "iterations": None,
+                       "wall": None, "width": width}
             runs.append(current)
         if current is None:
             continue
@@ -87,29 +97,32 @@ def report(runs: list[dict]) -> list[str]:
     out: list[str] = []
     by = defaultdict(list)
     for r in runs:
-        by[r["backend"]].append(r)
+        by[(r["width"], r["backend"])].append(r)
 
     out.append("### Per backend\n")
-    out.append("| backend | runs | wall clock | in kernels | iterations |")
-    out.append("| --- | --- | --- | --- | --- |")
-    for name, rs in by.items():
+    out.append("| backend | MaxVectorSize | runs | wall clock | in kernels | iterations |")
+    out.append("| --- | --- | --- | --- | --- | --- |")
+    for (width, name), rs in by.items():
         walls = [r["wall"] for r in rs if r["wall"]]
         kerns = [r["kernels"] for r in rs if r.get("kernels")]
         iters = {r["iterations"] for r in rs if r["iterations"]}
         out.append(
-            f"| `{name}` | {len(rs)} | {fmt(mean(walls), ' ms')} | {fmt(mean(kerns), ' ms')} | "
-            f"{', '.join(str(i) for i in sorted(iters)) or 'n/a'} |"
+            f"| `{name}` | {width} | {len(rs)} | {fmt(mean(walls), ' ms')} | "
+            f"{fmt(mean(kerns), ' ms')} | {', '.join(str(i) for i in sorted(iters)) or 'n/a'} |"
         )
 
-    ref = next((rs for n, rs in by.items() if n == "scala-reference"), None)
-    if not ref:
-        out.append("\nNo `scala-reference` runs: nothing to compare against.")
-        return out
-
-    for name, rs in by.items():
+    for (width, name), rs in by.items():
         if name == "scala-reference":
             continue
-        out.append(f"\n### `{name}` against the reference\n")
+        ref = by.get((width, "scala-reference"))
+        if not ref:
+            out.append(f"\n### `{name}` at MaxVectorSize {width}\n")
+            out.append("- No reference run at this width, so there is nothing to compare "
+                       "against. `-XX:MaxVectorSize` bounds C2's auto-vectorisation too, so "
+                       "dividing by a full-width scalar run would mix the width change with "
+                       "crippling SuperWord on the other arm.")
+            continue
+        out.append(f"\n### `{name}` against the reference at MaxVectorSize {width}\n")
 
         # Iteration confound, stated before any ratio is shown.
         ri = {r["iterations"] for r in ref if r["iterations"]}

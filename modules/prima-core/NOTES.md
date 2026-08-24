@@ -1830,26 +1830,36 @@ clock to each of the eight operations. On `scigrid-de` at 1e-4 — 60,552 variab
 | `dualStep` | 1.6% | 14,848 | 6.2 µs |
 | `scale` | 0.1% | 928 | 6.7 µs |
 
-**Sparse 54.5%, dense 45.5%.** SpMV is the largest single operation by a wide
-margin and it is not the majority of the time. Nearly half the solve is spent in
-six operations that are flat loops over contiguous `Array[Double]` — the ones a
-`Kernels` backend can vectorise without touching an index buffer.
+**Sparse 54.5%, dense 45.5% — of time inside `Kernels`.** That qualifier is not
+pedantry: the two shares are shares of the eight timed operations, not of the
+solve, and the harness measures the difference rather than assuming it away. The
+timed operations are 97% of the solve here, so the numbers are nearly the same
+either way; three reviews still caught this section stating one and meaning the
+other, because "nearly the same" is a measurement and not a definition.
+
+SpMV is the largest single operation by a wide margin and is not the majority.
+Nearly half the kernel time is six operations that are flat loops over contiguous
+`Array[Double]`.
 
 That reorders the acceleration work. A device backend has to move SpMV, which is
-the hard kernel and the one the Cyfra spike existed to answer; but the *cheap*
-half of the win is available on the CPU, in this repository, without a driver.
-There is no SIMD anywhere in this tree — `ScalaKernels` is scalar `while` loops
-by design, being the correctness oracle — so the 45.5% is entirely unexploited.
+the hard kernel and the one the Cyfra spike existed to answer; the other half is
+on the CPU, without a driver.
 
-The arithmetic is worth stating so it can be checked against later: at a 3×
-speedup on the dense operations and nothing on SpMV, the solve goes to
-54.5 + 45.5/3 = 69.7% of its time, or 1.43× faster. At 2×, 1.28×. Neither is the
-order of magnitude a GPU is for, and both are a fraction of the work.
+There is no SIMD in the *source* of this tree — `ScalaKernels` is scalar `while`
+loops by design, being the correctness oracle. There is a great deal of it in the
+generated code, which is the thing this section originally got wrong: at 3× on
+the dense operations the arithmetic gives 54.5 + 45.5/3 = 69.7%, or 1.43×, and at
+2× it gives 1.29×. Neither happened. The measured answer is **1.14×**, because
+most of those loops were already vector instructions and only the reductions were
+not — see *SIMD: 1.14x* below.
 
 ==On trusting these numbers==
 
-Two `System.nanoTime` reads per call, measured at **17.8 ns** per pair on this
-machine. Against `scigrid-de`'s cheapest operation at 5.5 µs that is 0.3%, and
+The instrument reads `System.nanoTime` twice per call, and the probe measures the
+interval between two reads: **17.8 ns** on this machine. That interval is the
+bias charged to each operation — the second read's overhead before the sample
+plus the first's after it — rather than the wall-clock cost of the pair, which is
+larger. Against `scigrid-de`'s cheapest operation at 5.5 µs that is 0.3%, and
 0.08% of the run — the shares are safe.
 
 They are *not* safe on a small network, and the tool prints the overhead so this
@@ -1862,123 +1872,88 @@ that would flatter the dense share.
 The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
 three runs) and the shares are what to read; absolute times are context.
 
-### SIMD: 1.08x, and the reason it is not more
+### SIMD: 1.14x, and three attempts to measure it
 
-The measurement above says 45.5% of a solve is dense loops with no SIMD in the
-source, and the obvious inference — vectorise them, get most of that half —
-gives the wrong answer. Written out beforehand it was "3x on the dense
-operations would be 1.43x overall". The measured result is **1.08x**, and the
-gap between those two numbers is the interesting part.
+Two of the three numbers this section carried before were wrong, and both were
+wrong for the same reason: the harness warmed up on a hardcoded `ScalaKernels`
+before the backend under test was chosen. The scalar arm entered measurement
+fully compiled; the vector arm entered with every widened loop never executed and
+every `kernels.*` site in `Pdhg` profiled on the wrong receiver. That understates
+the vector backend, and it understated it by about the size of the effect.
 
-**There was SIMD in the tree. It was just not in the source.** HotSpot's
-SuperWord pass auto-vectorises a simple `while` loop over contiguous arrays, so
-`axpby`, `scale` and `dualStep` were already running as vector instructions.
-Confirmed rather than assumed: under `-XX:-UseSuperWord` the reference `axpby`
-slows from 7.0 to 8.6 µs. Against a loop C2 has already widened, the Vector API
-brings only its own overhead — and loses.
+What survives is the explanation. What does not is the arithmetic and the
+conclusion drawn from it.
 
-What C2 will *not* do is reassociate floating-point addition, because that
-changes the answer. A reduction therefore stays scalar however simple it looks,
-and that is where the whole win is:
+==What C2 already does==
 
-| operation | ratio | why |
+HotSpot's SuperWord pass auto-vectorises a plain `while` loop over contiguous
+arrays, so `axpby`, `scale` and `dualStep` were vector instructions before any of
+this. Confirmed under `-XX:-UseSuperWord`, where the reference `axpby` slows from
+7.0 to 8.6 µs. What C2 will not do is reassociate floating-point addition, since
+that changes the answer, so a reduction stays scalar however simple it looks.
+
+That is where the win is, and at eight lanes it is large — drift-corrected,
+against the reference:
+
+| operation | 8 lanes | why |
 | --- | --- | --- |
-| `dot` | **1.65x faster** | reduction; C2 will not reassociate |
-| `squaredNorm` | **1.64x faster** | reduction |
-| `primalStep` | **1.27x faster** | data-dependent clamp per element |
-| `axpby` | 1.44x slower | C2 already vectorises it |
-| `dualStep` | 1.30x slower | C2 already vectorises it |
-| `scale` | 2.17x slower | C2 already vectorises it |
+| `dot` | **6.09x** | reduction; C2 will not reassociate |
+| `squaredNorm` | **5.77x** | reduction |
+| `primalStep` | **1.23x** | data-dependent clamp per element |
 
-So `VectorKernels` widens three operations and hands the other three back. All
-six widened came out at 1.029x — noise. The three that win, measured over
-interleaved runs to control for drift, give 5,602 ms against 5,202 ms: **1.077x**.
+And the whole solve moves from 12,463 ms to 10,182 ms: **1.14x** drift-corrected,
+1.22x raw.
 
-==Two lanes, and that is most of the story==
+==Widening the other three: no==
 
-`SPECIES_PREFERRED` is **2** here: Apple Silicon, 128-bit NEON, two doubles. That
-is the narrowest useful width, and two lanes leave almost nothing to pay the
-API's overhead with. On x86_64 with AVX2 (four) or AVX-512 (eight) the losing
-rows above could easily flip.
+The previous version of this section reported that widening `axpby`, `scale` and
+`dualStep` lost by 1.44x, 1.30x and 2.17x, and `VectorKernels` delegates them on
+that basis. Those figures were the warm-up artifact. Measured properly at eight
+lanes they lose by roughly **5%** — 0.94x, 0.96x, 0.95x — and the whole solve is
+**1.14x either way**, identical to two decimal places between three widened and
+six.
 
-Nothing here has measured that, and the honest position is that this result is
-about *this* machine. CI runs Linux/x86_64 and does not run this benchmark; doing
-so is the cheapest next measurement in this area, and it would either roughly
-double the win or leave it where it is.
+So the division stands and its justification does not. Widening all six is not
+worse in any way this can measure; it is simply not better, and three fewer
+hand-written loops is the tiebreak. `alsoWidenAutoVectorised` keeps both so the
+question stays a measurement.
 
-==One implementation trap, worth 3x==
+==Lane width barely matters, which is the useful finding==
 
-The first version held the species in a `private val`. `squaredNorm` then ran
-**three times slower** than the scalar loop it replaces — worse than not
-vectorising at all.
-
-`DoubleVector.SPECIES_PREFERRED` is a `static final` field, and HotSpot's vector
-intrinsics constant-fold on the species: read through an instance field it is an
-ordinary load, and the operations stop being intrinsified entirely. Referencing
-the JDK's field directly at each use site is the whole fix, and it is the
-difference between 70.6 µs and 13.7 µs on the same operation.
-
-That is worth recording because the failure is silent. The code is correct either
-way and passes every contract test either way; only the timing says which of the
-two things it compiled to.
-
-### Eight lanes: the reductions scale, the solve does not
-
-The section above measures 1.08x on Apple Silicon at two lanes and says the
-result is about that machine. CI's `kernel-split` job answers it on Linux/x86_64,
-where `SPECIES_PREFERRED` is **eight** — AVX-512, four times the width.
-
-The prediction written down beforehand was that eight lanes would "roughly double
-the win". It does not. The solve goes from 1.08x to **1.13x**.
-
-The reductions behave exactly as width suggests:
-
-| operation | 2 lanes | 8 lanes |
+| | 2 lanes (aarch64) | 8 lanes (x86_64) |
 | --- | --- | --- |
-| `squaredNorm` | 1.64x | **4.73x** |
-| `dot` | 1.65x | **3.38x** |
-| `primalStep` | 1.27x | 1.11x |
+| `dot` | 1.65x | 6.09x |
+| `squaredNorm` | 1.64x | 5.77x |
+| **whole solve** | **1.13x** | **1.14x** |
 
-`squaredNorm` at 4.73x is a fine result and it buys almost nothing, because
-`squaredNorm` and `dot` together are 15.5% of the solve on this machine. An
-*infinite* speedup on both caps the whole thing at about 1.18x. This is Amdahl
-rather than anything about the Vector API, and it is the answer to whether wider
-vectors change the picture: they change the operations and not the total.
+A four-fold width increase makes the reductions roughly four times faster and the
+solve 1% faster. That is Amdahl: `dot` and `squaredNorm` together are about 12%
+of the time inside `Kernels`, so an *infinite* speedup on both caps the solve at
+roughly 1.14x — which is where it already is. There is nothing further to win
+here at any width.
 
-`primalStep` going the other way — 1.27x at two lanes, 1.11x at eight — is not
-explained. It is the one widened operation that is not a reduction.
+The two arms are different machines as well as different widths, so width is not
+cleanly isolated. A `-XX:MaxVectorSize` sweep on one machine was attempted and
+does not answer it either: that flag bounds C2's auto-vectorisation as well as
+the Vector API, so a width-limited vector run has to be compared against a
+width-limited *scalar* run, and the first version compared it against a
+full-width one. The job now measures both arms at each width; the reporter
+refuses the comparison when a matching reference is missing rather than dividing
+anyway.
 
-==Two confounds, both measurable because the runs are interleaved==
+==What the shares are shares of==
 
-**The runner drifted.** Five of the eight operations are byte-identical code in
-both backends, since `VectorKernels` delegates them. Those five came out
-uniformly slower during the vector runs — 0.898x, 0.937x, 0.930x, 0.937x, 0.978x,
-mean **0.936** — which is machine load, not code. Raw, the solve ratio is 1.057x;
-corrected by that factor it is 1.13x. The truth is near the corrected figure and
-the correction is an estimate, so both are recorded.
+Every percentage here is a share of time inside `Kernels`, and that is now
+measured rather than assumed: the eight timed operations are **97%** of the
+solve, printed on every run. So shares of kernel time and shares of the solve are
+nearly the same number here — but they are not the same quantity, and three
+reviews in a row caught this section asserting one and meaning the other.
 
-That the control operations agree on a direction and roughly a magnitude is what
-makes the correction defensible. Had they scattered around 1.0, the right
-conclusion would have been that the run was too noisy to read.
-
-**The vector backend does more work.** It takes 1.3% more iterations — 30,317
-`spmv` calls against 29,930. Reductions in a different order give slightly
-different iterates, so the trajectory differs and the solve takes a few more
-steps. The per-call comparison above holds call counts at the scalar run's for
-this reason; a totals comparison would charge the vector backend for arithmetic
-the scalar one never did.
-
-==What this settles, and what it does not==
-
-It settles the lane question: wider vectors do not make this backend
-transformative, and the ceiling is set by what is *not* widened. On x86_64 `spmv`
-is 40–47% of the solve and `axpby` a further 24–28%.
-
-It does not settle whether `axpby`, `scale` and `dualStep` should be widened at
-eight lanes. They were handed back to SuperWord on two-lane evidence, and this
-run exercised only their delegated form, so it says nothing about them either
-way. That is the obvious next measurement if this line is pursued — and on the
-shares above, `axpby` is worth more than both reductions put together.
+The 12.7 s recorded for this configuration in the table above is not reproducible
+by this harness, which solves the same 14,848 iterations in about 5.5 s on
+aarch64 and 12.5 s on the CI runner. The obvious explanation was that the older
+figure was cold; it is not, since cold and warm come out within 1% of each other.
+The harness prints both and the discrepancy stays open.
 
 ### What `scigrid-de` cannot gate
 

@@ -11,64 +11,39 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * solve was running one lane at a time for no reason other than that nothing had
   * been written to do otherwise. This is that half.
   *
-  * ==Three operations, not six, and the reason is C2==
+  * ==Three operations, not six==
   *
-  * The first version widened every dense loop and came out 2.9% faster than the
-  * scalar reference, which is noise. Per operation it was not noise at all:
+  * HotSpot's SuperWord pass already auto-vectorises a plain `while` loop over
+  * contiguous arrays, so `axpby`, `scale` and `dualStep` were vector
+  * instructions before this file existed -- confirmed under `-XX:-UseSuperWord`,
+  * where the reference `axpby` slows from 7.0 to 8.6 us. What C2 will not do is
+  * reassociate floating-point addition, since that changes the answer, so a
+  * reduction stays scalar however simple it looks. That is where the win is:
+  * drift-corrected at eight lanes, `dot` 6.09x and `squaredNorm` 5.77x, with
+  * `primalStep` at 1.23x because its clamp is a data-dependent branch per
+  * element that SuperWord also declines.
   *
-  * {{{
-  * dot          1.65x faster     axpby     1.44x slower
-  * squaredNorm  1.64x faster     dualStep  1.30x slower
-  * primalStep   1.27x faster     scale     2.17x slower
-  * }}}
+  * The other three are delegated, and the reason is weaker than it once looked.
+  * An earlier measurement had them losing by 1.44x, 1.30x and 2.17x, which was
+  * an artifact of a harness that warmed up on the wrong backend. Measured
+  * properly they lose by about 5%, and the whole solve is **1.14x either way** --
+  * identical to two decimals between three widened and six. So this is a tiebreak
+  * on there being three fewer hand-written loops, not a performance argument, and
+  * [[VectorKernels.widenEverything]] keeps the other coverage so it stays a
+  * measurement.
   *
-  * The split is not arbitrary. HotSpot's SuperWord pass already auto-vectorises
-  * a simple `while` loop over contiguous arrays, so the straight-line arithmetic
-  * in `axpby`, `scale` and `dualStep` was *already* SIMD before this file existed
-  * -- confirmed by running the reference under `-XX:-UseSuperWord`, where
-  * `axpby` slows from 7.0 to 8.6 us. Against an already-vectorised loop the
-  * Vector API only adds its own overhead.
+  * ==Width barely matters==
   *
-  * What C2 will not do is reassociate floating-point addition, because that
-  * changes the answer -- so a reduction stays scalar however simple it looks.
-  * `dot` and `squaredNorm` are where the win is, and `primalStep` joins them
-  * because its clamp is a data-dependent branch per element, which SuperWord
-  * also declines.
-  *
-  * So the three operations C2 already handles are left to it. This is a measured
-  * division rather than a principled one, and it is measured on **two lanes**.
+  * Two lanes on aarch64 gives 1.13x; eight on x86_64 gives 1.14x. A four-fold
+  * width increase makes the reductions roughly four times faster and the solve 1%
+  * faster, because `dot` and `squaredNorm` together are about 12% of the time
+  * inside `Kernels` -- an infinite speedup on both caps the solve near where it
+  * already is. There is nothing further to win here at any width, and `spmv` at
+  * 40-55% is what sets the ceiling.
   *
   * `spmv` delegates unchanged: a CSR row is an indexed gather through a column
   * index buffer, which the Vector API can express but does not obviously win at,
-  * and widening it is a separate question with its own measurement. Claiming it
-  * here would be the pattern of asserting ahead of the evidence that this file
-  * exists because of. `copy` is already `System.arraycopy`, intrinsified.
-  *
-  * ==The lane count is the variable that matters==
-  *
-  * `SPECIES_PREFERRED` is **2** on the machine these numbers come from -- Apple
-  * Silicon, 128-bit NEON, two doubles. That is the narrowest useful width there
-  * is, and it is why the losses above are losses: two lanes leave almost no
-  * headroom to pay for the API's overhead.
-  *
-  * CI has since measured **eight** lanes on Linux/x86_64, and the answer is not
-  * the one predicted. The reductions scale roughly as the width suggests --
-  * `squaredNorm` 1.64x at two lanes becomes 4.73x at eight, `dot` 1.65x becomes
-  * 3.38x -- and the whole solve goes from 1.08x only to **1.13x**, because those
-  * two operations are 15% of it. Amdahl, not the Vector API: an infinite speedup
-  * on them caps the solve at about 1.18x.
-  *
-  * `primalStep` does not scale with width at all (1.27x at two lanes, 1.11x at
-  * eight), which is worth knowing and is not explained here.
-  *
-  * One thing that measurement does '''not''' settle: `axpby`, `scale` and
-  * `dualStep` were handed back to SuperWord on two-lane evidence, and this run
-  * exercised them only in their delegated form. Whether widening them wins at
-  * eight lanes is untested -- the numbers above say nothing about it either way.
-  *
-  * `KernelSplit` in `network-lopf` is the tool, and it prints the lane count in
-  * the backend name so no number from it can be read without the width that
-  * produced it.
+  * and widening it is a separate question with its own measurement.
   *
   * ==Reductions do not associate==
   *

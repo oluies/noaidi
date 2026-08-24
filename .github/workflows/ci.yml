@@ -183,11 +183,17 @@ jobs:
           # Decided at two lanes, never tested at more.
           run 3 vector-all
           run 3 scala
-          # Width isolated on one machine, which a cross-machine comparison
-          # cannot do: same host, same workload, 16 and 32 bytes give two and
-          # four lanes against the default eight.
+          # Width on one machine. Both arms at each width, which the first
+          # version got wrong: it ran only the vector arm width-limited and
+          # compared it against a full-width scalar reference, so the ratio
+          # mixed the width change with crippling SuperWord on the scalar side.
+          # `-XX:MaxVectorSize` bounds C2's auto-vectorisation too, not just the
+          # Vector API, so a width-limited run is only comparable to another
+          # width-limited run.
+          run 4 scala 16
           run 4 vector 16
-          run 4 vector 32
+          run 5 vector 32
+          run 5 scala 32
 
       # The reporter before the report, as `action-pins` and the drift job both
       # do. Its failure mode is publishing a plausible number computed from the

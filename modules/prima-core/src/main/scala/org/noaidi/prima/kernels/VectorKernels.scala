@@ -17,29 +17,35 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * contiguous arrays, so `axpby`, `scale` and `dualStep` were vector
   * instructions before this file existed -- confirmed under `-XX:-UseSuperWord`,
   * where the reference `axpby` slows from 7.0 to 8.6 us. What C2 will not do is
-  * reassociate floating-point addition, since that changes the answer, so a
-  * reduction stays scalar however simple it looks. That is where the win is:
-  * drift-corrected at eight lanes, `dot` 6.09x and `squaredNorm` 5.77x, with
-  * `primalStep` at 1.23x because its clamp is a data-dependent branch per
-  * element that SuperWord also declines.
+  * reassociate floating-point addition, so a reduction stays scalar however
+  * simple it looks. That is where the win is: `dot` and `squaredNorm` run 6.09x
+  * and 5.77x at eight lanes, with `primalStep` at 1.23x because its clamp is a
+  * data-dependent branch per element.
   *
-  * The other three are delegated, and the reason is weaker than it once looked.
-  * An earlier measurement had them losing by 1.44x, 1.30x and 2.17x, which was
-  * an artifact of a harness that warmed up on the wrong backend. Measured
-  * properly they lose by about 5%, and the whole solve is **1.14x either way** --
-  * identical to two decimals between three widened and six. So this is a tiebreak
-  * on there being three fewer hand-written loops, not a performance argument, and
-  * [[VectorKernels.widenEverything]] keeps the other coverage so it stays a
-  * measurement.
+  * The other three are delegated on a tiebreak rather than a measurement. An
+  * earlier figure had them losing by 1.44x to 2.17x, which was an artifact of a
+  * harness that warmed up on the wrong backend; measured properly they lose by
+  * about 5%, and on one runner widening all six came out *slower end to end* than
+  * widening three. Three fewer hand-written loops decides it.
+  * [[VectorKernels.widenEverything]] keeps the other coverage so it stays
+  * measurable.
   *
-  * ==Width barely matters==
+  * ==Per iteration is not per solve==
   *
-  * Two lanes on aarch64 gives 1.13x; eight on x86_64 gives 1.14x. A four-fold
-  * width increase makes the reductions roughly four times faster and the solve 1%
-  * faster, because `dot` and `squaredNorm` together are about 12% of the time
-  * inside `Kernels` -- an infinite speedup on both caps the solve near where it
-  * already is. There is nothing further to win here at any width, and `spmv` at
-  * 40-55% is what sets the ceiling.
+  * Reassociating the reductions changes the iterates, so the solve takes a
+  * different path. On one CI runner both backends took exactly 14,848 iterations
+  * and a 1.14x per-iteration gain carried through. On the next, this backend was
+  * 1.29x faster per iteration and needed **25.4% more iterations**, which very
+  * nearly cancelled: 1.03x end to end, and 0.95x for the six-operation coverage.
+  *
+  * So the per-operation numbers above are about the kernels and not about the
+  * solve, and the end-to-end benefit is between -5% and +14% depending on the
+  * machine and on whether the perturbation costs iterations. That is the reason
+  * this is opt-in beyond the JVM flag it needs.
+  *
+  * Two lanes is architecture-dependent in the same way and more sharply: 1.13x
+  * on aarch64, and **0.32x** on x86_64 under `-XX:MaxVectorSize=16` against a
+  * reference at the same width. `NOTES.md` carries the measurements.
   *
   * `spmv` delegates unchanged: a CSR row is an indexed gather through a column
   * index buffer, which the Vector API can express but does not obviously win at,

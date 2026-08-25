@@ -1850,7 +1850,7 @@ loops by design, being the correctness oracle. There is a great deal of it in th
 generated code, which is the thing this section originally got wrong: at 3× on
 the dense operations the arithmetic gives 54.5 + 45.5/3 = 69.7%, or 1.43×, and at
 2× it gives 1.29×. Neither happened. The measured answer is about **1.2× per
-iteration** and between **0.32× and 1.22× end to end**, because most of those
+iteration** and between **0.31× and 1.22× end to end**, because most of those
 loops were already vector instructions, only the reductions were not, and the
 reassociation that makes those fast can cost iterations — see *SIMD: 1.2x per
 iteration everywhere, and at best a wash at four lanes* below.
@@ -1897,14 +1897,14 @@ data-dependent branch per element.
 
 ==The whole result, in one table==
 
-Pooled over six CI sweeps — sixteen same-width comparisons — plus one local
+Pooled over seven CI sweeps — nineteen same-width comparisons — plus one local
 measurement on the only aarch64 machine available:
 
 | width | iterations against the reference | **end to end** | n | basis |
 | --- | --- | --- | --- | --- |
 | 2, aarch64 | same | **1.11x** | 1 | local |
-| 2, x86_64 | same | **0.32–0.38x** (median 0.35) | 5 | CI |
-| 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.97) | 7 | CI |
+| 2, x86_64 | same | about **⅓** — 0.31–0.38, median 0.34 | 6 | CI |
+| 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.98) | 9 | CI |
 | 8, x86_64 | same | **1.15–1.22x** (median 1.20) | 4 | CI |
 
 Ranges rather than point estimates, because every point estimate this section has
@@ -1913,12 +1913,17 @@ within each width is wider than the differences the earlier revisions were
 arguing about; the *signs* are what is stable, and they are stable in all
 sixteen.
 
-**And the ranges themselves are not tight.** The two-lane band was published as
-0.32–0.36 from five sweeps and the sixth came in at 0.38, outside it — a small
-miss in a figure whose sign was never in question, but a reminder that a
-min–max over four samples is a description of those samples rather than a
-prediction. Read the medians and the signs; treat the endpoints as the least
-reliable thing here.
+**And the ranges themselves are not tight — the two-lane one has now been missed
+twice running, in opposite directions.** It was published as 0.32–0.36 from five
+sweeps; the sixth came in at 0.38, above it, so it was widened to 0.32–0.38; the
+seventh came in at 0.31, below that. Six samples and every new one has been an
+endpoint.
+
+So that row is quoted as "about a third" rather than as a band that keeps
+moving. A min–max over a handful of samples describes those samples; it does not
+predict the next one, and continuing to widen it after each miss would be fitting
+the description to the data one point at a time. Read the medians and the signs;
+the endpoints are the least reliable thing here.
 
 **No figure in the table has a correction applied.** The reporter compares the
 control operations' spread against the size of the correction and withholds the
@@ -1936,7 +1941,8 @@ and the whole of the four-lane gap between them is the iteration count.
 
 Reassociating a sum changes its rounding, and the lane count decides how the
 partial sums are grouped, which moves the trajectory. Against the reference's
-14,848 iterations, four lanes takes **18,624** — reproduced in all six sweeps, at
+14,848 iterations, four lanes takes **18,624** — reproduced in all seven sweeps,
+at
 native width and under `-XX:MaxVectorSize=32` on a machine whose native width was
 eight, and identical to the digit every time. It is the one figure in this
 section that pooling did not have to turn into a range.
@@ -1961,15 +1967,17 @@ small loss** — five of the six comparisons land below 1.0, at native width and
 under `MaxVectorSize=32` alike, and the coverage that widens all six behaves the
 same.
 
-==Two lanes on x86_64 is 0.32–0.38x==
+==Two lanes on x86_64 is about a third==
 
 Against a reference at the same width, with matching iteration counts. In one of
-the five comparisons the vector backend takes 31,025 ms where the scalar
-reference takes 10,328; the five together run 0.32x to 0.38x, median 0.35 —
-about three times slower throughout. The same two lanes on aarch64 give
-1.11x. Whatever the Vector API costs per operation, x86's scalar and
-auto-vectorised paths absorb it and NEON's do not — so a lane count says nothing
-about an outcome without the architecture beside it.
+the six comparisons the vector backend takes 31,025 ms where the scalar reference
+takes 10,328; the six together run 0.31x to 0.38x, median 0.34 — about three
+times slower throughout, which is the part that has never moved.
+
+The same two lanes on aarch64 give 1.11x. Whatever the Vector API costs per
+operation, x86's scalar and auto-vectorised paths absorb it and NEON's do not —
+so a lane count says nothing about an outcome without the architecture beside
+it.
 
 ==What the sweeps cannot settle==
 
@@ -1989,7 +1997,7 @@ in code.
 ==Where this leaves it==
 
 Opt-in, and the case for anything more is weak. It needs a JVM flag, it perturbs
-the iterate trajectory, and across the machines measured it ranges from **0.32x
+the iterate trajectory, and across the machines measured it ranges from **0.31x
 to 1.22x end to end** with no way to know which without running it. The kernels
 are genuinely 1.2x faster per iteration and that is not the question a caller
 asks.

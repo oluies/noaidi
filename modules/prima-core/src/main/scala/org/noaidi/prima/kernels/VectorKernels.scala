@@ -44,7 +44,7 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * Reassociating a sum changes its rounding, and the lane count decides how the
   * partial sums are grouped. On `scigrid-de` the solve then takes measurably
   * longer at four lanes: against the reference's 14,848 iterations, two and eight
-  * come out level and four takes **18,624**, in all six CI sweeps at native width
+  * come out level and four takes **18,624**, in all seven CI sweeps at native width
   * and under `-XX:MaxVectorSize`, identical to the digit every time.
   *
   * These are iteration counts and not line-search trials. The harness printed
@@ -57,8 +57,8 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   *
   * {{{
   * 2 lanes, aarch64    1.11x            one local measurement
-  * 2 lanes, x86_64     0.32-0.38x       five CI comparisons
-  * 4 lanes, x86_64     0.86-1.03x       seven; 1.22x per iteration, 25.4% more
+  * 2 lanes, x86_64     about a third    six CI comparisons, 0.31-0.38
+  * 4 lanes, x86_64     0.86-1.03x       nine; 1.22x per iteration, 25.4% more
   * 8 lanes, x86_64     1.15-1.22x       four
   * }}}
   *

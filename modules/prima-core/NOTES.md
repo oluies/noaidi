@@ -1897,21 +1897,28 @@ data-dependent branch per element.
 
 ==The whole result, in one table==
 
-Pooled over five CI sweeps — thirteen same-width comparisons — plus one local
+Pooled over six CI sweeps — sixteen same-width comparisons — plus one local
 measurement on the only aarch64 machine available:
 
 | width | iterations against the reference | **end to end** | n | basis |
 | --- | --- | --- | --- | --- |
 | 2, aarch64 | same | **1.11x** | 1 | local |
-| 2, x86_64 | same | **0.32–0.36x** (median 0.34) | 4 | CI |
-| 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.98) | 6 | CI |
-| 8, x86_64 | same | **1.15–1.22x** (median 1.19) | 3 | CI |
+| 2, x86_64 | same | **0.32–0.38x** (median 0.35) | 5 | CI |
+| 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.97) | 7 | CI |
+| 8, x86_64 | same | **1.15–1.22x** (median 1.20) | 4 | CI |
 
 Ranges rather than point estimates, because every point estimate this section has
 published has been a single run and several have been withdrawn. The spread
 within each width is wider than the differences the earlier revisions were
 arguing about; the *signs* are what is stable, and they are stable in all
-thirteen.
+sixteen.
+
+**And the ranges themselves are not tight.** The two-lane band was published as
+0.32–0.36 from five sweeps and the sixth came in at 0.38, outside it — a small
+miss in a figure whose sign was never in question, but a reminder that a
+min–max over four samples is a description of those samples rather than a
+prediction. Read the medians and the signs; treat the endpoints as the least
+reliable thing here.
 
 Per iteration the vector backend is 1.19x to 1.23x on wall clock away from two
 lanes, and 1.20x to 1.24x on time inside `Kernels`. Only the four-lane row
@@ -1957,7 +1964,7 @@ same.
 
 Against a reference at the same width, with matching iteration counts: the
 vector backend takes 31,025 ms where the scalar reference takes 10,328 — three
-times slower, reproduced across sweeps. The same two lanes on aarch64 give
+times slower, and between 0.32x and 0.38x across five sweeps. The same two lanes on aarch64 give
 1.11x. Whatever the Vector API costs per operation, x86's scalar and
 auto-vectorised paths absorb it and NEON's do not — so a lane count says nothing
 about an outcome without the architecture beside it.

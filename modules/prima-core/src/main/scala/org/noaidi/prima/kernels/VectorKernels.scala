@@ -56,10 +56,10 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * coverage measured away from two lanes. End to end:
   *
   * {{{
-  * 2 lanes, aarch64    1.11x
-  * 2 lanes, x86_64     0.33x
-  * 4 lanes, x86_64     0.97x     1.22x per iteration, 25.4% more of them
-  * 8 lanes, x86_64     1.19x
+  * 2 lanes, aarch64    1.11x            one local measurement
+  * 2 lanes, x86_64     0.32-0.36x       four CI comparisons
+  * 4 lanes, x86_64     0.86-1.03x       six; 1.22x per iteration, 25.4% more
+  * 8 lanes, x86_64     1.15-1.22x       three
   * }}}
   *
   * So on a four-lane machine it is a net loss, and on x86_64 at two lanes it is

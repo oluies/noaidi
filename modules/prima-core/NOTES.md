@@ -1897,17 +1897,30 @@ data-dependent branch per element.
 
 ==The whole result, in one table==
 
-| width | per iteration | iterations against the reference | **end to end** | basis |
-| --- | --- | --- | --- | --- |
-| 2, aarch64 | 1.11x | same | **1.11x** | local, raw |
-| 2, x86_64 | 0.33x | same | **0.33x** | CI, raw — correction withheld |
-| 4, x86_64 | 1.22x | **+25.4%** | **0.97x** | CI, raw — correction withheld |
-| 8, x86_64 | 1.19x | same | **1.19x** | CI, raw — correction withheld |
+Pooled over five CI sweeps — thirteen same-width comparisons — plus one local
+measurement on the only aarch64 machine available:
 
-Every CI row is raw. The reporter compares the control operations' spread against
+| width | iterations against the reference | **end to end** | n | basis |
+| --- | --- | --- | --- | --- |
+| 2, aarch64 | same | **1.11x** | 1 | local |
+| 2, x86_64 | same | **0.32–0.36x** (median 0.34) | 4 | CI |
+| 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.98) | 6 | CI |
+| 8, x86_64 | same | **1.15–1.22x** (median 1.19) | 3 | CI |
+
+Ranges rather than point estimates, because every point estimate this section has
+published has been a single run and several have been withdrawn. The spread
+within each width is wider than the differences the earlier revisions were
+arguing about; the *signs* are what is stable, and they are stable in all
+thirteen.
+
+Per iteration the vector backend is 1.19x to 1.23x on wall clock away from two
+lanes, and 1.20x to 1.24x on time inside `Kernels`. Only the four-lane row
+differs between the two columns, and only because of the iteration count.
+
+The figures are raw. The reporter compares the control operations' spread against
 the size of the correction and withholds the corrected figure when the spread
-dominates, which it does on all three; where a correction was usable at all it
-came out at 1.002 and 1.003.
+dominates, which it does on most arms; where a correction survived it came out
+between 1.002 and 1.028, smaller than the spread between sweeps.
 
 The per-iteration column is remarkably flat away from two lanes. Wall clock runs
 1.19x to 1.23x and time inside `Kernels` 1.20x to 1.24x, across every arm, width
@@ -1933,11 +1946,12 @@ and report the same figure, so for those it is an inference rather than a
 measurement. The line search accepts essentially every step here, and the extra
 work is genuinely extra iterations.
 
-At 1.22x per iteration against 1.254x the iterations, the arithmetic is
-1.22/1.254 = 0.973 — and the measured end-to-end figure is 0.97x. **On a
-four-lane machine this backend is a net loss**, in every configuration the sweep
-ran: 0.97x at native width, 0.98x under `MaxVectorSize=32`, and 0.98x for the
-coverage that widens all six.
+At about 1.22x per iteration against 1.254x the iterations, the arithmetic gives
+1.22/1.254 = 0.973, and the six measured figures run 0.86x to 1.03x with a median
+of 0.98. **On a four-lane machine this backend is at best a wash and usually a
+small loss** — five of the six comparisons land below 1.0, at native width and
+under `MaxVectorSize=32` alike, and the coverage that widens all six behaves the
+same.
 
 ==Two lanes on x86_64 is 0.33x==
 
@@ -1966,8 +1980,8 @@ in code.
 ==Where this leaves it==
 
 Opt-in, and the case for anything more is weak. It needs a JVM flag, it perturbs
-the iterate trajectory, and across the machines measured it ranges from **0.33x
-to 1.19x end to end** with no way to know which without running it. The kernels
+the iterate trajectory, and across the machines measured it ranges from **0.32x
+to 1.22x end to end** with no way to know which without running it. The kernels
 are genuinely 1.2x faster per iteration and that is not the question a caller
 asks.
 

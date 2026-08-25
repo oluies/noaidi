@@ -154,8 +154,8 @@ jobs:
     # the job red on every PR: a benchmark that can block a merge is a gate
     # whatever its comment says.
     continue-on-error: true
-    # 50, not 30. The sweep grew from 8 sbt invocations to 14 and the four added
-    # ones are width-limited, which is the slowest kind -- a `MaxVectorSize=16`
+    # 50, not 30. The sweep is fourteen sbt invocations, eight of them
+    # width-limited, which is the slowest kind -- a `MaxVectorSize=16`
     # solve took 34 s, and each invocation runs a cold solve and a warm one. If
     # the job times out, `continue-on-error` keeps the workflow green and the
     # summary is the only thing this job produces, so the failure would present
@@ -237,7 +237,13 @@ jobs:
           # warning instead of a silently empty code block. sbt sends a forked
           # run's output through its logger on some configurations, so the
           # prefix is optional rather than assumed absent.
-          rows=$(grep -E "^(\[info\] )?(===|scigrid-de:|backend:|status |cold solve|iterations |wall clock|timing overhead)|^(\[info\] )?  [a-zA-Z]+ +[0-9]|sparse .*dense" split.log || true)
+          # Split across two patterns rather than one 190-character alternation:
+          # the header lines the harness prints, and the per-operation rows. The
+          # optional `[info] ` prefix is because sbt sends a forked run's output
+          # through its logger on some configurations.
+          headers='^(\[info\] )?(===|scigrid-de:|backend:|status |cold solve|iterations |wall clock|timing overhead)'
+          oprows='^(\[info\] )?  [a-zA-Z]+ +[0-9]|sparse .*dense'
+          rows=$(grep -E "$headers|$oprows" split.log || true)
           if [ -z "$rows" ]; then
             echo "::warning::the summary filter matched nothing; publishing the raw tail"
             rows=$(tail -60 split.log)

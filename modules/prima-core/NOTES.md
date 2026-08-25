@@ -1849,9 +1849,11 @@ There is no SIMD in the *source* of this tree — `ScalaKernels` is scalar `whil
 loops by design, being the correctness oracle. There is a great deal of it in the
 generated code, which is the thing this section originally got wrong: at 3× on
 the dense operations the arithmetic gives 54.5 + 45.5/3 = 69.7%, or 1.43×, and at
-2× it gives 1.29×. Neither happened. The measured answer is **1.14×**, because
-most of those loops were already vector instructions and only the reductions were
-not — see *SIMD: 1.14x* below.
+2× it gives 1.29×. Neither happened. The measured answer is about **1.2× per
+iteration** and between **0.33× and 1.19× end to end**, because most of those
+loops were already vector instructions, only the reductions were not, and the
+reassociation that makes those fast can cost iterations — see *SIMD: 1.2x per
+iteration everywhere, and a net loss at four lanes* below.
 
 ==On trusting these numbers==
 
@@ -1876,7 +1878,12 @@ three runs) and the shares are what to read; absolute times are context.
 
 Measured with the harness and the reporter both repaired — the earlier revisions
 of this section were measuring an asymmetric warm-up, then a drift estimator that
-had the iteration confound folded into it. What follows comes out of the job.
+had the iteration confound folded into it.
+
+The x86_64 rows come out of the CI job, with its counterbalancing, its same-width
+references and its control-spread test. The aarch64 row does not: there is no
+aarch64 runner, so it is a laptop measurement with none of that machinery behind
+it, and it is marked as such in the table.
 
 ==What C2 already does==
 
@@ -1890,15 +1897,21 @@ data-dependent branch per element.
 
 ==The whole result, in one table==
 
-| width | per iteration | iterations against the reference | **end to end** |
-| --- | --- | --- | --- |
-| 2, aarch64 | 1.11x | same | **1.11x** |
-| 2, x86_64 | 0.33x | same | **0.33x** |
-| 4, x86_64 | 1.22x | **+25.4%** | **0.97x** |
-| 8, x86_64 | 1.19x | same | **1.19x** |
+| width | per iteration | iterations against the reference | **end to end** | basis |
+| --- | --- | --- | --- | --- |
+| 2, aarch64 | 1.11x | same | **1.11x** | local, raw |
+| 2, x86_64 | 0.33x | same | **0.33x** | CI, raw — correction withheld |
+| 4, x86_64 | 1.22x | **+25.4%** | **0.97x** | CI, raw — correction withheld |
+| 8, x86_64 | 1.19x | same | **1.19x** | CI, raw — correction withheld |
 
-The per-iteration column is remarkably flat away from two lanes: 1.19x to 1.24x
-across every arm, width and coverage the sweeps have run. The end-to-end column
+Every CI row is raw. The reporter compares the control operations' spread against
+the size of the correction and withholds the corrected figure when the spread
+dominates, which it does on all three; where a correction was usable at all it
+came out at 1.002 and 1.003.
+
+The per-iteration column is remarkably flat away from two lanes. Wall clock runs
+1.19x to 1.23x and time inside `Kernels` 1.20x to 1.24x, across every arm, width
+and coverage the sweeps have run. The end-to-end column
 is not, and the difference between them is entirely the iteration count.
 
 ==Four lanes costs 25.4% more iterations, and that is a real iteration count==
@@ -1912,10 +1925,13 @@ eight.
 This was in doubt for two commits. The harness printed `primalStep` calls under
 the heading `iterations`, and `Pdhg.step` calls it inside `while !accepted do`,
 so the figure could have been line-search trials — which would have made it a
-statement about the acceptance test rather than about convergence. It now prints
-both, and they are equal: 18,624 iterations and 18,624 trials. The line search
-accepts essentially every step here, and the extra work is genuinely extra
-iterations.
+statement about the acceptance test rather than about convergence.
+
+The sweep run after the harness was repaired prints both, and they are equal:
+18,624 iterations and 18,624 trials. The three earlier sweeps printed one number
+and report the same figure, so for those it is an inference rather than a
+measurement. The line search accepts essentially every step here, and the extra
+work is genuinely extra iterations.
 
 At 1.22x per iteration against 1.254x the iterations, the arithmetic is
 1.22/1.254 = 0.973 — and the measured end-to-end figure is 0.97x. **On a
@@ -1925,8 +1941,9 @@ coverage that widens all six.
 
 ==Two lanes on x86_64 is 0.33x==
 
-Against a reference at the same width, with matching iteration counts: 31,025 ms
-against 10,328 ms, reproduced across sweeps. The same two lanes on aarch64 give
+Against a reference at the same width, with matching iteration counts: the
+vector backend takes 31,025 ms where the scalar reference takes 10,328 — three
+times slower, reproduced across sweeps. The same two lanes on aarch64 give
 1.11x. Whatever the Vector API costs per operation, x86's scalar and
 auto-vectorised paths absorb it and NEON's do not — so a lane count says nothing
 about an outcome without the architecture beside it.
@@ -1954,7 +1971,10 @@ to 1.19x end to end** with no way to know which without running it. The kernels
 are genuinely 1.2x faster per iteration and that is not the question a caller
 asks.
 
-`dot` and `squaredNorm` are about 12% of the time inside `Kernels`. `spmv` at
+`dot` and `squaredNorm` are **17.3%** of the time inside `Kernels` on the
+reference arm of the sweep these figures come from — the share moves between runs
+and machines, and the table forty lines above gives 14.8% for the same two
+operations on an earlier one, which is why the run has to be named. `spmv` at
 40–55% is the ceiling that matters, and it is untouched.
 
 ==What the shares are shares of==
@@ -1963,9 +1983,13 @@ Every percentage here is a share of time inside `Kernels`, measured rather than
 assumed: the timed operations are 96–97% of the solve, printed on every run.
 
 The 12.7 s recorded for this configuration in the table above is still not
-reproducible — about 5.4 s on aarch64 and 9.9–13.3 s across CI runners, same
-14,848 iterations. Cold-versus-warm was the obvious explanation and is not it,
-since the two come out within 1% of each other, so the discrepancy stays open.
+reproducible — about 5.4 s on aarch64, and 9.9–13.3 s across CI runners at their
+native width, same 14,848 iterations. The width-limited references are excluded
+from that range: `-XX:MaxVectorSize` throttles SuperWord on the scalar arm too,
+so they are a different configuration.
+
+Cold-versus-warm was the obvious explanation and is not it, since the two come
+out within 1% of each other, so the discrepancy stays open.
 
 ### What `scigrid-de` cannot gate
 

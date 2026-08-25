@@ -18,30 +18,39 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * instructions before this file existed -- confirmed under `-XX:-UseSuperWord`,
   * where the reference `axpby` slows from 7.0 to 8.6 us. What C2 will not do is
   * reassociate floating-point addition, so a reduction stays scalar however
-  * simple it looks. That is where the win is: `dot` and `squaredNorm` run 6.09x
-  * and 5.77x at eight lanes, with `primalStep` at 1.23x because its clamp is a
-  * data-dependent branch per element.
+  * simple it looks. That is where the win is: `dot` and `squaredNorm` run
+  * several times faster, with `primalStep` gaining less because its clamp is a
+  * data-dependent branch per element rather than a reduction.
+  *
+  * Per-operation figures are deliberately not quoted here. The ones this file
+  * carried came from a drift estimator that has since been replaced, on an arm
+  * where the repaired reporter declines to publish a corrected number at all --
+  * so they were pre-repair numbers surviving in shipped source after being
+  * deleted from `NOTES.md`. `NOTES.md` and the CI job's summary carry the
+  * current ones.
   *
   * The other three are delegated on a tiebreak rather than a measurement, and two
   * successive figures said otherwise before this settled. A first had them losing
   * by 1.44x to 2.17x, which was a harness that warmed up on the wrong backend. A
-  * second had widening all six coming out slower end to end, which was the
-  * four-lane run, where both coverages carry the same convergence penalty. At
-  * eight lanes the two are indistinguishable -- 1.22x against 1.18x, then 1.19x
-  * against 1.21x, the ordering reversing between runs. Nothing measured here
-  * prefers three to six; three fewer hand-written loops decides it.
+  * second had widening all six coming out slower end to end, which was one
+  * four-lane run, where both coverages carry the same convergence penalty.
+  * Measured since, the two coverages come out level. Nothing measured prefers
+  * three to six; three fewer hand-written loops decides it.
   * [[VectorKernels.widenEverything]] keeps the other coverage so it stays
   * measurable.
   *
   * ==Faster per iteration, and that is not the question a caller asks==
   *
   * Reassociating a sum changes its rounding, and the lane count decides how the
-  * partial sums are grouped -- which on `scigrid-de` moves the trajectory.
-  * Against the reference's 14,848 iterations, two and eight lanes come out level
-  * and four takes **18,624**, reproduced in four CI sweeps at native width and
-  * under `-XX:MaxVectorSize`. These are iteration counts, confirmed against the
-  * line-search trial count printed beside them: the two are equal, so the extra
-  * work is convergence and not rejected steps.
+  * partial sums are grouped. On `scigrid-de` the solve then takes measurably
+  * longer at four lanes: against the reference's 14,848 iterations, two and eight
+  * come out level and four takes **18,624**, in four CI sweeps at native width
+  * and under `-XX:MaxVectorSize`.
+  *
+  * These are iteration counts and not line-search trials. The harness printed
+  * only one number under the heading `iterations` until it was repaired; the
+  * sweep run since prints both and they are equal, and the three earlier sweeps
+  * report the same figure.
   *
   * Per iteration this backend is 1.19x to 1.24x faster on every width and
   * coverage measured away from two lanes. End to end:

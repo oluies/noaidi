@@ -192,10 +192,16 @@ def report(runs: list[dict]) -> list[str]:
             out.append(f"- Line-search trials per iteration: reference {tr:.3f}, "
                        f"`{name}` {tv:.3f}.")
             if abs(tv / tr - 1) > 0.01:
+                # Symmetric, because the quantity is signed: the guard fires for
+                # *fewer* trials too, and the previous wording then said "-3.2%
+                # more trials ... is more kernel work charged as slowness",
+                # which is backwards twice. Both ratios are named, since the
+                # wall-clock one is the figure this report calls end-to-end.
                 out.append(
-                    f"  **The per-iteration kernel ratio is confounded by this**: kernel calls "
-                    f"scale with trials, so {100 * (tv / tr - 1):+.1f}% more trials per iteration "
-                    "is more kernel work charged to the backend as slowness."
+                    f"  **Both per-iteration ratios below are confounded by this**: kernel calls "
+                    f"scale with trials, so `{name}` does {100 * (tv / tr - 1):+.1f}% "
+                    "the kernel work per iteration for a reason that is not its speed, and the "
+                    "ratios charge that to the backend."
                 )
 
         ri = {r["iterations"] for r in ref if r["iterations"]}
@@ -231,7 +237,14 @@ def report(runs: list[dict]) -> list[str]:
             out.append(f"- Controls (identical code in both): {listed}.")
             if drift:
                 width_of_spread = max(each.values()) - min(each.values())
-                usable_drift = width_of_spread <= 2 * abs(drift - 1.0) or width_of_spread < 0.02
+                # A correction that is essentially the identity cannot be
+                # unusable: with drift at 1.000 the `2 * abs(drift - 1)` term is
+                # zero, so any spread at all condemned a correction that changes
+                # nothing -- and blanked the per-operation table with it.
+                correction = abs(drift - 1.0)
+                usable_drift = (correction < 0.005
+                                or width_of_spread <= 2 * correction
+                                or width_of_spread < 0.02)
                 out.append(
                     f"- Time-weighted drift **{drift:.3f}**, controls spanning {spread} — "
                     "**below** 1.0 means the machine was slower during the "
@@ -267,6 +280,10 @@ def report(runs: list[dict]) -> list[str]:
         # Per operation, computed here rather than by hand from the raw block.
         # Every previously published per-operation figure was derived in a
         # notebook, which is the practice this script exists to end.
+        # The corrected column exists only when there is a correction to put in
+        # it. Emitting the heading with a column of dashes advertises a quantity
+        # the run did not produce, which is the shape of every figure this
+        # section has had to withdraw.
         ops = sorted({o for r in ref + rs for o in r["ops"]})
         rows = []
         for o in ops:
@@ -274,11 +291,16 @@ def report(runs: list[dict]) -> list[str]:
             if not a or not b:
                 continue
             raw = a / b
-            corrected = f"{raw / drift:.2f}x" if drift else "—"
-            rows.append(f"| `{o}` | {a:.1f} µs | {b:.1f} µs | {raw:.2f}x | {corrected} |")
+            cell = f" {raw / drift:.2f}x |" if drift else ""
+            rows.append(f"| `{o}` | {a:.1f} µs | {b:.1f} µs | {raw:.2f}x |{cell}")
         if rows:
-            out.append("\n| operation | reference | this backend | raw | drift-corrected |")
-            out.append("| --- | --- | --- | --- | --- |")
+            head = "| operation | reference | this backend | raw |"
+            rule = "| --- | --- | --- | --- |"
+            if drift:
+                head += " drift-corrected |"
+                rule += " --- |"
+            out.append("\n" + head)
+            out.append(rule)
             out.extend(rows)
     return out
 

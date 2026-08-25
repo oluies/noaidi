@@ -36,8 +36,14 @@ def run(log_text):
     return out.stdout + out.stderr
 
 
-def entry(backend, wall, kernels, iterations, ops):
-    lines = [f"backend: {backend}", f"iterations {iterations}",
+def entry(backend, wall, kernels, iterations, ops, trials=None):
+    # The real one-line format the harness prints. Emitted here so `TRIALS` is
+    # driven by a fixture: without one, deleting the regex left all sixteen
+    # cases green while the summary silently lost the trial block -- which is
+    # the measured-then-discarded behaviour the feature exists to end.
+    trials = iterations if trials is None else trials
+    lines = [f"backend: {backend}",
+             f"iterations {iterations} (line-search trials {trials})",
              f"wall clock {wall} ms, in kernels {kernels} ms"]
     for name, (us, calls) in ops.items():
         lines.append(f"  {name}       {us} ms   10.0%   {calls} calls   {us} us/call")
@@ -149,8 +155,12 @@ def coverage(backend):
                   "scale": ("2.0", 100), "dualStep": ("3.0", 100), "dot": ("20.0", 100)})
 
 out = run(coverage("scala-reference") + coverage("scala-vector-8"))
+# Scoped to the `- Controls` line. Searching the whole output cannot fail: the
+# per-operation table lists every name unconditionally, so the assertion passed
+# even with `controls_for` returning nothing extra.
+controls = next((l for l in out.splitlines() if l.startswith("- Controls")), "")
 check("the default coverage counts the delegated three as controls",
-      "`axpby`" in out and "`dualStep`" in out and "`scale`" in out, out)
+      all(f"`{o}`" in controls for o in ("axpby", "dualStep", "scale")), controls)
 
 out = run(coverage("scala-reference") + coverage("scala-vector-8-all"))
 controls = next((l for l in out.splitlines() if l.startswith("- Controls")), "")
@@ -171,6 +181,41 @@ zerocalls = (entry("scala-reference", "100.0", "100.0", 100,
 out = run(zerocalls)
 check("an uncalled operation does not crash the drift block",
       "Traceback" not in out and "**2.00x**" in out, out)
+
+# Trials, which had no fixture at all.
+tr = (entry("scala-reference", "100.0", "100.0", 100,
+            {"spmv": ("50.0", 100), "copy": ("5.0", 100)}, trials=100) +
+      entry("scala-vector-8", "100.0", "100.0", 100,
+            {"spmv": ("50.0", 100), "copy": ("5.0", 100)}, trials=125))
+out = run(tr)
+check("trials per iteration are reported", "trials per iteration" in out, out)
+check("a divergent rejection rate is called a confound",
+      "confounded by this" in out and "+25.0%" in out, out)
+
+# ... and does not fire when the rates match.
+out = run(entry("scala-reference", "100.0", "100.0", 100,
+                {"spmv": ("50.0", 100), "copy": ("5.0", 100)}) +
+          entry("scala-vector-8", "50.0", "50.0", 100,
+                {"spmv": ("50.0", 100), "copy": ("5.0", 100)}))
+check("matching rejection rates raise no confound", "confounded by this" not in out, out)
+
+# The withholding rule decides how every published ratio reads, and both real
+# runs cited fall on the withheld side. Neither branch had a case.
+wide = (entry("scala-reference", "100.0", "100.0", 100,
+              {"spmv": ("50.0", 100), "copy": ("5.0", 100)}) +
+        entry("scala-vector-8", "50.0", "50.0", 100,
+              {"spmv": ("40.0", 100), "copy": ("10.0", 100)}))
+out = run(wide)
+check("a wide control spread withholds the correction",
+      "the correction is not usable" in out and "drift-corrected" not in out, out)
+
+narrow = (entry("scala-reference", "100.0", "100.0", 100,
+                {"spmv": ("50.0", 100), "copy": ("5.0", 100)}) +
+          entry("scala-vector-8", "50.0", "50.0", 100,
+                {"spmv": ("55.0", 100), "copy": ("5.6", 100)}))
+out = run(narrow)
+check("agreeing controls keep the correction",
+      "drift-corrected" in out and "the correction is not usable" not in out, out)
 
 out = run("nothing useful here\n")
 check("says so when there are no runs", "No runs found" in out, out)

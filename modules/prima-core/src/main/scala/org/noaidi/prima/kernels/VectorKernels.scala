@@ -44,13 +44,13 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * Reassociating a sum changes its rounding, and the lane count decides how the
   * partial sums are grouped. On `scigrid-de` the solve then takes measurably
   * longer at four lanes: against the reference's 14,848 iterations, two and eight
-  * come out level and four takes **18,624**, in four CI sweeps at native width
-  * and under `-XX:MaxVectorSize`.
+  * come out level and four takes **18,624**, in all six CI sweeps at native width
+  * and under `-XX:MaxVectorSize`, identical to the digit every time.
   *
   * These are iteration counts and not line-search trials. The harness printed
   * only one number under the heading `iterations` until it was repaired; the
-  * sweep run since prints both and they are equal, and the three earlier sweeps
-  * report the same figure.
+  * three sweeps run since print both and find them equal, and the three earlier
+  * ones report the same figure.
   *
   * Per iteration this backend is 1.19x to 1.24x faster on every width and
   * coverage measured away from two lanes. End to end:
@@ -62,8 +62,9 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * 8 lanes, x86_64     1.15-1.22x       four
   * }}}
   *
-  * So on a four-lane machine it is a net loss, and on x86_64 at two lanes it is
-  * three times slower than the scalar reference at the same width. The kernels
+  * So on a four-lane machine it is at best a wash and usually a small loss, and
+  * on x86_64 at two lanes it is about three times slower than the scalar
+  * reference at the same width. The kernels
   * are genuinely faster; whether the solve is depends on where the lane count
   * lands. `NOTES.md` carries the measurements and the confounds.
   *

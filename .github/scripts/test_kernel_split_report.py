@@ -190,7 +190,7 @@ tr = (entry("scala-reference", "100.0", "100.0", 100,
 out = run(tr)
 check("trials per iteration are reported", "trials per iteration" in out, out)
 check("a divergent rejection rate is called a confound",
-      "confounded by this" in out and "+25.0%" in out, out)
+      "confounded by this" in out and "125.0% of the reference's" in out, out)
 
 # ... and does not fire when the rates match.
 out = run(entry("scala-reference", "100.0", "100.0", 100,
@@ -209,12 +209,27 @@ out = run(wide)
 check("a wide control spread withholds the correction",
       "the correction is not usable" in out and "drift-corrected" not in out, out)
 
+# Spread past 0.02 so the `width_of_spread < 0.02` shortcut cannot carry it, and
+# a correction large enough that `correction < 0.005` cannot either: only the
+# `2 * correction` clause is left to publish this.
 narrow = (entry("scala-reference", "100.0", "100.0", 100,
                 {"spmv": ("50.0", 100), "copy": ("5.0", 100)}) +
           entry("scala-vector-8", "50.0", "50.0", 100,
-                {"spmv": ("55.0", 100), "copy": ("5.6", 100)}))
+                {"spmv": ("58.0", 100), "copy": ("5.2", 100)}))
 out = run(narrow)
 check("agreeing controls keep the correction",
+      "drift-corrected" in out and "the correction is not usable" not in out, out)
+
+# The near-identity floor, which was the one branch of three with no fixture --
+# in the commit whose subject was that the named feature is the untested one.
+# Controls disagree wildly (0.5) but the time-weighted drift is ~0.995, so the
+# correction changes nothing and must not be condemned for the spread.
+identity = (entry("scala-reference", "100.0", "100.0", 100,
+                  {"spmv": ("100.0", 1000), "copy": ("100.0", 5)}) +
+            entry("scala-vector-8", "100.0", "100.0", 100,
+                  {"spmv": ("100.0", 1000), "copy": ("200.0", 5)}))
+out = run(identity)
+check("a near-identity correction survives a wide spread",
       "drift-corrected" in out and "the correction is not usable" not in out, out)
 
 out = run("nothing useful here\n")

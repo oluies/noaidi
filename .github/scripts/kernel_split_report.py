@@ -199,9 +199,9 @@ def report(runs: list[dict]) -> list[str]:
                 # wall-clock one is the figure this report calls end-to-end.
                 out.append(
                     f"  **Both per-iteration ratios below are confounded by this**: kernel calls "
-                    f"scale with trials, so `{name}` does {100 * (tv / tr - 1):+.1f}% "
-                    "the kernel work per iteration for a reason that is not its speed, and the "
-                    "ratios charge that to the backend."
+                    f"scale with trials, so `{name}` does {100 * tv / tr:.1f}% of the reference's "
+                    "kernel work per iteration for a reason that is not its speed, and the ratios "
+                    "charge that to the backend."
                 )
 
         ri = {r["iterations"] for r in ref if r["iterations"]}

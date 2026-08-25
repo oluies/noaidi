@@ -1850,10 +1850,10 @@ loops by design, being the correctness oracle. There is a great deal of it in th
 generated code, which is the thing this section originally got wrong: at 3× on
 the dense operations the arithmetic gives 54.5 + 45.5/3 = 69.7%, or 1.43×, and at
 2× it gives 1.29×. Neither happened. The measured answer is about **1.2× per
-iteration** and between **0.33× and 1.19× end to end**, because most of those
+iteration** and between **0.32× and 1.22× end to end**, because most of those
 loops were already vector instructions, only the reductions were not, and the
 reassociation that makes those fast can cost iterations — see *SIMD: 1.2x per
-iteration everywhere, and a net loss at four lanes* below.
+iteration everywhere, and at best a wash at four lanes* below.
 
 ==On trusting these numbers==
 
@@ -1874,7 +1874,7 @@ that would flatter the dense share.
 The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
 three runs) and the shares are what to read; absolute times are context.
 
-### SIMD: 1.2x per iteration everywhere, and a net loss at four lanes
+### SIMD: 1.2x per iteration everywhere, and at best a wash at four lanes
 
 Measured with the harness and the reporter both repaired — the earlier revisions
 of this section were measuring an asymmetric warm-up, then a drift estimator that
@@ -1920,38 +1920,39 @@ min–max over four samples is a description of those samples rather than a
 prediction. Read the medians and the signs; treat the endpoints as the least
 reliable thing here.
 
-Per iteration the vector backend is 1.19x to 1.23x on wall clock away from two
-lanes, and 1.20x to 1.24x on time inside `Kernels`. Only the four-lane row
-differs between the two columns, and only because of the iteration count.
+**No figure in the table has a correction applied.** The reporter compares the
+control operations' spread against the size of the correction and withholds the
+corrected figure when the spread dominates, and it withheld on every arm
+contributing an endpoint above. Corrections did survive on a few arms — the
+largest 1.028, on an eight-lane `-all` run — and all of them are smaller than the
+spread between sweeps, which is why pooling raw figures loses nothing here.
 
-The figures are raw. The reporter compares the control operations' spread against
-the size of the correction and withholds the corrected figure when the spread
-dominates, which it does on most arms; where a correction survived it came out
-between 1.002 and 1.028, smaller than the spread between sweeps.
-
-The per-iteration column is remarkably flat away from two lanes. Wall clock runs
-1.19x to 1.23x and time inside `Kernels` 1.20x to 1.24x, across every arm, width
-and coverage the sweeps have run. The end-to-end column
-is not, and the difference between them is entirely the iteration count.
+The per-iteration figures are remarkably flat away from two lanes: 1.19x to
+1.23x on wall clock and 1.20x to 1.24x on time inside `Kernels`, across every
+arm, width and coverage the sweeps have run. The end-to-end column is not flat,
+and the whole of the four-lane gap between them is the iteration count.
 
 ==Four lanes costs 25.4% more iterations, and that is a real iteration count==
 
 Reassociating a sum changes its rounding, and the lane count decides how the
 partial sums are grouped, which moves the trajectory. Against the reference's
-14,848 iterations, four lanes takes **18,624** — reproduced in four sweeps, at
+14,848 iterations, four lanes takes **18,624** — reproduced in all six sweeps, at
 native width and under `-XX:MaxVectorSize=32` on a machine whose native width was
-eight.
+eight, and identical to the digit every time. It is the one figure in this
+section that pooling did not have to turn into a range.
 
 This was in doubt for two commits. The harness printed `primalStep` calls under
 the heading `iterations`, and `Pdhg.step` calls it inside `while !accepted do`,
 so the figure could have been line-search trials — which would have made it a
 statement about the acceptance test rather than about convergence.
 
-The sweep run after the harness was repaired prints both, and they are equal:
-18,624 iterations and 18,624 trials. The three earlier sweeps printed one number
-and report the same figure, so for those it is an inference rather than a
-measurement. The line search accepts essentially every step here, and the extra
-work is genuinely extra iterations.
+Three sweeps have run since the harness was repaired, and all three print both
+and find them equal: 18,624 iterations and 18,624 trials, with the trial rate at
+1.000 on every arm. The three earlier sweeps printed one number and report the
+same figure, so for those it is an inference rather than a measurement.
+
+The line search accepts essentially every step here, so the extra work is
+genuinely extra iterations.
 
 At about 1.22x per iteration against 1.254x the iterations, the arithmetic gives
 1.22/1.254 = 0.973, and the six measured figures run 0.86x to 1.03x with a median
@@ -1960,11 +1961,12 @@ small loss** — five of the six comparisons land below 1.0, at native width and
 under `MaxVectorSize=32` alike, and the coverage that widens all six behaves the
 same.
 
-==Two lanes on x86_64 is 0.33x==
+==Two lanes on x86_64 is 0.32–0.38x==
 
-Against a reference at the same width, with matching iteration counts: the
-vector backend takes 31,025 ms where the scalar reference takes 10,328 — three
-times slower, and between 0.32x and 0.38x across five sweeps. The same two lanes on aarch64 give
+Against a reference at the same width, with matching iteration counts. In one of
+the five comparisons the vector backend takes 31,025 ms where the scalar
+reference takes 10,328; the five together run 0.32x to 0.38x, median 0.35 —
+about three times slower throughout. The same two lanes on aarch64 give
 1.11x. Whatever the Vector API costs per operation, x86's scalar and
 auto-vectorised paths absorb it and NEON's do not — so a lane count says nothing
 about an outcome without the architecture beside it.
@@ -1994,8 +1996,9 @@ asks.
 
 `dot` and `squaredNorm` are **17.3%** of the time inside `Kernels` on the
 reference arm of the sweep these figures come from — the share moves between runs
-and machines, and the table forty lines above gives 14.8% for the same two
-operations on an earlier one, which is why the run has to be named. `spmv` at
+and machines, and the share table under *Where the time actually goes* gives
+14.8% for the same two operations on an earlier one, which is why the run has to
+be named. `spmv` at
 40–55% is the ceiling that matters, and it is untouched.
 
 ==What the shares are shares of==

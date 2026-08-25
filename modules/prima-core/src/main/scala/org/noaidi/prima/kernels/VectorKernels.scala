@@ -48,9 +48,9 @@ import jdk.incubator.vector.{DoubleVector, VectorOperators, VectorSpecies}
   * and under `-XX:MaxVectorSize`, identical to the digit every time.
   *
   * These are iteration counts and not line-search trials. The harness printed
-  * only one number under the heading `iterations` until it was repaired; the
-  * three sweeps run since print both and find them equal, and the three earlier
-  * ones report the same figure.
+  * only one number under the heading `iterations` until it was repaired; the four
+  * sweeps run since print both and find them equal, and the three before them
+  * report the same figure.
   *
   * Per iteration this backend is 1.19x to 1.24x faster on every width and
   * coverage measured away from two lanes. End to end:

@@ -1903,21 +1903,21 @@ measurement on the only aarch64 machine available:
 | width | iterations against the reference | **end to end** | n | basis |
 | --- | --- | --- | --- | --- |
 | 2, aarch64 | same | **1.11x** | 1 | local |
-| 2, x86_64 | same | about **⅓** — 0.31–0.38, median 0.34 | 6 | CI |
+| 2, x86_64 | same | about **0.33x** — samples 0.31x–0.38x, median 0.34x | 6 | CI |
 | 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.98) | 9 | CI |
 | 8, x86_64 | same | **1.15–1.22x** (median 1.20) | 4 | CI |
 
 Ranges rather than point estimates, because every point estimate this section has
 published has been a single run and several have been withdrawn. The spread
 within each width is wider than the differences the earlier revisions were
-arguing about; the *signs* are what is stable, and they are stable in all
-sixteen.
+arguing about; the *signs* are what is stable, and they are stable in every
+comparison in the table.
 
 **And the ranges themselves are not tight — the two-lane one has now been missed
-twice running, in opposite directions.** It was published as 0.32–0.36 from five
-sweeps; the sixth came in at 0.38, above it, so it was widened to 0.32–0.38; the
-seventh came in at 0.31, below that. Six samples and every new one has been an
-endpoint.
+twice running, in opposite directions.** It was published as 0.32–0.36 from four
+comparisons; the fifth came in at 0.38, above it, so it was widened to 0.32–0.38;
+the sixth came in at 0.31, below that. Six comparisons, and the last two have
+both been endpoints.
 
 So that row is quoted as "about a third" rather than as a band that keeps
 moving. A min–max over a handful of samples describes those samples; it does not
@@ -1927,8 +1927,8 @@ the endpoints are the least reliable thing here.
 
 **No figure in the table has a correction applied.** The reporter compares the
 control operations' spread against the size of the correction and withholds the
-corrected figure when the spread dominates, and it withheld on every arm
-contributing an endpoint above. Corrections did survive on a few arms — the
+corrected figure when the spread dominates, and it withheld on every arm in the
+table above. Corrections did survive on a few arms — the
 largest 1.028, on an eight-lane `-all` run — and all of them are smaller than the
 spread between sweeps, which is why pooling raw figures loses nothing here.
 
@@ -1942,9 +1942,8 @@ and the whole of the four-lane gap between them is the iteration count.
 Reassociating a sum changes its rounding, and the lane count decides how the
 partial sums are grouped, which moves the trajectory. Against the reference's
 14,848 iterations, four lanes takes **18,624** — reproduced in all seven sweeps,
-at
-native width and under `-XX:MaxVectorSize=32` on a machine whose native width was
-eight, and identical to the digit every time. It is the one figure in this
+at native width and under `-XX:MaxVectorSize=32` on machines whose native width
+was eight, and identical to the digit every time. It is the one figure in this
 section that pooling did not have to turn into a range.
 
 This was in doubt for two commits. The harness printed `primalStep` calls under
@@ -1952,20 +1951,23 @@ the heading `iterations`, and `Pdhg.step` calls it inside `while !accepted do`,
 so the figure could have been line-search trials — which would have made it a
 statement about the acceptance test rather than about convergence.
 
-Three sweeps have run since the harness was repaired, and all three print both
-and find them equal: 18,624 iterations and 18,624 trials, with the trial rate at
-1.000 on every arm. The three earlier sweeps printed one number and report the
-same figure, so for those it is an inference rather than a measurement.
+Four sweeps have run since the harness was repaired, and all four print both and
+find them equal: 18,624 iterations and 18,624 trials, with the trial rate at
+1.000 on every arm. The three before it printed one number and report the same
+figure, so for those it is an inference rather than a measurement — four measured
+and three inferred, against the seven the table pools.
 
 The line search accepts essentially every step here, so the extra work is
 genuinely extra iterations.
 
 At about 1.22x per iteration against 1.254x the iterations, the arithmetic gives
-1.22/1.254 = 0.973, and the six measured figures run 0.86x to 1.03x with a median
-of 0.98. **On a four-lane machine this backend is at best a wash and usually a
-small loss** — five of the six comparisons land below 1.0, at native width and
-under `MaxVectorSize=32` alike, and the coverage that widens all six behaves the
-same.
+1.22/1.254 = 0.973, which is the row's median. **On a four-lane machine this
+backend is at best a wash and usually a small loss** — seven of the nine
+comparisons land below 1.0, at native width and under `MaxVectorSize=32` alike,
+and the coverage that widens all six operations behaves the same.
+
+The two above 1.0 are both 1.03x, so nothing in the sample reaches the
+per-iteration gain.
 
 ==Two lanes on x86_64 is about a third==
 
@@ -1981,10 +1983,11 @@ it.
 
 ==What the sweeps cannot settle==
 
-**The runner's width is not stable.** Four sweeps reported `SPECIES_PREFERRED` of
-8, 4, 8 and 4. Any figure from this job belongs to the machine that run landed
-on, which is why the width is swept explicitly rather than taken from whatever
-turned up.
+**The runner's width is not stable.** The seven sweeps reported
+`SPECIES_PREFERRED` of 8, 4, 8, 4, 8, 8 and 4 — four eights and three fours, in no
+pattern. Any figure from this job belongs to the machine that run landed on,
+which is why the width is swept explicitly rather than taken from whatever turned
+up.
 
 **The drift correction is often not usable, and the reporter now says so rather
 than applying it anyway.** It compares the control operations' spread against the

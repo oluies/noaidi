@@ -224,12 +224,34 @@ check("agreeing controls keep the correction",
 # in the commit whose subject was that the named feature is the untested one.
 # Controls disagree wildly (0.5) but the time-weighted drift is ~0.995, so the
 # correction changes nothing and must not be condemned for the spread.
+# `entry`'s op tuples are (total_ms, calls), not per-call microseconds. The first
+# version of this fixture was written as if they were the latter, so `copy` came
+# out at 20,000 us/call, drift at 0.667 rather than 0.995, and the case was
+# carried by the `2 * correction` clause -- leaving the floor deletable with all
+# 22 green, which is the regression path it was added to close.
+#
+# 0.5 ms over 5 calls is 100 us; 1.0 ms over 5 is 200. With `spmv` identical at
+# 100 us over 1000 calls, drift is 100500/101000 = 0.995, the spread is 0.5, and
+# `2 * correction` is 0.0099 -- so only the floor can publish this.
 identity = (entry("scala-reference", "100.0", "100.0", 100,
-                  {"spmv": ("100.0", 1000), "copy": ("100.0", 5)}) +
+                  {"spmv": ("100.0", 1000), "copy": ("0.5", 5)}) +
             entry("scala-vector-8", "100.0", "100.0", 100,
-                  {"spmv": ("100.0", 1000), "copy": ("200.0", 5)}))
+                  {"spmv": ("100.0", 1000), "copy": ("1.0", 5)}))
 out = run(identity)
 check("a near-identity correction survives a wide spread",
+      "drift **0.995**" in out and "drift-corrected" in out
+      and "the correction is not usable" not in out, out)
+
+# And the third clause, which was in the state the floor was in: no case needed
+# it. Correction 0.0058 (above the floor) with a spread of 0.0151 (above
+# 2 * correction, below 0.02) leaves `width_of_spread < 0.02` as the only thing
+# that can publish it.
+shortcut = (entry("scala-reference", "100.0", "100.0", 100,
+                  {"spmv": ("100.0", 1000), "copy": ("1.0", 10)}) +
+            entry("scala-vector-8", "100.0", "100.0", 100,
+                  {"spmv": ("100.6", 1000), "copy": ("0.991", 10)}))
+out = run(shortcut)
+check("a spread under the noise budget keeps the correction",
       "drift-corrected" in out and "the correction is not usable" not in out, out)
 
 out = run("nothing useful here\n")

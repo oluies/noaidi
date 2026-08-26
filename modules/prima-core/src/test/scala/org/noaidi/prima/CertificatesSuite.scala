@@ -456,3 +456,73 @@ class CertificatesSuite extends munit.FunSuite:
       "a feasible problem was reported infeasible",
     )
   }
+
+  test("a row norm too large to represent is not treated as a certificate") {
+    // The dual-side mirror of the column test above, and the reason the
+    // `rowNorms` half of that guard cannot be reverted with the suite green.
+    // Two entries near `Double.MaxValue` overflow the row norm on their own:
+    // the scaled form is `1.7e308 * sqrt(2)`.
+    //
+    // `min -x0` subject to `1.7e308 x0 + 1.7e308 x1 <= 0` with both variables
+    // non-negative pins each to zero, so the objective is bounded. `lessThan`
+    // negates the row, so `d = (1, 0)` gives `kd(0) = -1.7e308`. Dividing that
+    // by an infinite norm yields `-0.0`, making `rowSq` and `boundSq` both
+    // zero and the shortfall exactly 0.0 -- a bounded problem certified
+    // unbounded.
+    val b = LpProblem.builder(2)
+    b.bounds(0, 0.0, inf)
+    b.bounds(1, 0.0, inf)
+    b.objectiveCoefficient(0, -1.0)
+    b.lessThan(Seq(0 -> 1.7e308, 1 -> 1.7e308), 0.0)
+    val problem = b.build()._1
+
+    assert(
+      !problem.constraintMatrix.rowNorms(0).isFinite,
+      "the fixture no longer overflows the row norm, so this tests nothing",
+    )
+    assertEquals(
+      Certificates.dualInfeasibility(problem, Array(1.0, 0.0)),
+      None,
+      "an unrepresentable row norm was read as an exact certificate",
+    )
+    assertEquals(
+      Certificates.classify(problem, Array(1.0, 0.0), Array(0.0), 1e-8),
+      None,
+      "a bounded problem was reported unbounded",
+    )
+  }
+
+  test("an overflowing equality row does not discard a direction it does not constrain") {
+    // The guard above propagates the non-finite norm, but every equality row is
+    // scaled unconditionally -- unlike the inequality half, which is reached
+    // only where `kd(i) < 0.0`. So a row whose norm overflows poisoned `rowSq`
+    // even when the direction lies in its null space and its violation is
+    // exactly zero, discarding a certificate that is genuinely there.
+    //
+    // `min -x0` with `1.7e308 x1 + 1.7e308 x2 = 0` over non-negative variables
+    // pins x1 and x2 to zero and leaves x0 free above, so the problem is
+    // unbounded and `d = (1, 0, 0)` is the direction. `kd` on the equality row
+    // is exactly 0.0, so the row contributes nothing and the shortfall is 0.0.
+    val b = LpProblem.builder(3)
+    b.bounds(0, 0.0, inf)
+    b.bounds(1, 0.0, inf)
+    b.bounds(2, 0.0, inf)
+    b.objectiveCoefficient(0, -1.0)
+    b.equalityConstraint(Seq(1 -> 1.7e308, 2 -> 1.7e308), 0.0)
+    val problem = b.build()._1
+
+    assert(
+      !problem.constraintMatrix.rowNorms(0).isFinite,
+      "the fixture no longer overflows the row norm, so this tests nothing",
+    )
+    assertEquals(
+      Certificates.dualInfeasibility(problem, Array(1.0, 0.0, 0.0)),
+      Some(0.0),
+      "a direction in the overflowing row's null space was discarded",
+    )
+    assertEquals(
+      Certificates.classify(problem, Array(1.0, 0.0, 0.0), Array(0.0), 1e-8),
+      Some(SolveStatus.DualInfeasible),
+      "an unbounded problem was not reported unbounded",
+    )
+  }

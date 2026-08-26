@@ -378,6 +378,29 @@ class UnitCommitmentSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("stand_by_cost"), failure.getMessage)
   }
 
+  test("a multi-period commitment network is refused, naming the periods") {
+    assume(available, "goldens missing")
+    // `Lopf` models multi-period dispatch and this does not, and the refusal
+    // lives here rather than in a shared guard for that reason -- so it needs
+    // its own test. Reaching it takes a network `Lopf` would accept: the
+    // commitment fixture's own committable units, re-indexed across two
+    // investment periods. Without this, the throw could be deleted or moved
+    // behind a check that fires first and the suite would stay green.
+    val broken = fixtureWith(
+      "snapshots.csv" ->
+        (",period,timestep,objective,stores,generators\n" +
+          (0 until 8)
+            .map(i => s"$i,${if i < 4 then 2030 else 2040},${i % 4},1.0,1.0,1.0")
+            .mkString("\n") + "\n"),
+      "investment_periods.csv" -> "period,objective,years\n2030,1.0,10\n2040,1.0,10\n",
+    )
+    assert(broken.isMultiPeriod, "the fixture is not multi-period, so this tests nothing")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("2030"), failure.getMessage)
+    assert(failure.getMessage.contains("2040"), failure.getMessage)
+    assert(failure.getMessage.contains("commitment"), failure.getMessage)
+  }
+
   private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
 
   override def afterAll(): Unit =

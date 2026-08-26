@@ -1,8 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema}
-import org.noaidi.prima.PdhgParams
+import java.nio.file.Files
+import org.noaidi.network.{CsvReader, Network}
 
 /** Every documented gap, asserted to actually refuse.
   *
@@ -31,6 +30,16 @@ import org.noaidi.prima.PdhgParams
   * delete a case from it, deliberately, in the change that implements it. Three
   * cases were removed that way when the AC transformer model was written.
   *
+  * ==The overlap with `LopfSuite` is deliberate==
+  *
+  * Several cases here restate an assertion `LopfSuite` already makes — `Store`'s
+  * `e_set`/`p_set`, the three `StorageUnit` set points, the `unit-commitment`
+  * refusal. That is the point rather than an oversight: those live in `LopfSuite`
+  * beside the behaviour they qualify, where a failure says which feature broke,
+  * and they live here as one list that can be read against `NOTES.md`'s gap list
+  * in a single pass. Deleting either copy costs one of those two readings, and
+  * the audit is only worth having if it is complete.
+  *
   * ==One documented gap is not here==
   *
   * Piecewise cost curves. Every case in this suite goes through `Lopf.build`, and
@@ -45,34 +54,7 @@ import org.noaidi.prima.PdhgParams
   */
 class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 
-  private def goldens: Path =
-    Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
-
-  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
-  private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
-
-  private def network(name: String): Network =
-    CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
-
-  private val params = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 500_000)
-
-  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
-
-  override def afterAll(): Unit =
-    temporaries.foreach { dir =>
-      scala.util.Using.resource(Files.list(dir))(_.forEach(Files.deleteIfExists(_)))
-      Files.deleteIfExists(dir)
-    }
-
-  /** A copy of a golden network's directory, for the mutations below. */
-  private def copyOf(name: String): Path =
-    val dir = Files.createTempDirectory("noaidi-gap-")
-    temporaries += dir
-    val source = goldens.resolve("networks").resolve(name)
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
-    dir
+  override protected def tempPrefix: String = "noaidi-gap-"
 
   /** A golden network with one file added, for a component it does not carry. */
   private def withExtraFile(name: String, file: String, content: String): Network =
@@ -95,15 +77,6 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   /** A copy of a golden network with one file rewritten, read back through the
     * real parse path.
     */
-  private def mutate(name: String, file: String, edit: String => String): Network =
-    val dir    = copyOf(name)
-    val target = dir.resolve(file)
-    val before = Files.readString(target)
-    val after  = edit(before)
-    assertNotEquals(after, before, s"the edit to $file changed nothing")
-    Files.writeString(target, after)
-    CsvReader.read(dir, schema, name)
-
   /** One gap: a network that exercises it, and a word its refusal must contain.
     *
     * Built through `CsvReader` rather than assembled in memory, for the reason

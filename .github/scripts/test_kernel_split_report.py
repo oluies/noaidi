@@ -252,7 +252,9 @@ shortcut = (entry("scala-reference", "100.0", "100.0", 100,
                   {"spmv": ("100.6", 1000), "copy": ("0.991", 10)}))
 out = run(shortcut)
 check("a spread under the noise budget keeps the correction",
-      "drift-corrected" in out and "the correction is not usable" not in out, out)
+      "drift **0.994**" in out
+      and "drift-corrected" in out
+      and "the correction is not usable" not in out, out)
 
 out = run("nothing useful here\n")
 check("says so when there are no runs", "No runs found" in out, out)

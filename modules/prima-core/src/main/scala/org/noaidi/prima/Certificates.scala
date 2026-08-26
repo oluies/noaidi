@@ -230,8 +230,17 @@ object Certificates:
       def scaledRow(v: Double, r: Int): Double =
         // Non-finite norms propagate rather than divide, as in
         // `primalInfeasibility` and for the same reason.
+        //
+        // The zero case is short-circuited first, which `primalInfeasibility`
+        // has no need to do: its `scaled` is reached only where the reduced
+        // cost is non-zero, whereas every equality row is scaled here whether
+        // it is violated or not. Propagating Infinity for a violation that is
+        // exactly zero would discard a direction lying in that row's null
+        // space -- a certificate that is genuinely there -- so the two sides
+        // are not quite mirror images despite the comment above.
         val ri = rowNorms(r)
-        if !ri.isFinite then Double.PositiveInfinity
+        if v == 0.0 then 0.0
+        else if !ri.isFinite then Double.PositiveInfinity
         else if ri > 0.0 then v / ri
         else 0.0
 

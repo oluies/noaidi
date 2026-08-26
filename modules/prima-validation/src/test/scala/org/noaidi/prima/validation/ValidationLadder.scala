@@ -45,6 +45,20 @@ object ValidationLadder:
   def relativeGap(mine: Double, oracle: Double): Double =
     math.abs(mine - oracle) / math.max(1.0, math.abs(oracle))
 
+  /** The worst gap at full precision, as both reports print it.
+    *
+    * Shared because the precision and the layout are what a reader diffs across
+    * two job logs, so the two reports drifting apart here would be worse than
+    * their prose drifting. `Report` carries the explanation of why both forms
+    * are printed.
+    *
+    * The decimal round-trips rather than being exact: `%.17e` asks for more
+    * digits than a `Double` carries and Java pads the shortest round-tripping
+    * representation with zeros. The raw bits need no such caveat.
+    */
+  def exactly(worst: Double): String =
+    f"  exactly: $worst%.17e  (raw bits 0x${java.lang.Double.doubleToRawLongBits(worst)}%016x)"
+
   /** The bound `OracleAgreementSuite` enforces and both documents quote.
     *
     * Set above the observed worst gap — 4.9e-10 on macOS/aarch64, 5.9e-10 on

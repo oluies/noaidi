@@ -114,6 +114,10 @@ object MilpReport:
     )
     val worst = if comparable.isEmpty then 0.0 else comparable.map(_.relativeGap).max
     println(f"%nworst relative objective gap against the oracle: $worst%.3e")
+    // Unrounded too, for the reason `Report` gives at length: this figure gets
+    // compared across CI's two JDK jobs, and four significant digits agreeing
+    // does not make two doubles equal.
+    println(f"  exactly: $worst%.17e  (raw bits 0x${java.lang.Double.doubleToRawLongBits(worst)}%016x)")
     println(f"instances where Prima claimed a better objective than the oracle: " +
       comparable.count(r => r.primaObjective < r.oracleObjective - 1e-6))
     println(f"total nodes explored: ${rows.map(_.nodes).sum}, of which unproven: ${rows.map(_.unproven).sum}")

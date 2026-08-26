@@ -46,10 +46,16 @@ object OjAlgoMilp:
     // of the non-determinism: a multi-threaded branch-and-bound races to an
     // incumbent, so which node closes the search -- and therefore what it holds
     // when a time or gap check fires -- varies between runs on the same input.
+    //
+    // The worker count sits on the options rather than on the strategy: 57.1.1
+    // dropped `ConfigurableStrategy.withParallelism` and had `IntegerSolver`
+    // read `options.getParallelism()` instead, feeding it to the strategy's
+    // `getWorkerPriorities(int)`. One priority comparator is one worker, so
+    // this is the same single thread the old call asked for.
+    model.options.parallelism(1): Unit
     model.options.integer(
       IntegerStrategy.newConfigurable()
         .withGapTolerance(NumberContext.ofScale(12))
-        .withParallelism(() => 1)
     ): Unit
 
     val variables = Array.tabulate(problem.numVariables) { i =>

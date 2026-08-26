@@ -1809,6 +1809,223 @@ sparse matrix-vector products each is precisely the workload `Kernels` exists to
 move, and it is the first instance in this repository large enough for the
 question to matter.
 
+### Where the time actually goes: 55% sparse, 45% dense
+
+The paragraph above reasons from a whole-solve number that SpMV "is precisely the
+workload `Kernels` exists to move". That is the standard expectation for a
+first-order method, and it is half right in a way that changes what to do first.
+
+`KernelSplit` runs the real solve with a `Kernels` decorator that attributes wall
+clock to each of the eight operations. On `scigrid-de` at 1e-4 — 60,552 variables,
+23,688 rows, 14,848 iterations:
+
+| operation | share | calls | per call |
+| --- | --- | --- | --- |
+| `spmv` | 54.5% | 29,930 | 105.5 µs |
+| `axpby` | 16.4% | 133,660 | 7.1 µs |
+| `squaredNorm` | 11.5% | 29,724 | 22.4 µs |
+| `primalStep` | 9.8% | 14,848 | 38.3 µs |
+| `dot` | 3.3% | 14,848 | 12.9 µs |
+| `copy` | 2.8% | 29,839 | 5.5 µs |
+| `dualStep` | 1.6% | 14,848 | 6.2 µs |
+| `scale` | 0.1% | 928 | 6.7 µs |
+
+**Sparse 54.5%, dense 45.5% — of time inside `Kernels`.** That qualifier is not
+pedantry: the two shares are shares of the eight timed operations, not of the
+solve, and the harness measures the difference rather than assuming it away. The
+timed operations are 97% of the solve here, so the numbers are nearly the same
+either way; three reviews still caught this section stating one and meaning the
+other, because "nearly the same" is a measurement and not a definition.
+
+SpMV is the largest single operation by a wide margin and is not the majority.
+Nearly half the kernel time is six operations that are flat loops over contiguous
+`Array[Double]`.
+
+That reorders the acceleration work. A device backend has to move SpMV, which is
+the hard kernel and the one the Cyfra spike existed to answer; the other half is
+on the CPU, without a driver.
+
+There is no SIMD in the *source* of this tree — `ScalaKernels` is scalar `while`
+loops by design, being the correctness oracle. There is a great deal of it in the
+generated code, which is the thing this section originally got wrong: at 3× on
+the dense operations the arithmetic gives 54.5 + 45.5/3 = 69.7%, or 1.43×, and at
+2× it gives 1.29×. Neither happened. The measured answer is about **1.2× per
+iteration** and between **0.31× and 1.22× end to end**, because most of those
+loops were already vector instructions, only the reductions were not, and the
+reassociation that makes those fast can cost iterations — see *SIMD: 1.2x per
+iteration everywhere, and at best a wash at four lanes* below.
+
+==On trusting these numbers==
+
+The instrument reads `System.nanoTime` twice per call, and the probe measures the
+interval between two reads: **17.8 ns** on this machine. That interval is the
+bias charged to each operation — the second read's overhead before the sample
+plus the first's after it — rather than the wall-clock cost of the pair, which is
+larger. Against `scigrid-de`'s cheapest operation at 5.5 µs that is 0.3%, and
+0.08% of the run — the shares are safe.
+
+They are *not* safe on a small network, and the tool prints the overhead so this
+is visible rather than assumed: on `ac-dc-meshed` `axpby` runs in about 40 ns, so
+nearly half of what would be attributed to it is the clock. Those runs agree with
+this one at 52–53% sparse, which is reassuring and is not evidence — the
+distortion falls on the operations with the most calls, which is the direction
+that would flatter the dense share.
+
+The split is stable run to run on `scigrid-de` (52.0%, 52.5%, 54.5% sparse across
+three runs) and the shares are what to read; absolute times are context.
+
+### SIMD: 1.2x per iteration everywhere, and at best a wash at four lanes
+
+Measured with the harness and the reporter both repaired — the earlier revisions
+of this section were measuring an asymmetric warm-up, then a drift estimator that
+had the iteration confound folded into it.
+
+The x86_64 rows come out of the CI job, with its counterbalancing, its same-width
+references and its control-spread test. The aarch64 row does not: there is no
+aarch64 runner, so it is a laptop measurement with none of that machinery behind
+it, and it is marked as such in the table.
+
+==What C2 already does==
+
+HotSpot's SuperWord pass auto-vectorises a plain `while` loop over contiguous
+arrays, so `axpby`, `scale` and `dualStep` were vector instructions before any of
+this — confirmed under `-XX:-UseSuperWord`, where the reference `axpby` slows
+from 7.0 to 8.6 µs. What C2 will not do is reassociate floating-point addition,
+so a reduction stays scalar however simple it looks. `dot` and `squaredNorm` are
+where the win is, and `primalStep` joins them because its clamp is a
+data-dependent branch per element.
+
+==The whole result, in one table==
+
+Pooled over seven CI sweeps — nineteen same-width comparisons — plus one local
+measurement on the only aarch64 machine available:
+
+| width | iterations against the reference | **end to end** | n | basis |
+| --- | --- | --- | --- | --- |
+| 2, aarch64 | same | **1.11x** | 1 | local |
+| 2, x86_64 | same | about **0.33x** — samples 0.31x–0.38x, median 0.34x | 6 | CI |
+| 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.98) | 9 | CI |
+| 8, x86_64 | same | **1.15–1.22x** (median 1.20) | 4 | CI |
+
+Ranges rather than point estimates, because every point estimate this section has
+published has been a single run and several have been withdrawn. The spread
+within each width is wider than the differences the earlier revisions were
+arguing about; the *signs* are what is stable, and they are stable in every
+comparison in the table.
+
+**And the ranges themselves are not tight — the two-lane one has now been missed
+twice running, in opposite directions.** It was published as 0.32–0.36 from four
+comparisons; the fifth came in at 0.38, above it, so it was widened to 0.32–0.38;
+the sixth came in at 0.31, below that. Six comparisons, and the last two have
+both been endpoints.
+
+So that row is quoted as "about a third" rather than as a band that keeps
+moving. A min–max over a handful of samples describes those samples; it does not
+predict the next one, and continuing to widen it after each miss would be fitting
+the description to the data one point at a time. Read the medians and the signs;
+the endpoints are the least reliable thing here.
+
+**No figure in the table has a correction applied.** The reporter compares the
+control operations' spread against the size of the correction and withholds the
+corrected figure when the spread dominates, and it withheld on every arm in the
+table above. Corrections did survive on a few arms — the
+largest 1.028, on an eight-lane `-all` run — and all of them are smaller than the
+spread between sweeps, which is why pooling raw figures loses nothing here.
+
+The per-iteration figures are remarkably flat away from two lanes: 1.19x to
+1.23x on wall clock and 1.20x to 1.24x on time inside `Kernels`, across every
+arm, width and coverage the sweeps have run. The end-to-end column is not flat,
+and the whole of the four-lane gap between them is the iteration count.
+
+==Four lanes costs 25.4% more iterations, and that is a real iteration count==
+
+Reassociating a sum changes its rounding, and the lane count decides how the
+partial sums are grouped, which moves the trajectory. Against the reference's
+14,848 iterations, four lanes takes **18,624** — reproduced in all seven sweeps,
+at native width and under `-XX:MaxVectorSize=32` on machines whose native width
+was eight, and identical to the digit every time. It is the one figure in this
+section that pooling did not have to turn into a range.
+
+This was in doubt for two commits. The harness printed `primalStep` calls under
+the heading `iterations`, and `Pdhg.step` calls it inside `while !accepted do`,
+so the figure could have been line-search trials — which would have made it a
+statement about the acceptance test rather than about convergence.
+
+Four sweeps have run since the harness was repaired, and all four print both and
+find them equal: 18,624 iterations and 18,624 trials, with the trial rate at
+1.000 on every arm. The three before it printed one number and report the same
+figure, so for those it is an inference rather than a measurement — four measured
+and three inferred, against the seven the table pools.
+
+The line search accepts essentially every step here, so the extra work is
+genuinely extra iterations.
+
+At about 1.22x per iteration against 1.254x the iterations, the arithmetic gives
+1.22/1.254 = 0.973, which is the row's median. **On a four-lane machine this
+backend is at best a wash and usually a small loss** — seven of the nine
+comparisons land below 1.0, at native width and under `MaxVectorSize=32` alike,
+and the coverage that widens all six operations behaves the same.
+
+The two above 1.0 are both 1.03x, so nothing in the sample reaches the
+per-iteration gain.
+
+==Two lanes on x86_64 is about a third==
+
+Against a reference at the same width, with matching iteration counts. In one of
+the six comparisons the vector backend takes 31,025 ms where the scalar reference
+takes 10,328; the six together run 0.31x to 0.38x, median 0.34 — about three
+times slower throughout, which is the part that has never moved.
+
+The same two lanes on aarch64 give 1.11x. Whatever the Vector API costs per
+operation, x86's scalar and auto-vectorised paths absorb it and NEON's do not —
+so a lane count says nothing about an outcome without the architecture beside
+it.
+
+==What the sweeps cannot settle==
+
+**The runner's width is not stable.** The seven sweeps reported
+`SPECIES_PREFERRED` of 8, 4, 8, 4, 8, 8 and 4 — four eights and three fours, in no
+pattern. Any figure from this job belongs to the machine that run landed on,
+which is why the width is swept explicitly rather than taken from whatever turned
+up.
+
+**The drift correction is often not usable, and the reporter now says so rather
+than applying it anyway.** It compares the control operations' spread against the
+size of the correction and withholds the corrected figure when the spread
+dominates — which it does on the arms above where the raw ratio is quoted. An
+earlier revision published a corrected number from a run it simultaneously
+described as too noisy to correct, then withdrew it; this is that judgement made
+in code.
+
+==Where this leaves it==
+
+Opt-in, and the case for anything more is weak. It needs a JVM flag, it perturbs
+the iterate trajectory, and across the machines measured it ranges from **0.31x
+to 1.22x end to end** with no way to know which without running it. The kernels
+are genuinely 1.2x faster per iteration and that is not the question a caller
+asks.
+
+`dot` and `squaredNorm` are **17.3%** of the time inside `Kernels` on the
+reference arm of the sweep these figures come from — the share moves between runs
+and machines, and the share table under *Where the time actually goes* gives
+14.8% for the same two operations on an earlier one, which is why the run has to
+be named. `spmv` at
+40–55% is the ceiling that matters, and it is untouched.
+
+==What the shares are shares of==
+
+Every percentage here is a share of time inside `Kernels`, measured rather than
+assumed: the timed operations are 96–97% of the solve, printed on every run.
+
+The 12.7 s recorded for this configuration in the table above is still not
+reproducible — about 5.4 s on aarch64, and 9.9–13.3 s across CI runners at their
+native width, same 14,848 iterations. The width-limited references are excluded
+from that range: `-XX:MaxVectorSize` throttles SuperWord on the scalar arm too,
+so they are a different configuration.
+
+Cold-versus-warm was the obvious explanation and is not it, since the two come
+out within 1% of each other, so the discrepancy stays open.
+
 ### What `scigrid-de` cannot gate
 
 Its `optimize` dispatch. Adding the `standard-types` fixture rewrote 59,000 lines

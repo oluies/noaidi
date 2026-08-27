@@ -74,9 +74,6 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
     CsvReader.read(dir, schema, name)
 
-  /** A copy of a golden network with one file rewritten, read back through the
-    * real parse path.
-    */
   /** One gap: a network that exercises it, and a word its refusal must contain.
     *
     * Built through `CsvReader` rather than assembled in memory, for the reason

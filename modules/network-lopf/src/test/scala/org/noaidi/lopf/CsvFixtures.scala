@@ -21,20 +21,26 @@ import org.noaidi.network.{CsvReader, Network, Schema}
   * ==The rest of the fixture machinery==
   *
   * `goldens`, `schema`, `copyOf`, `mutate` and the temp-directory bookkeeping
-  * live here for the same reason `setColumn` does. All three suites mixing this
-  * in had carried byte-identical copies, and the copies had already drifted:
-  * `GapRefusalSuite`'s `afterAll` deleted one level with `Files.list` where the
-  * others walked the tree, so a fixture with a subdirectory would have leaked.
-  * The walking version is the one kept.
+  * live here for the same reason `setColumn` does. Every suite in this module
+  * had carried its own copy and they had already drifted three ways: some walked
+  * the tree to clean up, `DelaysSuite` deleted a single level with `Files.list`
+  * so a fixture with a subdirectory leaked, and `CyclesSuite` walked but never
+  * closed the stream `copyOf` below explains must be closed. One definition ends
+  * all three.
   *
-  * `LinearPowerFlowSuite` has a fourth copy and does not share it — it is in
-  * `network-pf`, and a test-jar dependency between the two modules costs more
-  * than the duplication does.
+  * `LinearPowerFlowSuite` and `NewtonRaphsonSuite` keep their own copies. They
+  * are in `network-pf`, and a test-jar dependency between the two modules costs
+  * more than the duplication does — that is the only reason a copy remains, and
+  * it does not apply to anything in this module.
   */
 trait CsvFixtures extends munit.Suite, munit.Assertions:
 
-  /** Prefix for this suite's temporary directories, so a leak names its owner. */
-  protected def tempPrefix: String
+  /** Prefix for this suite's temporary directories, so a leak names its owner.
+    *
+    * Only [[copyOf]] reads it; suites that build fixtures from scratch pass a
+    * prefix to [[tempDir]] directly and need not override this.
+    */
+  protected def tempPrefix: String = "noaidi-"
 
   protected def goldens: Path =
     Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
@@ -47,6 +53,16 @@ trait CsvFixtures extends munit.Suite, munit.Assertions:
 
   protected val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
 
+  /** A registered temporary directory, deleted by [[afterAll]].
+    *
+    * Creating one without registering it is the leak this exists to prevent, and
+    * every call site in this module had the two lines written out separately.
+    */
+  protected def tempDir(prefix: String): Path =
+    val dir = Files.createTempDirectory(prefix)
+    temporaries += dir
+    dir
+
   /** A copy of a golden network's directory, for the mutations below.
     *
     * Routed through `CsvReader` rather than assembled in memory on purpose: a
@@ -54,8 +70,7 @@ trait CsvFixtures extends munit.Suite, munit.Assertions:
     * built that way can pass while the real path stays broken.
     */
   protected def copyOf(name: String): Path =
-    val dir = Files.createTempDirectory(tempPrefix)
-    temporaries += dir
+    val dir    = tempDir(tempPrefix)
     val source = goldens.resolve("networks").resolve(name)
     // Closed explicitly: `Files.list` is backed by an open directory handle, and
     // this runs once per mutation test.

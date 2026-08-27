@@ -1910,9 +1910,10 @@ measurement on the only aarch64 machine available:
 
 Ranges rather than point estimates, because every point estimate this section has
 published has been a single run and several have been withdrawn. The spread
-within each width is wider than the differences the earlier revisions were
+within each row is wider than the differences the earlier revisions were
 arguing about; the *signs* are what is stable, and they are stable within each
-width except at four lanes, where the row straddles 1.0.
+row except at four lanes, where the row straddles 1.0. Across rows they are not:
+the same two lanes give 1.11x on aarch64 and 0.34x on x86_64.
 
 **And the ranges themselves are not tight — the two-lane one has now been missed
 twice running, in opposite directions.** It was published as 0.32–0.36 from four

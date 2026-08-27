@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema}
+import java.nio.file.Files
+import org.noaidi.network.{CsvReader, Network}
 
 /** Cycle basis construction, on graphs small enough to check by hand.
   *
@@ -15,26 +15,11 @@ import org.noaidi.network.{CsvReader, Network, Schema}
   * The graphs are built as CSV and read back through `CsvReader`, not assembled
   * in memory, so a fixture cannot express a state the reader never produces.
   */
-class CyclesSuite extends munit.FunSuite:
-
-  private def goldens: Path =
-    Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
-
-  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
-  private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
-
-  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
-
-  override def afterAll(): Unit =
-    temporaries.foreach { dir =>
-      if Files.exists(dir) then
-        Files.walk(dir).sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
-    }
+class CyclesSuite extends munit.FunSuite, CsvFixtures:
 
   /** A network with the given buses and AC lines, via the real reader. */
   private def network(buses: Seq[String], lines: Seq[(String, String, String)]): Network =
-    val dir = Files.createTempDirectory("noaidi-cycles-")
-    temporaries += dir
+    val dir = tempDir("noaidi-cycles-")
     Files.writeString(
       dir.resolve("buses.csv"),
       "name,v_nom,carrier\n" + buses.map(b => s"$b,1.0,AC\n").mkString,
@@ -133,8 +118,7 @@ class CyclesSuite extends munit.FunSuite:
     // lines carry x = 0, so reading reactance there gives a vacuously satisfied
     // constraint. Built with x = 0 deliberately, so reading the wrong attribute
     // shows up as a zero rather than as a near-miss.
-    val dir = Files.createTempDirectory("noaidi-cycles-dc-")
-    temporaries += dir
+    val dir = tempDir("noaidi-cycles-dc-")
     Files.writeString(
       dir.resolve("buses.csv"),
       "name,v_nom,carrier\nA,2.0,DC\nB,2.0,DC\nC,2.0,DC\n",

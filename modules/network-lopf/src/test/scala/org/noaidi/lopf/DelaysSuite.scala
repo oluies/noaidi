@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema}
+import java.nio.file.Files
+import org.noaidi.network.{CsvReader, Network}
 
 /** The delay shift itself, on the paths no golden reaches.
   *
@@ -22,26 +22,11 @@ import org.noaidi.network.{CsvReader, Network, Schema}
   * reader never produces, so a test built that way can pass while the real path
   * stays broken.
   */
-class DelaysSuite extends munit.FunSuite:
-
-  private def goldens: Path =
-    Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
-
-  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
-  private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
-
-  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
-
-  override def afterAll(): Unit =
-    temporaries.foreach { dir =>
-      scala.util.Using.resource(Files.list(dir))(_.forEach(Files.deleteIfExists(_)))
-      Files.deleteIfExists(dir)
-    }
+class DelaysSuite extends munit.FunSuite, CsvFixtures:
 
   /** A three-port network written out and read back through the real parser. */
   private def threePort(links: String): Network =
-    val dir = Files.createTempDirectory("noaidi-delays-")
-    temporaries += dir
+    val dir = tempDir("noaidi-delays-")
     Files.writeString(dir.resolve("snapshots.csv"),
       ",snapshot,objective,stores,generators\n0,0,1.0,1.0,1.0\n1,1,1.0,1.0,1.0\n" +
         "2,2,1.0,1.0,1.0\n3,3,1.0,1.0,1.0\n")

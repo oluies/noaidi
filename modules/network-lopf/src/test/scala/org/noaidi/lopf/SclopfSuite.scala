@@ -30,14 +30,7 @@ class SclopfSuite extends munit.FunSuite, CsvFixtures:
       case o: ujson.Obj if o.value.contains("$nan") => Double.NaN
       case other                                    => fail(s"unexpected golden value $other")
 
-  /** A temporary directory holding a copy of a golden network.
-    *
-    * One definition: `mutate` and `triangleWithSpur` had the same eight lines
-    * inlined separately, which is how two copies of a helper drift.
-    */
-  /** A copy of a golden network with one file rewritten, read back through the
-    * real parse path.
-    */
+  /** The branch outages PyPSA secured against, from its own recorded result. */
   private def outagesFrom(name: String): IndexedSeq[Sclopf.Outage] =
     results(name)("sclopf")("branch_outages").arr.map(v => Sclopf.Outage("Line", v.str)).toIndexedSeq
 
@@ -152,8 +145,7 @@ class SclopfSuite extends munit.FunSuite, CsvFixtures:
     // to redistribute and the factor's denominator goes to zero. Producing an
     // infinity would put one into a constraint coefficient and the LP would come
     // back infeasible with nothing to explain it.
-    val dir = Files.createTempDirectory("noaidi-sclopf-")
-    temporaries += dir
+    val dir = tempDir("noaidi-sclopf-")
     Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\n")
     Files.writeString(dir.resolve("lines.csv"), "name,bus0,bus1,x,r,s_nom\nAB,A,B,0.1,0.0,150.0\n")
     Files.writeString(dir.resolve("generators.csv"), "name,bus,control,carrier\ng,A,Slack,wind\n")
@@ -218,8 +210,7 @@ class SclopfSuite extends munit.FunSuite, CsvFixtures:
     // With two islands, the row count must be what one island alone produces --
     // otherwise the cross-island guard is emitting rows with zero coefficients or,
     // worse, non-zero ones.
-    val dir = Files.createTempDirectory("noaidi-sclopf-split-")
-    temporaries += dir
+    val dir = tempDir("noaidi-sclopf-split-")
     Files.writeString(
       dir.resolve("buses.csv"),
       "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\nC,380.0,AC\nX,380.0,AC\nY,380.0,AC\n",
@@ -367,8 +358,7 @@ class SclopfSuite extends munit.FunSuite, CsvFixtures:
     // reasoning that a denominator just past the threshold would yield a huge
     // finite factor; this is the measurement that showed it could never trip.
     Seq(1e2, 1e4, 1e6).foreach { ratio =>
-      val dir = Files.createTempDirectory("noaidi-sclopf-weak-")
-      temporaries += dir
+      val dir = tempDir("noaidi-sclopf-weak-")
       Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\nC,380.0,AC\n")
       Files.writeString(
         dir.resolve("lines.csv"),

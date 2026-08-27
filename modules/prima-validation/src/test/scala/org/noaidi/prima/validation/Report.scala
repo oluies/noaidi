@@ -96,10 +96,12 @@ object Report:
     // padded with zeros rather than the true binary expansion, so it identifies
     // the value uniquely without being its exact decimal. That is enough for
     // comparing two job logs and it stays readable; the raw bits are what a
-    // reader can compare without trusting the round-tripping claim at all. Neither is asserted on -- the comparison
-    // is across two CI jobs, which nothing here can see -- so this makes the
-    // claim checkable rather than checked, and the prose stays at what the
-    // rounded line supports until a run has shown otherwise.
+    // reader can compare without trusting the round-tripping claim at all.
+    //
+    // Neither is asserted on -- the comparison is across two CI jobs, which
+    // nothing here can see -- so this makes the claim checkable rather than
+    // checked, and the prose stays at what the rounded line supports until a run
+    // has shown otherwise.
     println(ValidationLadder.exactly(worst))
     if disagreements.nonEmpty then
       println(s"STATUS DISAGREEMENTS: ${disagreements.map(_.name).mkString(", ")}")

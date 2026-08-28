@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network, Schema}
+import java.nio.file.Files
+import org.noaidi.network.{CsvReader, Network}
 import org.noaidi.prima.{BnbParams, MilpStatus, PdhgParams}
 
 /** Unit commitment against PyPSA's own mixed-integer solve.
@@ -13,16 +13,7 @@ import org.noaidi.prima.{BnbParams, MilpStatus, PdhgParams}
   * an implementation that never switches anything off, and a non-binding
   * constraint is one this suite could not tell apart from its absence.
   */
-class UnitCommitmentSuite extends munit.FunSuite:
-
-  private def goldens: Path =
-    Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
-
-  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
-  private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
-
-  private def network(name: String): Network =
-    CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
+class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
 
   private def results(name: String): ujson.Value =
     ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))("optimize")
@@ -161,8 +152,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
     // Ramp limits are ordinary in a commitment study and are not modelled.
     // Ignoring one gives a schedule the network cannot follow, and it comes out
     // cheaper, so it has to be refused.
-    val dir = Files.createTempDirectory("noaidi-uc-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-")
     val source = goldens.resolve("networks").resolve("unit-commitment")
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
@@ -186,8 +176,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
     // one block above it in the source says so about `stand_by_cost` and the
     // ramp check asserted the opposite -- so without this, reverting
     // `UnitCommitment.reject` to the old sweep leaves every test green.
-    val dir = Files.createTempDirectory("noaidi-uc-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-")
     val source = goldens.resolve("networks").resolve("unit-commitment")
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
@@ -219,8 +208,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
     // deleted, and the answer comes back either spuriously infeasible or far
     // more expensive than the real network's. Nothing caught this because the
     // only fixture is a single bus with no branches.
-    val dir = Files.createTempDirectory("noaidi-uc-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-")
     val source = goldens.resolve("networks").resolve("unit-commitment")
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
@@ -241,8 +229,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
     // It would match no balance row and simply vanish, and the schedule would
     // come out cheaper with no diagnostic. Lopf already guarded this; leaving
     // one entry point loud and the other silently wrong is the thing to avoid.
-    val dir = Files.createTempDirectory("noaidi-uc-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-")
     val source = goldens.resolve("networks").resolve("unit-commitment")
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
@@ -277,8 +264,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
     // 50 MW minimum and releases it after, for 57000 against the 8000 an
     // unconstrained schedule costs. Disabling the residual rows makes this fail,
     // which is what the previous versions could not do.
-    val dir = Files.createTempDirectory("noaidi-uc-residual-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-residual-")
     Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nbus,110.0,AC\n")
     Files.writeString(
       dir.resolve("generators.csv"),
@@ -313,8 +299,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
 
   /** A copy of the commitment golden with extra or rewritten files. */
   private def fixtureWith(files: (String, String)*): Network =
-    val dir = Files.createTempDirectory("noaidi-uc-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-")
     val source = goldens.resolve("networks").resolve("unit-commitment")
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
@@ -361,8 +346,7 @@ class UnitCommitmentSuite extends munit.FunSuite:
     // hole. Built from scratch rather than by emptying the golden's snapshots,
     // because the reader rightly refuses a series file with more rows than the
     // network has snapshots.
-    val dir = Files.createTempDirectory("noaidi-uc-empty-")
-    temporaries += dir
+    val dir = tempDir("noaidi-uc-empty-")
     Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nbus,110.0,AC\n")
     Files.writeString(
       dir.resolve("generators.csv"),
@@ -378,12 +362,25 @@ class UnitCommitmentSuite extends munit.FunSuite:
     assert(failure.getMessage.contains("stand_by_cost"), failure.getMessage)
   }
 
-  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
-
-  override def afterAll(): Unit =
-    temporaries.foreach { dir =>
-      if Files.exists(dir) then
-        scala.util.Using.resource(Files.walk(dir)) { paths =>
-          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
-        }
-    }
+  test("a multi-period commitment network is refused, naming the periods") {
+    assume(available, "goldens missing")
+    // `Lopf` models multi-period dispatch and this does not, and the refusal
+    // lives here rather than in a shared guard for that reason -- so it needs
+    // its own test. Reaching it takes a network `Lopf` would accept: the
+    // commitment fixture's own committable units, re-indexed across two
+    // investment periods. Without this, the throw could be deleted or moved
+    // behind a check that fires first and the suite would stay green.
+    val broken = fixtureWith(
+      "snapshots.csv" ->
+        (",period,timestep,objective,stores,generators\n" +
+          (0 until 8)
+            .map(i => s"$i,${if i < 4 then 2030 else 2040},${i % 4},1.0,1.0,1.0")
+            .mkString("\n") + "\n"),
+      "investment_periods.csv" -> "period,objective,years\n2030,1.0,10\n2040,1.0,10\n",
+    )
+    assert(broken.isMultiPeriod, "the fixture is not multi-period, so this tests nothing")
+    val failure = intercept[UnitCommitment.UnsupportedNetwork](UnitCommitment.solve(broken, params))
+    assert(failure.getMessage.contains("2030"), failure.getMessage)
+    assert(failure.getMessage.contains("2040"), failure.getMessage)
+    assert(failure.getMessage.contains("commitment"), failure.getMessage)
+  }

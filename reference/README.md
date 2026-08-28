@@ -66,7 +66,7 @@ job, because that means the API these files are derived from has changed shape.
 | `goldens/schema.json` | All 16 component types, 454 attributes: type, unit, default, and whether it may vary by snapshot. The typed store is generated from this rather than from the documentation, which describes a version rather than the one pinned. |
 | `goldens/networks/<name>/` | PyPSA's own CSV directory export. This is the format L1 must round-trip, not a convenience dump. |
 | `goldens/results/<name>.json` | Linear power flow and optimisation outputs that L2 must reproduce within documented tolerances. |
-| `goldens/manifest.json` | Versions used, and a per-network summary of what carries time-varying data. |
+| `goldens/manifest.json` | Versions used, and per-network and per-directory summaries of what was written. |
 | `goldens/standard_types/` | PyPSA's line and transformer type library. Not part of any network export — see below. |
 
 ## What a regeneration diff means

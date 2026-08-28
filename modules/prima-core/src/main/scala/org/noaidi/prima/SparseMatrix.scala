@@ -180,9 +180,11 @@ final class SparseMatrix private (
   /** Euclidean norm of each column, the counterpart of [[rowNorms]] for `K'y`.
     *
     * Accumulated straight off the CSR arrays rather than as `transpose.rowNorms`,
-    * so reading it does not *force* the transpose. That matters for callers who
-    * would not otherwise build one -- [[Certificates]] used standalone, or a
-    * solve with `ScalingParams.none`.
+    * so reading it does not *force* the transpose. That matters only for callers
+    * that would not otherwise build one -- a solve with `ScalingParams.none`, or
+    * [[Certificates.primalInfeasibility]] when `ktY` is supplied. Called without
+    * it, that method transposes to form `K'y` regardless of this norm, so the
+    * saving is not available on its default shape.
     *
     * It does '''not''' save anything on the default solve path, and an earlier
     * version of this comment claimed it did. `Pdhg.Solve` hands the same

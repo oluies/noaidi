@@ -55,9 +55,13 @@ object Admittance:
     * `zc = summand · y = z + y z²/4` and `za = summand · 2/z = z/2 + 2/y`,
     * whence `y' = 2/za = 4y/(zy + 4)`.
     *
-    * Applied only where the shunt is non-zero. `1/y` is the third leg of the
-    * wye, so a lossless, non-charging transformer has no T to convert and the
-    * expression would divide by zero — PyPSA masks on exactly that condition.
+    * Applied only where the shunt is non-zero, which is PyPSA parity rather than
+    * arithmetic necessity. `1/y` is the third leg of the wye, so a lossless,
+    * non-charging transformer has no T to convert; PyPSA's general `summand / z_i`
+    * form does divide by zero there, but the closed form above does not — at
+    * `y = 0` the denominator `zy + 4` is exactly 4 and it returns `(r, x, 0, 0)`
+    * unchanged. The mask is kept because PyPSA masks on the same condition, not
+    * because this would fail without it.
     */
   private[pf] def tModelToPi(
       r: Double,
@@ -155,8 +159,9 @@ object Admittance:
               // The T model, converted to its equivalent pi before anything else
               // reads the impedance. PyPSA does this in `apply_transformer_t_model`
               // ahead of `calculate_Y`, and only where the shunt is non-zero --
-              // with no shunt the two models coincide and the conversion would
-              // divide by zero.
+              // with no shunt the two models coincide. The mask mirrors PyPSA's;
+              // `tModelToPi` is a no-op at a zero shunt rather than a division by
+              // zero, so this guard is parity, not protection.
               val (rPu, xPu, shuntGpu, shuntBpu) =
                 if isTModel(table, id) && (gRaw != 0.0 || bRaw != 0.0) then
                   tModelToPi(rRaw, xRaw, gRaw, bRaw)

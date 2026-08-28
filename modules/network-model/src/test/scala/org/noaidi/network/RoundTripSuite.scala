@@ -61,22 +61,22 @@ class RoundTripSuite extends munit.FunSuite:
       }
     }
 
-  /** Every golden network, from the manifest rather than from a list here.
+  /** Every golden network, from the manifest rather than from a list here, and
+    * multi-period ones included.
     *
     * The list this replaces had gone stale four fixtures running, so the writer
     * had never been asked to reproduce `scigrid-de`'s 852-line `lines.csv` or
     * any file carrying a `type` column. Reading the manifest means a fixture
     * added to `generate_goldens.py` is round-tripped without anyone remembering
     * to add it here.
-    */
-  /** Every golden network, multi-period ones included.
     *
-    * They used to be skipped on the `multi_period` flag, because `Network` held
-    * a flat list of snapshot labels and a `(period, timestep)` index cannot
-    * survive that: `investment-periods` came back as `2030, 2030, 2040, 2040`.
-    * `snapshotPeriods` carries the other half now, and `CsvWriter` emits the two
-    * index columns and `investment_periods.csv`, so the round trip is a real
-    * check on the multi-period path rather than an exemption from it.
+    * Multi-period networks used to be skipped on the `multi_period` flag,
+    * because `Network` held a flat list of snapshot labels and a
+    * `(period, timestep)` index cannot survive that: `investment-periods` came
+    * back as `2030, 2030, 2040, 2040`. `snapshotPeriods` carries the other half
+    * now, and `CsvWriter` emits the two index columns and
+    * `investment_periods.csv`, so the round trip is a real check on the
+    * multi-period path rather than an exemption from it.
     */
   private lazy val goldenNetworks: List[String] =
     ujson

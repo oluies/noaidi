@@ -807,13 +807,14 @@ transformer at each end, so the network has a cycle crossing both transformers.
 The cycle matters — in a radial network the flows are fixed by topology and any
 per-unit base reproduces them, so a radial fixture would validate nothing.
 
-**Nominal taps only.** `tap_ratio` folds into the linear models as a plain
-multiplier, exactly as PyPSA does it, so `Cycles.impedance` and the linear flow
-honour it. The AC admittance is different: an off-nominal tap makes `Y`
-asymmetric, and `model = "t"` with a non-zero shunt needs a wye–delta conversion
-before `Y` is built at all. Both are refused in `Admittance` rather than
-approximated. `scigrid-de`'s 96 transformers all sit at `tap_ratio = 1` with
-`b = g = 0`, so the T-model path there is inert.
+**Taps.** `tap_ratio` folds into the linear models as a plain multiplier,
+exactly as PyPSA does it, so `Cycles.impedance` and the linear flow honour it.
+The AC admittance is harder: an off-nominal tap makes `Y` asymmetric, and
+`model = "t"` with a non-zero shunt needs a wye–delta conversion before `Y` is
+built at all. Both were refused in `Admittance` for a while; both are modelled
+now — see *The AC transformer model, and an assumption that was never made*.
+`scigrid-de`'s 96 transformers all sit at `tap_ratio = 1` with `b = g = 0`, so
+the T-model path there is inert either way.
 
 The shared `Branches` object is now public. Its stated purpose was one definition
 of susceptance across the power-flow modules, and the transformer conversion was
@@ -882,7 +883,7 @@ transformer, t1 carries **−840.53 MW** against the **+150.66** it carries
 unshifted: reversed, and 5.6 times the power. The port returned the unshifted
 number.
 
-The interesting part is how it escaped a codebase that refuses off-nominal taps,
+The interesting part is how it escaped a codebase that refused off-nominal taps,
 the T model, `Store`, `overnight_cost` and a dozen other things by name. **A
 refusal needs a code site, and an attribute nothing reads has none.** Every other
 gap here was found at the moment some code had to decide what to do with a value;
@@ -1903,15 +1904,16 @@ measurement on the only aarch64 machine available:
 | width | iterations against the reference | **end to end** | n | basis |
 | --- | --- | --- | --- | --- |
 | 2, aarch64 | same | **1.11x** | 1 | local |
-| 2, x86_64 | same | about **0.33x** — samples 0.31x–0.38x, median 0.34x | 6 | CI |
+| 2, x86_64 | same | about **0.34x** — samples 0.31x–0.38x | 6 | CI |
 | 4, x86_64 | **+25.4%** | **0.86–1.03x** (median 0.98) | 9 | CI |
 | 8, x86_64 | same | **1.15–1.22x** (median 1.20) | 4 | CI |
 
 Ranges rather than point estimates, because every point estimate this section has
 published has been a single run and several have been withdrawn. The spread
-within each width is wider than the differences the earlier revisions were
-arguing about; the *signs* are what is stable, and they are stable in every
-comparison in the table.
+within each row is wider than the differences the earlier revisions were
+arguing about; the *signs* are what is stable, and they are stable within each
+row except at four lanes, where the row straddles 1.0. Across rows they are not:
+the same two lanes give 1.11x on aarch64 and 0.34x on x86_64.
 
 **And the ranges themselves are not tight — the two-lane one has now been missed
 twice running, in opposite directions.** It was published as 0.32–0.36 from four
@@ -1928,9 +1930,9 @@ the endpoints are the least reliable thing here.
 **No figure in the table has a correction applied.** The reporter compares the
 control operations' spread against the size of the correction and withholds the
 corrected figure when the spread dominates, and it withheld on every arm in the
-table above. Corrections did survive on a few arms — the
-largest 1.028, on an eight-lane `-all` run — and all of them are smaller than the
-spread between sweeps, which is why pooling raw figures loses nothing here.
+table above. Corrections did survive on a few arms — the largest 1.028, on an
+eight-lane `-all` run — and all of them are smaller than the spread between
+sweeps, which is why pooling raw figures loses nothing here.
 
 The per-iteration figures are remarkably flat away from two lanes: 1.19x to
 1.23x on wall clock and 1.20x to 1.24x on time inside `Kernels`, across every
@@ -1961,7 +1963,7 @@ The line search accepts essentially every step here, so the extra work is
 genuinely extra iterations.
 
 At about 1.22x per iteration against 1.254x the iterations, the arithmetic gives
-1.22/1.254 = 0.973, which is the row's median. **On a four-lane machine this
+1.22/1.254 = 0.973, near the row's median of 0.98. **On a four-lane machine this
 backend is at best a wash and usually a small loss** — seven of the nine
 comparisons land below 1.0, at native width and under `MaxVectorSize=32` alike,
 and the coverage that widens all six operations behaves the same.
@@ -1990,12 +1992,11 @@ which is why the width is swept explicitly rather than taken from whatever turne
 up.
 
 **The drift correction is often not usable, and the reporter now says so rather
-than applying it anyway.** It compares the control operations' spread against the
-size of the correction and withholds the corrected figure when the spread
-dominates — which it does on the arms above where the raw ratio is quoted. An
-earlier revision published a corrected number from a run it simultaneously
-described as too noisy to correct, then withdrew it; this is that judgement made
-in code.
+than applying it anyway.** It compares the control operations' spread against
+the size of the correction and withholds the corrected figure when the spread
+dominates — which it did on every arm in the table above. An earlier revision
+published a corrected number from a run it simultaneously described as too noisy
+to correct, then withdrew it; this is that judgement made in code.
 
 ==Where this leaves it==
 
@@ -2054,11 +2055,13 @@ magnetising shunt, and `Transformer.model` defaults to `"t"`, under which PyPSA
 converts wye–delta before building `Y`. The `standard-types` fixture sets
 `model = "pi"` explicitly to isolate type expansion from that conversion.
 
-The 110/20 kV types are worse — they are Dyn5 with `phase_shift = 150°`, and
-phase shift is not modelled anywhere in this port. The fixture uses
-`160 MVA 380/110 kV`, which has none. So: a transformer standard type works
-today if it is a transmission-level unit declared `pi`. The T model and phase
-shift are the next two pieces, and both need goldens of their own.
+The 110/20 kV types are Dyn5 with `phase_shift = 150°`. Phase shift and the T
+model are both modelled now — see *The AC transformer model* — so what is left
+here is narrower than it was: no golden exercises a standard type that carries
+either. The fixture uses `160 MVA 380/110 kV`, which has no shift, and pins
+`model = "pi"` to isolate type expansion from the conversion rather than because
+the conversion is missing. The remaining piece is a golden over a Dyn5 type, not
+the capability it would exercise.
 
 ## PyPSA 1.3.0, and a pin that stopped being free
 

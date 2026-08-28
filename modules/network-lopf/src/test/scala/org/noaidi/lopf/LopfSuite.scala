@@ -1,8 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import scala.jdk.CollectionConverters.*
-import org.noaidi.network.{CsvReader, Network, Schema, Topology}
+import java.nio.file.Files
+import org.noaidi.network.{CsvReader, Network, Topology}
 import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
 
 /** Dispatch against PyPSA's own optimisation results.
@@ -46,50 +45,14 @@ import org.noaidi.prima.{PdhgParams, RowExpansion, SolveStatus}
   */
 class LopfSuite extends munit.FunSuite, CsvFixtures:
 
-  private def goldens: Path =
-    Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
-
-  private lazy val available: Boolean = Files.exists(goldens.resolve("schema.json"))
-  private lazy val schema: Schema     = Schema.fromFile(goldens.resolve("schema.json"))
-
-  private def network(name: String): Network =
-    CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
+  override protected def tempPrefix: String = "noaidi-lopf-"
 
   private def results(name: String): ujson.Value =
     ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))
 
   private val params = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 500_000)
 
-  private val temporaries = scala.collection.mutable.ArrayBuffer.empty[Path]
-
-  /** A copy of a golden network with one file rewritten.
-    *
-    * Routed through `CsvReader` rather than assembled in memory on purpose: a
-    * hand-built table can express states the reader never produces, so a test
-    * built that way can pass while the real path stays broken.
-    */
-  private def copyOf(name: String): Path =
-    val dir = Files.createTempDirectory("noaidi-lopf-")
-    temporaries += dir
-    val source = goldens.resolve("networks").resolve(name)
-    // Closed explicitly: `Files.list` is backed by an open directory handle, and
-    // this runs once per mutation test.
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.asScala.foreach(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
-    dir
-
-  private def mutate(name: String, file: String, edit: String => String): Network =
-    val dir    = copyOf(name)
-    val target = dir.resolve(file)
-    val before = Files.readString(target)
-    val after  = edit(before)
-    // Otherwise a fixture that silently stops matching turns into a test that
-    // asserts something about an unmodified network.
-    assertNotEquals(after, before, s"the edit to $file changed nothing")
-    Files.writeString(target, after)
-    CsvReader.read(dir, schema, name)
-
+  /** A golden network with one file added, for a component it does not carry. */
   private def withExtraFile(name: String, file: String, content: String): Network =
     withFiles(name, file -> content)
 
@@ -104,14 +67,6 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     val dir = copyOf(name)
     files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
     CsvReader.read(dir, schema, name)
-
-  override def afterAll(): Unit =
-    temporaries.foreach { dir =>
-      if Files.exists(dir) then
-        scala.util.Using.resource(Files.walk(dir)) { paths =>
-          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
-        }
-    }
 
   /** A column of a golden frame, by entity name, with tagged NaN handled. */
   private def frameValue(frame: ujson.Value, row: Int, column: String): Double =

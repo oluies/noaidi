@@ -90,14 +90,19 @@ object Report:
     // -- which `%.3e` cannot support: four significant digits agreeing says
     // nothing about the other forty-nine bits.
     //
-    // Both forms, because they answer different questions. Seventeen digits
-    // round-trip a `Double`, so the decimal is exact and still readable; the raw
-    // bits are what a reader diffing two job logs can compare without trusting
-    // that claim about round-tripping. Neither is asserted on -- the comparison
-    // is across two CI jobs, which nothing here can see -- so this makes the
-    // claim checkable rather than checked, and the prose stays at what the
-    // rounded line supports until a run has shown otherwise.
-    println(f"  exactly: $worst%.17e  (raw bits 0x${java.lang.Double.doubleToRawLongBits(worst)}%016x)")
+    // Both forms, because they answer different questions. The decimal
+    // round-trips -- `%.17e` asks for more digits than a `Double` carries, and
+    // Java's `Formatter` supplies the shortest round-tripping representation
+    // padded with zeros rather than the true binary expansion, so it identifies
+    // the value uniquely without being its exact decimal. That is enough for
+    // comparing two job logs and it stays readable; the raw bits are what a
+    // reader can compare without trusting the round-tripping claim at all.
+    //
+    // Neither is asserted on -- the comparison is across two CI jobs, which
+    // nothing here can see -- so this makes the claim checkable rather than
+    // checked, and the prose stays at what the rounded line supports until a run
+    // has shown otherwise.
+    println(ValidationLadder.exactly(worst))
     if disagreements.nonEmpty then
       println(s"STATUS DISAGREEMENTS: ${disagreements.map(_.name).mkString(", ")}")
 

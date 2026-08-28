@@ -24,7 +24,25 @@ class NewtonRaphsonSuite extends munit.FunSuite:
   // *length*num_parallel` and a transformer's is a magnetising current, and
   // neither enters a linear flow at all -- so this suite is the only thing that
   // can tell whether they were derived correctly.
-  private val networks = List("ac-pf-pv", "storage-hvdc", "standard-types")
+  //
+  // `phase-shift` and `transformer-taps` cover what were three separate
+  // refusals: an off-nominal tap, a phase shift, and the T model with a
+  // non-zero shunt. Each was a real gap -- PyPSA converges on all of them and
+  // the goldens recorded answers this port declined to compute. What made them
+  // tractable was that the solver never needed changing: `Y` becomes asymmetric
+  // (`exp(jphi)` on one off-diagonal and its conjugate on the other), but
+  // `Admittance` already stored a full dense matrix with the two off-diagonals
+  // written separately, every consumer indexes `(i, k)` in the general form,
+  // and the Jacobian was already asymmetric and solved by LU rather than
+  // Cholesky. The refusals were guarding an assumption the code did not make.
+  //
+  // They are in this list rather than in a test of their own so that the
+  // `bus_p`/`bus_q` comparison reaches them. That comparison is what separates
+  // a converged-to-something from a converged-to-the-right-thing, and it is the
+  // only assertion that reads the slack bus's own row of `Y` -- which is
+  // precisely where a tap's `/tau^2` and half of the T-converted shunt land.
+  private val networks =
+    List("ac-pf-pv", "storage-hvdc", "standard-types", "phase-shift", "transformer-taps")
 
   private def network(name: String): Network =
     CsvReader.read(goldens.resolve("networks").resolve(name), schema, name)
@@ -218,39 +236,6 @@ class NewtonRaphsonSuite extends munit.FunSuite:
         }
     }
 
-  test("the transformer features that were refused now match PyPSA") {
-    assume(available, "goldens missing")
-    // These were three separate refusals: an off-nominal tap, a phase shift, and
-    // the T model with a non-zero shunt. Each was a real gap -- PyPSA converges
-    // on all of them and the goldens recorded answers this port declined to
-    // compute.
-    //
-    // What made them tractable in the end was that the solver never needed
-    // changing. `Y` becomes asymmetric (`exp(jphi)` on one off-diagonal and its
-    // conjugate on the other), but `Admittance` already stored a full dense
-    // matrix with the two off-diagonals written separately, every consumer
-    // indexes `(i, k)` in the general form, and the Jacobian was already
-    // asymmetric and solved by LU rather than Cholesky. The refusals were
-    // guarding an assumption the code did not actually make.
-    Seq("phase-shift", "transformer-taps").foreach { name =>
-      val expected = pf(name)
-      assert(!expected.obj.contains("error"), s"$name: golden pf failed")
-
-      val n      = network(name)
-      val result = NewtonRaphson.solve(n)
-      assert(result.allConverged, s"$name did not converge: ${result.converged}")
-
-      n.snapshots.indices.foreach { t =>
-        n.require("Bus").ids.foreach { bus =>
-          assertEqualsDouble(result.voltageMagnitude(bus, t),
-            frameValue(expected("bus_v_mag_pu"), t, bus), 1e-9, s"$name |V| at $t, $bus")
-          assertEqualsDouble(result.voltageAngle(bus, t),
-            frameValue(expected("bus_v_ang"), t, bus), 1e-9, s"$name angle at $t, $bus")
-        }
-      }
-    }
-  }
-
   test("each transformer feature in the fixture is load-bearing") {
     assume(available, "goldens missing")
     // Guarding the guard. Every one of these could be set and change nothing, in
@@ -312,7 +297,9 @@ class NewtonRaphsonSuite extends munit.FunSuite:
     assertEqualsDouble(gp, yShunt._1, 1e-15, "shunt g")
     assertEqualsDouble(bp, yShunt._2, 1e-15, "shunt b")
 
-    // And a zero shunt is left alone rather than converted, which would divide
-    // by zero -- PyPSA masks on the same condition.
+    // And a zero shunt is left alone rather than converted, because PyPSA masks
+    // on that condition. The conversion itself is a no-op there rather than a
+    // division by zero -- which is what the equality below actually shows, and
+    // why the mask is parity rather than protection.
     assertEquals(Admittance.tModelToPi(r, x, 0.0, 0.0), (r, x, 0.0, 0.0))
   }

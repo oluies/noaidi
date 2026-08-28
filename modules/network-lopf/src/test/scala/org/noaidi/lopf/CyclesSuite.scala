@@ -17,9 +17,11 @@ import org.noaidi.network.{CsvReader, Network}
   */
 class CyclesSuite extends munit.FunSuite, CsvFixtures:
 
+  override protected def tempPrefix: String = "noaidi-cycles-"
+
   /** A network with the given buses and AC lines, via the real reader. */
   private def network(buses: Seq[String], lines: Seq[(String, String, String)]): Network =
-    val dir = tempDir("noaidi-cycles-")
+    val dir = tempDir()
     Files.writeString(
       dir.resolve("buses.csv"),
       "name,v_nom,carrier\n" + buses.map(b => s"$b,1.0,AC\n").mkString,

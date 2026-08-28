@@ -24,9 +24,11 @@ import org.noaidi.network.{CsvReader, Network}
   */
 class DelaysSuite extends munit.FunSuite, CsvFixtures:
 
+  override protected def tempPrefix: String = "noaidi-delays-"
+
   /** A three-port network written out and read back through the real parser. */
   private def threePort(links: String): Network =
-    val dir = tempDir("noaidi-delays-")
+    val dir = tempDir()
     Files.writeString(dir.resolve("snapshots.csv"),
       ",snapshot,objective,stores,generators\n0,0,1.0,1.0,1.0\n1,1,1.0,1.0,1.0\n" +
         "2,2,1.0,1.0,1.0\n3,3,1.0,1.0,1.0\n")

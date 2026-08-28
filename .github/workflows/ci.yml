@@ -14,16 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The invariant `.github/dependabot.yml` rests on, checked rather than asserted
-  # in a comment. That file suppresses patch and minor updates for a named set of
-  # actions, which is sound only while each is pinned to a floating major tag: a
-  # SHA or exact pin gets no fix at run time, so ignoring its updates would freeze
-  # it silently and for ever.
+  # Conventions this repository relies on that no compiler or linter enforces.
+  # Both checks here are for defects that leave the build green, which is the
+  # only reason either needs to exist.
   #
-  # The logic lives in a script rather than a heredoc so it can be run against a
-  # working tree before pushing, and so it can be read.
+  #   action pins   `.github/dependabot.yml` suppresses patch and minor updates
+  #                 for a named set of actions. That is sound only while each is
+  #                 pinned to a floating major tag: a SHA or exact pin gets no fix
+  #                 at run time, so ignoring its updates freezes it for ever.
+  #
+  #   orphan docs   Scala attaches only the doc comment immediately above a
+  #                 definition. A stack of two drops the first in silence, and it
+  #                 lands when a definition moves and its comment is left behind.
+  #
+  # The logic lives in scripts rather than heredocs so each can be run against a
+  # working tree before pushing, and so they can be read.
+  #
+  # The job keeps its `action-pins` id: renaming it would orphan the check's
+  # history on existing pull requests for no gain.
   action-pins:
-    name: Dependabot ignore list matches the workflows
+    name: Source checks the compiler does not make
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -49,6 +59,22 @@ jobs:
       - run: python3 .github/scripts/test_check_action_pins.py
 
       - run: python3 .github/scripts/check_action_pins.py
+
+      # Orphaned doc comments. Scala attaches only the comment immediately above
+      # a definition, so a stack of two silently drops the first -- and the
+      # compiler, `-Wunused:all` and scaladoc all accept it without a word, which
+      # is why this needs a check of its own rather than a compiler flag.
+      #
+      # It rides in this job rather than its own because it needs no dependency
+      # beyond the interpreter already set up above, and a second runner to walk
+      # 94 files would cost more to start than to run.
+      #
+      # Tests first, for the reason the pair above gives. They matter more here:
+      # the defect is invisible to every other tool, so a check that silently
+      # stopped working would leave nothing watching at all.
+      - run: python3 .github/scripts/test_check_orphan_docs.py
+
+      - run: python3 .github/scripts/check_orphan_docs.py
 
   test:
     name: Test (JDK ${{ matrix.java }})

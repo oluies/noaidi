@@ -34,6 +34,124 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The other half of the question. `schema-drift` below asks whether upstream
+  # changed the *shape* of a component; this asks whether it changed an *answer*.
+  #
+  # Nothing else can. A revised linearisation, a different default tolerance, a
+  # corrected sign in an objective -- none of those touch the schema, and all of
+  # them move the numbers every comparison in this repository is made against.
+  # Until this existed the first sign would have been a pin bump turning 741
+  # tests red at once, with nothing to say which upstream change caused it.
+  #
+  # Its own job rather than a step in the other one, because it needs a solver.
+  # `schema-drift` deliberately installs PyPSA without `highspy` so that a solver
+  # problem cannot be mistaken for drift, and that reasoning is right; it just
+  # cannot be honoured by a job whose whole subject is solved answers.
+  #
+  # The full set is generated, not a subset: all 22 networks take about 35
+  # seconds, measured, so there is nothing to buy by choosing among them.
+  results-drift:
+    name: Results against the newest PyPSA
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # The comparator before the comparison, for the reason the sibling job
+      # gives: a green run here is read as "upstream did not change an answer",
+      # so a comparator that silently compares nothing is worse than none.
+      # Stdlib only, so it runs before the venv below can fail.
+      - name: Test the results comparator
+        run: python3 reference/test_results_drift.py
+
+      # `highspy` because the optimise results need a solver; `tables` left out
+      # because it buys only the HDF5 exports, which this job does not read --
+      # the generator announces skipping them rather than failing, and every
+      # extra dependency is another way to fail for a reason that is not drift.
+      - name: Install the newest PyPSA
+        id: install
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pypsa highspy
+          latest=$("$RUNNER_TEMP/venv/bin/python" -c "import pypsa; print(pypsa.__version__)")
+          pinned=$(python3 -c "import json; print(json.load(open('reference/goldens/manifest.json'))['versions']['pypsa'])")
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "pinned $pinned, latest $latest"
+
+      # `--into` is a whole generation with the destination moved, so `goldens/`
+      # is untouched and the manifest lands beside the results it describes. A
+      # non-zero exit means a network failed to build or solve on the newest
+      # PyPSA, which is drift of the loudest kind: the answer is not different,
+      # it is gone. It is captured rather than allowed to abort so the report
+      # below still runs.
+      - name: Generate results from the newest PyPSA
+        id: generate
+        run: |
+          set -euo pipefail
+          status=0
+          "$RUNNER_TEMP/venv/bin/python" reference/generate_goldens.py \
+            --into "$RUNNER_TEMP/latest" 2>&1 | tee generate.log || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Diff against the pinned results
+        id: drift
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -d "$RUNNER_TEMP/latest/results" ]; then
+            {
+              echo "## PyPSA ${{ steps.install.outputs.latest }} — no results to compare"
+              echo
+              echo "The generator exited ${{ steps.generate.outputs.status }} without writing a"
+              echo "results directory. That is not a comparison failure: the newest PyPSA could"
+              echo "not produce the goldens at all, and the generator needs looking at before"
+              echo "any drift question can be asked."
+            } > results-drift.md
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          status=0
+          python3 reference/results_drift.py \
+            reference/goldens/results "$RUNNER_TEMP/latest/results" > results-drift.md || status=$?
+          [ "$status" -le 1 ] || { cat results-drift.md; exit "$status"; }
+          echo "drifted=$([ "$status" -eq 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          cat results-drift.md
+
+      - name: Publish the report
+        if: always()
+        run: |
+          {
+            echo "## PyPSA results drift"
+            echo
+            echo "| | version |"
+            echo "| --- | --- |"
+            echo "| pinned | \`${{ steps.install.outputs.pinned }}\` |"
+            echo "| latest | \`${{ steps.install.outputs.latest }}\` |"
+            echo
+            if [ -f results-drift.md ]; then cat results-drift.md; fi
+            if [ "${{ steps.generate.outputs.status }}" != "0" ]; then
+              echo
+              echo "The generator exited \`${{ steps.generate.outputs.status }}\`. A network that"
+              echo "fails to build or solve on the newest PyPSA is reported here rather than"
+              echo "as a comparison difference, because there is no answer to compare."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Fails the run so the schedule surfaces it, after the report is published.
+      - name: Fail if an answer moved
+        if: always() && steps.drift.outputs.drifted == 'true'
+        run: |
+          echo "::error::an upstream result moved -- see the job summary"
+          exit 1
+
   schema-drift:
     name: Schema against the newest PyPSA
     runs-on: ubuntu-latest

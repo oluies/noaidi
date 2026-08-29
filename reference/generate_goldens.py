@@ -1773,28 +1773,41 @@ def write_schema_only(target: Path) -> int:
     return 0
 
 
-USAGE = "usage: generate_goldens.py [--schema-only PATH]"
+USAGE = "usage: generate_goldens.py [--schema-only PATH | --into PATH]"
 
 
 def main() -> int:
-    # Deliberately hand-rolled rather than argparse: there is exactly one flag,
-    # and it exists to make the file usable by the drift workflow without giving
+    # Deliberately hand-rolled rather than argparse: there are exactly two flags,
+    # and both exist to make the file usable by the drift workflow without giving
     # anyone a way to half-regenerate the goldens.
     #
-    # PATH is required rather than defaulting into `goldens/`. A default there
-    # would be exactly the half-regeneration this comment claims to prevent:
-    # `schema.json` rewritten from whatever PyPSA the invoking venv happens to
-    # hold while `manifest.json` still records the pinned one, so the schema and
-    # the recorded pin disagree and every schema-driven suite reads an unpinned
-    # schema believing it is the golden. Regenerating the goldens is the no-flag
-    # path, which rewrites the manifest alongside them.
+    # PATH is required on both rather than defaulting into `goldens/`. A default
+    # there would be exactly the half-regeneration this comment claims to
+    # prevent: `schema.json` rewritten from whatever PyPSA the invoking venv
+    # happens to hold while `manifest.json` still records the pinned one, so the
+    # schema and the recorded pin disagree and every schema-driven suite reads an
+    # unpinned schema believing it is the golden. Regenerating the goldens is the
+    # no-flag path, which rewrites the manifest alongside them.
+    #
+    # `--into` is a *whole* generation with the destination moved, not a partial
+    # one, which is why it is safe: everything that normally lands in `goldens/`
+    # lands together in PATH, manifest included, and `goldens/` is untouched. The
+    # results drift check needs the solved answers from a PyPSA nobody has
+    # pinned, and there is no way to get those without building the networks.
+    global OUT
     argv = sys.argv[1:]
     if argv[:1] == ["--schema-only"]:
         if len(argv) == 2:
             return write_schema_only(Path(argv[1]))
         print(USAGE, file=sys.stderr)
         return 2
-    if argv:
+    if argv[:1] == ["--into"]:
+        if len(argv) == 2:
+            OUT = Path(argv[1]).resolve()
+        else:
+            print(USAGE, file=sys.stderr)
+            return 2
+    elif argv:
         print(USAGE, file=sys.stderr)
         return 2
 

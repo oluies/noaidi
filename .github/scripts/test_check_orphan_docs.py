@@ -137,6 +137,36 @@ class B {
 }
 """
 
+# A note between the orphan and the brace. Skipping only whitespace let a single
+# `// revisit this` defeat the dangling rule entirely.
+DANGLING_PAST_LINE_COMMENT = """\
+class A {
+  def f = 1
+
+  /** Left behind when `g` was deleted. */
+  // revisit this
+}
+
+class B {
+  /** Real doc. */
+  def h = 2
+}
+"""
+
+DANGLING_PAST_BLOCK_COMMENT = """\
+class A {
+  def f = 1
+
+  /** Left behind. */
+  /* a note, not documentation */
+}
+
+class B {
+  /** Real doc. */
+  def h = 2
+}
+"""
+
 # --- shapes that must not fire ----------------------------------------------
 
 CLEAN = """\
@@ -273,6 +303,11 @@ CASES: list[tuple[str, dict[str, str], int, str]] = [
     ("a doc comment sharing its line with a closing brace is reported",
      {"src/P.scala": DANGLING_SAME_LINE}, 1, "no definition after it"),
 
+    ("a note between the orphan and the brace does not hide it",
+     {"src/P.scala": DANGLING_PAST_LINE_COMMENT}, 1, "no definition after it"),
+    ("a block-comment note between the orphan and the brace does not hide it",
+     {"src/P.scala": DANGLING_PAST_BLOCK_COMMENT}, 1, "no definition after it"),
+
     ("a correctly documented file passes", {"src/P.scala": CLEAN}, 0, "every doc comment attaches"),
     ("definitions sharing a line with their comments are not stacked",
      {"src/P.scala": SAME_LINE_DEFINITIONS}, 0, "every doc comment attaches"),
@@ -322,6 +357,21 @@ def unit_checks() -> list[str]:
         span = STACKED[begin:end]
         if not (span.startswith("/**") and span.endswith("*/")):
             problems.append(f"offsets for the comment at line {start_line} gave {span!r}")
+
+    # Exit code 1 is produced by any number of findings, so the dangling cases
+    # above pass just as happily if the rule also flags the `/** Real doc. */`
+    # that follows -- which is the natural failure mode of widening the rule from
+    # "the last comment" to "every comment". Counts and lines are asserted here so
+    # a false positive on the second comment fails the suite.
+    for name, fixture, expected in (
+        ("DANGLING_MID_FILE", DANGLING_MID_FILE, (4,)),
+        ("DANGLING_SAME_LINE", DANGLING_SAME_LINE, (3,)),
+        ("DANGLING_PAST_LINE_COMMENT", DANGLING_PAST_LINE_COMMENT, (4,)),
+        ("DANGLING_PAST_BLOCK_COMMENT", DANGLING_PAST_BLOCK_COMMENT, (4,)),
+    ):
+        lines = tuple(line for line, _ in findings(fixture))
+        if lines != expected:
+            problems.append(f"findings({name}) reported lines {lines}, expected {expected}")
 
     # An escaped quote is four characters. Consuming three leaves a stray quote
     # that can re-enter the scanner at the wrong offset.

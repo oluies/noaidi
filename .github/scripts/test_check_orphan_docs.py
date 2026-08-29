@@ -31,7 +31,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from check_orphan_docs import check, doc_comments, findings  # noqa: E402
+from check_orphan_docs import Scan, check, doc_comments, findings  # noqa: E402
 
 
 def run(files: dict[str, str]) -> tuple[int, str, str]:
@@ -105,6 +105,36 @@ object Probe:
   /** Only an end marker follows. */
 
 end Probe
+"""
+
+# The shape that distinguishes checking every comment from checking only the last:
+# the orphan is at the end of a braced block that is not the last block in the
+# file, so `DANGLING_AT_EOF` and `DANGLING_BEFORE_END` both pass an
+# implementation that misses this one.
+DANGLING_MID_FILE = """\
+class A {
+  def f = 1
+
+  /** Left behind when `g` was deleted. */
+}
+
+class B {
+  /** Real doc. */
+  def h = 2
+}
+"""
+
+# Same, with the orphan sharing its line with the brace. A rule that reads whole
+# lines cannot see this one at all.
+DANGLING_SAME_LINE = """\
+class A {
+  def f = 1
+  /** Left behind. */ }
+
+class B {
+  /** Real doc. */
+  def h = 2
+}
 """
 
 # --- shapes that must not fire ----------------------------------------------
@@ -208,6 +238,15 @@ object Probe:
   def slash: Char = '/'
 """
 
+# Two comments that each attach to their own definition on the same line. Read as
+# whole lines these look stacked, because the line where one ends is also the line
+# where its definition sits.
+SAME_LINE_DEFINITIONS = """\
+class A:
+  /** Documents x. */ val x = 1
+  /** Documents y. */ val y = 2
+"""
+
 # `/**/` is an empty block comment, not a doc comment that opens.
 EMPTY_BLOCK_COMMENT = """\
 package probe
@@ -229,7 +268,14 @@ CASES: list[tuple[str, dict[str, str], int, str]] = [
     ("a doc comment before only an end marker is reported",
      {"src/P.scala": DANGLING_BEFORE_END}, 1, "no definition after it"),
 
+    ("a doc comment before a mid-file closing brace is reported",
+     {"src/P.scala": DANGLING_MID_FILE}, 1, "no definition after it"),
+    ("a doc comment sharing its line with a closing brace is reported",
+     {"src/P.scala": DANGLING_SAME_LINE}, 1, "no definition after it"),
+
     ("a correctly documented file passes", {"src/P.scala": CLEAN}, 0, "every doc comment attaches"),
+    ("definitions sharing a line with their comments are not stacked",
+     {"src/P.scala": SAME_LINE_DEFINITIONS}, 0, "every doc comment attaches"),
     ("a line comment above a doc comment passes",
      {"src/P.scala": LINE_COMMENT_ABOVE}, 0, "every doc comment attaches"),
     ("a plain block comment above a doc comment passes",
@@ -260,14 +306,28 @@ def unit_checks() -> list[str]:
     problems = []
 
     # The scanner's line numbers are what a reader clicks, so an off-by-one here
-    # is worse than a miss: it sends them to the wrong comment.
-    spans = doc_comments(STACKED)
-    if spans != [(5, 5), (6, 6)]:
-        problems.append(f"doc_comments(STACKED) gave {spans}, expected [(5, 5), (6, 6)]")
+    # is worse than a miss: it sends them to the wrong comment. Offsets are
+    # checked by behaviour rather than by value, in the same-line cases above.
+    lines = [(a, b) for a, b, _, _ in doc_comments(STACKED)]
+    if lines != [(5, 5), (6, 6)]:
+        problems.append(f"doc_comments(STACKED) lines gave {lines}, expected [(5, 5), (6, 6)]")
 
-    spans = doc_comments(STACKED_WITH_BLANK)
-    if spans != [(5, 8), (10, 10)]:
-        problems.append(f"doc_comments(STACKED_WITH_BLANK) gave {spans}, expected [(5, 8), (10, 10)]")
+    lines = [(a, b) for a, b, _, _ in doc_comments(STACKED_WITH_BLANK)]
+    if lines != [(5, 8), (10, 10)]:
+        problems.append(f"doc_comments(STACKED_WITH_BLANK) lines gave {lines}, expected [(5, 8), (10, 10)]")
+
+    # Offsets must bracket the comment exactly, since both rules test the text
+    # between one comment's end and the next one's start.
+    for start_line, _, begin, end in doc_comments(STACKED):
+        span = STACKED[begin:end]
+        if not (span.startswith("/**") and span.endswith("*/")):
+            problems.append(f"offsets for the comment at line {start_line} gave {span!r}")
+
+    # An escaped quote is four characters. Consuming three leaves a stray quote
+    # that can re-enter the scanner at the wrong offset.
+    scan = Scan("'" + chr(92) + "''")
+    if not scan.skip_char_literal() or scan.i != 4:
+        problems.append(f"skip_char_literal on an escaped quote stopped at {scan.i}, expected 4")
 
     # A stack of three is two findings, not one: each dropped comment is its own
     # loss, and reporting only the first would leave the second to a later run.

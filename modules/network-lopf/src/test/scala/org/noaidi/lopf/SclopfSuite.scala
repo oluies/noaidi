@@ -145,7 +145,7 @@ class SclopfSuite extends munit.FunSuite, CsvFixtures:
     // to redistribute and the factor's denominator goes to zero. Producing an
     // infinity would put one into a constraint coefficient and the LP would come
     // back infeasible with nothing to explain it.
-    val dir = tempDir("noaidi-sclopf-")
+    val dir = tempDir()
     Files.writeString(dir.resolve("buses.csv"), "name,v_nom,carrier\nA,380.0,AC\nB,380.0,AC\n")
     Files.writeString(dir.resolve("lines.csv"), "name,bus0,bus1,x,r,s_nom\nAB,A,B,0.1,0.0,150.0\n")
     Files.writeString(dir.resolve("generators.csv"), "name,bus,control,carrier\ng,A,Slack,wind\n")

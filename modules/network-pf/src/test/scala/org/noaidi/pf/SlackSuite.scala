@@ -24,7 +24,11 @@ class SlackSuite extends munit.FunSuite:
   override def afterAll(): Unit =
     temporaries.foreach { dir =>
       if Files.exists(dir) then
-        Files.walk(dir).sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        // Closed explicitly: `Files.walk` holds an open directory handle, as the
+        // two other `network-pf` suites already account for.
+        scala.util.Using.resource(Files.walk(dir)) { paths =>
+          paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+        }
     }
 
   /** A two-bus AC island, with generators listed in the given order.

@@ -30,8 +30,13 @@ jobs:
   # The logic lives in scripts rather than heredocs so each can be run against a
   # working tree before pushing, and so they can be read.
   #
-  # The job keeps its `action-pins` id: renaming it would orphan the check's
-  # history on existing pull requests for no gain.
+  # The job keeps its `action-pins` id because nothing gains by churning it, but
+  # the id is not what carries a check's identity: GitHub derives the status
+  # context from `name:`, so the rename below *did* retire the old
+  # "Dependabot ignore list matches the workflows" context and start a new one.
+  # That is safe here only because `main` has no branch protection and so no
+  # required check to strand -- verified rather than assumed. Adding protection
+  # later means naming the context below, not this id.
   action-pins:
     name: Source checks the compiler does not make
     runs-on: ubuntu-latest

@@ -28,19 +28,24 @@ import org.noaidi.network.{CsvReader, Network, Schema}
   * closed the stream `copyOf` below explains must be closed. One definition ends
   * all three.
   *
-  * `LinearPowerFlowSuite` and `NewtonRaphsonSuite` keep their own copies. They
-  * are in `network-pf`, and a test-jar dependency between the two modules costs
-  * more than the duplication does — that is the only reason a copy remains, and
-  * it does not apply to anything in this module.
+  * Copies remain in `network-pf`, which cannot see this trait without a test-jar
+  * dependency between the two modules -- more than the duplication costs. No
+  * count of them is given here: this paragraph has named an incomplete set three
+  * times running, each time missing one that carried the very defect the
+  * sentence above claims to have ended. The rule is the durable part. Anything
+  * in `network-lopf` mixes this in; anything in `network-pf` does not, and each
+  * of those is its own copy to keep honest.
   */
 trait CsvFixtures extends munit.Suite, munit.Assertions:
 
   /** Prefix for this suite's temporary directories, so a leak names its owner.
     *
-    * Only [[copyOf]] reads it; suites that build fixtures from scratch pass a
-    * prefix to [[tempDir]] directly and need not override this.
+    * Abstract on purpose. It briefly had a default of `"noaidi-"`, which quietly
+    * gave that property away: a suite that forgot to override it would still
+    * compile and would leave anonymous directories behind, which is the one
+    * thing this member exists to prevent.
     */
-  protected def tempPrefix: String = "noaidi-"
+  protected def tempPrefix: String
 
   protected def goldens: Path =
     Paths.get(sys.env.getOrElse("NOAIDI_GOLDENS", "reference/goldens"))
@@ -58,7 +63,7 @@ trait CsvFixtures extends munit.Suite, munit.Assertions:
     * Creating one without registering it is the leak this exists to prevent, and
     * every call site in this module had the two lines written out separately.
     */
-  protected def tempDir(prefix: String): Path =
+  protected def tempDir(prefix: String = tempPrefix): Path =
     val dir = Files.createTempDirectory(prefix)
     temporaries += dir
     dir

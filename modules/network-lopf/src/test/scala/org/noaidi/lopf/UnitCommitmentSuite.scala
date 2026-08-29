@@ -15,6 +15,8 @@ import org.noaidi.prima.{BnbParams, MilpStatus, PdhgParams}
   */
 class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
 
+  override protected def tempPrefix: String = "noaidi-uc-"
+
   private def results(name: String): ujson.Value =
     ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))("optimize")
 
@@ -152,11 +154,7 @@ class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
     // Ramp limits are ordinary in a commitment study and are not modelled.
     // Ignoring one gives a schedule the network cannot follow, and it comes out
     // cheaper, so it has to be refused.
-    val dir = tempDir("noaidi-uc-")
-    val source = goldens.resolve("networks").resolve("unit-commitment")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
+    val dir = copyOf("unit-commitment")
     val target = dir.resolve("generators.csv")
     val lines  = Files.readString(target).linesIterator.toIndexedSeq
     val edited = (lines.head + ",ramp_limit_up") +: lines.tail.map(_ + ",0.5")
@@ -176,11 +174,7 @@ class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
     // one block above it in the source says so about `stand_by_cost` and the
     // ramp check asserted the opposite -- so without this, reverting
     // `UnitCommitment.reject` to the old sweep leaves every test green.
-    val dir = tempDir("noaidi-uc-")
-    val source = goldens.resolve("networks").resolve("unit-commitment")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
+    val dir = copyOf("unit-commitment")
 
     // Deliberately not touching generators.csv: the static column stays absent,
     // so a reader that only consults it sees no limit anywhere.
@@ -208,11 +202,7 @@ class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
     // deleted, and the answer comes back either spuriously infeasible or far
     // more expensive than the real network's. Nothing caught this because the
     // only fixture is a single bus with no branches.
-    val dir = tempDir("noaidi-uc-")
-    val source = goldens.resolve("networks").resolve("unit-commitment")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
+    val dir = copyOf("unit-commitment")
     Files.writeString(
       dir.resolve("buses.csv"),
       Files.readString(dir.resolve("buses.csv")).stripTrailing + "\nfar,110.0\n",
@@ -229,11 +219,7 @@ class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
     // It would match no balance row and simply vanish, and the schedule would
     // come out cheaper with no diagnostic. Lopf already guarded this; leaving
     // one entry point loud and the other silently wrong is the thing to avoid.
-    val dir = tempDir("noaidi-uc-")
-    val source = goldens.resolve("networks").resolve("unit-commitment")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
+    val dir = copyOf("unit-commitment")
     // Only the data rows: a blanket replace would rename the `bus` *column* too,
     // which is a different (also rejected) error and not the one under test.
     val loads = dir.resolve("loads.csv")
@@ -299,11 +285,7 @@ class UnitCommitmentSuite extends munit.FunSuite, CsvFixtures:
 
   /** A copy of the commitment golden with extra or rewritten files. */
   private def fixtureWith(files: (String, String)*): Network =
-    val dir = tempDir("noaidi-uc-")
-    val source = goldens.resolve("networks").resolve("unit-commitment")
-    scala.util.Using.resource(Files.list(source)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
+    val dir = copyOf("unit-commitment")
     files.foreach((name, content) => Files.writeString(dir.resolve(name), content))
     CsvReader.read(dir, schema, "unit-commitment")
 

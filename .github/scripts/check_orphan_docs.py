@@ -11,9 +11,9 @@ toolchain notices.
 The shape turns up when a definition is deleted or moved and its comment is left
 behind: the orphan lands on whatever member follows and now documents the wrong
 thing, while the text a reader wanted is gone. This repository has produced it
-three times across four commits -- twice in the same commit that was removing two
-other instances of it -- which is what a defect class invisible to the compiler
-looks like.
+six times across four commits -- twice in the commit that was removing two other
+instances of it -- which is what a defect class invisible to the compiler looks
+like. Run against those commits the script reproduces all six.
 
 Two rules, both about a comment that documents nothing:
 
@@ -116,8 +116,11 @@ class Scan:
         before anything is consumed.
         """
         rest = self.text[self.i : self.i + 4]
-        if len(rest) >= 3 and rest[1] == "\\" and rest.find("'", 2) > 0:
-            self.i += rest.find("'", 2) + 1
+        # From index 3, not 2: index 2 is the escaped character, and for `'\''`
+        # that character *is* a quote. Searching from 2 finds it, consumes three
+        # of the four characters and leaves a stray quote in the stream.
+        if len(rest) >= 4 and rest[1] == "\\" and rest.find("'", 3) > 0:
+            self.i += rest.find("'", 3) + 1
             return True
         if len(rest) >= 3 and rest[2] == "'" and rest[1] not in "\\\n":
             self.i += 3
@@ -125,8 +128,12 @@ class Scan:
         return False
 
 
-def doc_comments(text: str) -> list[tuple[int, int]]:
-    """Every `/** */` in `text`, as (start line, end line), both 1-based.
+def doc_comments(text: str) -> list[tuple[int, int, int, int]]:
+    """Every `/** */` in `text`, as (start line, end line, start offset, end offset).
+
+    Lines are 1-based and offsets are into `text`, the offset half being what the
+    rules need: a comment's line says nothing about whether code shares that line
+    with it, and both rules turn on exactly that.
 
     Only top-level comments: a doc comment nested inside a block comment is
     commented out and attaches to nothing, so it is not a finding.
@@ -160,46 +167,52 @@ def doc_comments(text: str) -> list[tuple[int, int]]:
             line += 1
     line_of[len(text)] = line
 
-    return [(line_of[a], line_of.get(b - 1, line)) for a, b in starts]
+    return [(line_of[a], line_of.get(b - 1, line), a, b) for a, b in starts]
 
 
-def documents_nothing(lines: list[str], after: int) -> bool:
-    """True if nothing after line `after` (1-based) can carry a doc comment.
+def documents_nothing(text: str, after: int) -> bool:
+    """True if nothing after offset `after` can carry a doc comment.
 
-    "Nothing" means end of file or a scope ending -- a lone `}` or an `end`
-    marker. A doc comment there is attached to no definition at all.
+    "Nothing" means end of file or a scope ending -- a closing bracket or an
+    `end` marker. A doc comment there is attached to no definition at all.
+
+    Offsets rather than lines, so that `/** orphan */ }` is read the same as the
+    same two tokens on separate lines. Working in whole lines missed the first,
+    and a rule that depends on where someone pressed return is not a rule.
     """
-    for raw in lines[after:]:
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        if stripped in {"}", ")", "]"} or stripped.startswith("end "):
-            return True
-        return False
-    return True
+    rest = text[after:].lstrip()
+    if not rest:
+        return True
+    if rest[0] in "}])":
+        return True
+    return rest == "end" or rest.startswith("end ") or rest.startswith("end\n")
 
 
 def findings(text: str) -> list[tuple[int, str]]:
     """Every orphaned doc comment in one file, as (line, message)."""
-    lines = text.split("\n")
     comments = doc_comments(text)
     out: list[tuple[int, str]] = []
 
-    for (a_start, a_end), (b_start, _) in zip(comments, comments[1:]):
-        between = lines[a_end:b_start - 1]
-        if all(not line.strip() for line in between):
+    for (a_line, _, _, a_end), (b_line, _, b_start, _) in zip(comments, comments[1:]):
+        # The span between the two comments, not the lines between them. A
+        # `/** a */ val x = 1` line carries its own definition, and reading whole
+        # lines called that pair stacked when the first attaches correctly.
+        if not text[a_end:b_start].strip():
             out.append((
-                a_start,
-                f"doc comment is followed by another at line {b_start} with only blank lines between, "
+                a_line,
+                f"doc comment is followed by another at line {b_line} with only blank lines between, "
                 "so this one is dropped and never reaches the docs",
             ))
 
-    if comments:
-        last_start, last_end = comments[-1]
-        if documents_nothing(lines, last_end):
-            out.append((last_start, "doc comment has no definition after it, so it documents nothing"))
+    # Every comment, not just the last. A comment left behind at the end of a
+    # braced block is the shape this exists to catch -- a definition deleted and
+    # its comment not -- and checking only the final comment in the file missed
+    # it wherever another class followed.
+    for line, _, _, end in comments:
+        if documents_nothing(text, end):
+            out.append((line, "doc comment has no definition after it, so it documents nothing"))
 
-    return out
+    return sorted(out)
 
 
 def scala_files(root: pathlib.Path) -> list[pathlib.Path]:

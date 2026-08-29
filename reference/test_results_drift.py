@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from results_drift import (  # noqa: E402
     DEFAULT_ABSOLUTE,
     DEFAULT_RELATIVE,
+    NOT_REPRODUCIBLE,
     compare_value,
     main,
 )
@@ -196,6 +197,83 @@ CASES: list[tuple[str, dict, dict, int, str]] = [
 ]
 
 
+def policy_cases() -> list[str]:
+    """The limited comparison for a network whose dispatch is not reproducible.
+
+    A first run of this job on Linux reported 67,535 differences on `scigrid-de`
+    with nothing changed upstream, so these check both halves: that the noise is
+    gone, and that the two figures still worth gating on did not go with it.
+    """
+    problems = []
+    degenerate = {
+        "optimize": {
+            "objective": 6684817.323607759,
+            "bus_marginal_price": frame(["bus"], [[10.0]]),
+            "generator_p": frame(["g"], [[100.0]]),
+        },
+        "pf": {"converged": frame(["bus"], [[True]])},
+    }
+
+    def run_scigrid(new_body):
+        return run({"scigrid-de": degenerate}, {"scigrid-de": new_body})
+
+    # The runner's actual failure: dispatch moves hugely, pf errors outright.
+    moved = json.loads(json.dumps(degenerate))
+    moved["optimize"]["generator_p"] = frame(["g"], [[850.0]])
+    moved["pf"] = {"error": "did not converge"}
+    code, output = run_scigrid(moved)
+    if code != 0:
+        problems.append(f"degenerate dispatch and a failed pf should not fail: exit {code}, {output.strip()[:200]}")
+    if "Compared in part" in output and "only" not in output:
+        problems.append("a limited comparison did not say what it compared")
+    if "scigrid-de" not in output:
+        problems.append("a clean run did not name the network it compared only in part")
+
+    # The objective is still gated, at the looser tolerance.
+    beyond = json.loads(json.dumps(degenerate))
+    beyond["optimize"]["objective"] *= 1.001
+    code, output = run_scigrid(beyond)
+    if code != 1 or "objective" not in output:
+        problems.append(f"a moved objective was not caught: exit {code}, {output.strip()[:200]}")
+
+    # ...but not at the shared one, which is tighter than this network reproduces.
+    within = json.loads(json.dumps(degenerate))
+    within["optimize"]["objective"] *= (1 + 1e-8)
+    code, _ = run_scigrid(within)
+    if code != 0:
+        problems.append("a move inside this network's own tolerance was reported")
+
+    # The marginal prices are the other half of what the generator says to gate on.
+    priced = json.loads(json.dumps(degenerate))
+    priced["optimize"]["bus_marginal_price"] = frame(["bus"], [[15.0]])
+    code, output = run_scigrid(priced)
+    if code != 1 or "bus_marginal_price" not in output:
+        problems.append(f"a moved marginal price was not caught: exit {code}")
+
+    # The exclusion must not outlive its reason. `DEGENERATE_DISPATCH` in the
+    # generator is where the measurement lives; if a network leaves it, the entry
+    # here is a claim about upstream that nobody is checking any more. Read as
+    # text rather than imported, because importing needs PyPSA and this file
+    # deliberately does not.
+    generator = (Path(__file__).resolve().parent / "generate_goldens.py").read_text(encoding="utf-8")
+    marker = "DEGENERATE_DISPATCH = {"
+    if marker not in generator:
+        problems.append("generate_goldens.py no longer defines DEGENERATE_DISPATCH")
+    else:
+        # From the opening brace to the closing one, rather than a fixed slice:
+        # the dict is referenced twice more further down, so splitting on the bare
+        # name lands after its last *use* and reads none of its contents.
+        body = generator.split(marker, 1)[1]
+        body = body[: body.index("\n}")]
+        for name in NOT_REPRODUCIBLE:
+            if f'"{name}"' not in body:
+                problems.append(
+                    f"{name} is compared only in part here but is no longer named in "
+                    "DEGENERATE_DISPATCH, so the reason for limiting it is gone"
+                )
+    return problems
+
+
 def main_tests() -> int:
     failures = 0
     for name, old, new, expected_code, expected_text in CASES:
@@ -208,12 +286,12 @@ def main_tests() -> int:
         else:
             print(f"ok    {name}")
 
-    problems = unit_cases()
+    problems = unit_cases() + policy_cases()
     for problem in problems:
         failures += 1
         print(f"FAIL  {problem}")
     if not problems:
-        print("ok    comparison rules")
+        print("ok    comparison rules and the not-reproducible policy")
 
     total = len(CASES) + 1
     if failures:

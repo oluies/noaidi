@@ -77,6 +77,40 @@ from pathlib import Path
 DEFAULT_RELATIVE = 1e-9
 DEFAULT_ABSOLUTE = 1e-12
 
+# Networks whose answers are not reproducible run to run, and what is left worth
+# comparing on them.
+#
+# This is not a tolerance question and no tolerance fixes it. `generate_goldens.py`
+# records the measurement under `DEGENERATE_DISPATCH`: PyPSA builds a different
+# Kirchhoff cycle basis from one process to the next -- 2372 or 2469 nonzeros over
+# the same 364 cycles -- and the degenerate optimum it lands on moves with it.
+# Generators differ by up to 750 MW between the two answers while the objective
+# agrees to 2e-8 relative. Fixing PYTHONHASHSEED does not pin it. Both answers are
+# correct; the network simply has an optimal face rather than an optimal point.
+#
+# This was not a guess. A first run of this job on a Linux runner reported 67,535
+# differences on `scigrid-de` alone with pinned and latest both at 1.3.0 -- no
+# upstream change at all -- including a `pf` block that errored where the goldens
+# converged and thousands of `bodf` cells at infinity. The same regeneration on
+# macOS/aarch64 had matched the goldens exactly, which is the same coin landing
+# the same way twice rather than evidence of determinism.
+#
+# So the entry says what to compare rather than what to skip: anything not listed
+# is not a target on this network and never was. The tolerance is its own, taken
+# from the 2e-8 the generator measured, because the shared 1e-9 is tighter than
+# this network reproduces even when nothing has changed.
+NOT_REPRODUCIBLE = {
+    "scigrid-de": {
+        "compare": ("optimize.objective", "optimize.bus_marginal_price"),
+        "relative": 1e-7,
+        "why": (
+            "one vertex of a degenerate optimal face: PyPSA's Kirchhoff basis differs "
+            "between runs, so dispatch, pf and bodf move while the objective holds to "
+            "2e-8 (see DEGENERATE_DISPATCH in generate_goldens.py)"
+        ),
+    },
+}
+
 # Enough to see the shape of a drift without pasting a 852-bus frame into a job
 # summary. The count of what was withheld is always printed -- a silent truncation
 # reads as "that was all of it".
@@ -239,19 +273,50 @@ def compare_directories(old_dir: Path, new_dir: Path, rel_tol: float, abs_tol: f
 
     drifts: list[Drift] = []
     for name in sorted(old_names & new_names):
-        drifts.extend(compare_value(
-            name, load(old_dir / f"{name}.json"), load(new_dir / f"{name}.json"), rel_tol, abs_tol,
-        ))
+        old_body = load(old_dir / f"{name}.json")
+        new_body = load(new_dir / f"{name}.json")
+        policy = NOT_REPRODUCIBLE.get(name)
+        if policy is None:
+            drifts.extend(compare_value(name, old_body, new_body, rel_tol, abs_tol))
+            continue
+        # Only the named paths, at this network's own tolerance. Comparing the
+        # rest would report a difference that is true, meaningless and 67,000
+        # lines long, which is the same as reporting nothing.
+        for path in policy["compare"]:
+            old_at, new_at = old_body, new_body
+            for step in path.split("."):
+                old_at = old_at.get(step) if isinstance(old_at, dict) else None
+                new_at = new_at.get(step) if isinstance(new_at, dict) else None
+            if old_at is None or new_at is None:
+                drifts.append(Drift(
+                    f"{name}.{path}", "structural",
+                    "present" if old_at is not None else "absent",
+                    "present" if new_at is not None else "absent",
+                ))
+                continue
+            drifts.extend(compare_value(
+                f"{name}.{path}", old_at, new_at, policy["relative"], abs_tol,
+            ))
     return drifts, missing, added, sorted(old_names & new_names)
 
 
 def report(drifts, missing, added, compared, rel_tol, out, err) -> int:
+    limited = [n for n in compared if n in NOT_REPRODUCIBLE]
     if not drifts and not missing and not added:
         print(
             f"{len(compared)} networks compared at relative tolerance {rel_tol:.0e}: "
             "every result is unchanged",
             file=out,
         )
+        for name in limited:
+            # Never silently: a clean run that quietly skipped most of the
+            # largest network reads as coverage it does not have.
+            policy = NOT_REPRODUCIBLE[name]
+            print(
+                f"  {name}: only {', '.join(policy['compare'])} at {policy['relative']:.0e} "
+                f"-- {policy['why']}",
+                file=out,
+            )
         return 0
 
     print("## Results drift", file=out)
@@ -271,7 +336,10 @@ def report(drifts, missing, added, compared, rel_tol, out, err) -> int:
     for kind, heading in (
         ("structural", "Structural — upstream changed the shape of a result"),
         ("categorical", "Categorical — a status or flag changed"),
-        ("numeric", f"Numeric — moved by more than {rel_tol:.0e} relative"),
+        # Not "more than {rel_tol}": a network in NOT_REPRODUCIBLE is compared at
+        # its own, looser tolerance, and naming one figure for all of them would
+        # be the kind of tidy sentence that is not true of every row under it.
+        ("numeric", "Numeric — moved by more than the tolerance for that network"),
     ):
         found = by_kind[kind]
         if not found:
@@ -282,6 +350,19 @@ def report(drifts, missing, added, compared, rel_tol, out, err) -> int:
             print(f"- `{drift}`", file=out)
         if len(found) > MAX_REPORTED:
             print(f"- …and {len(found) - MAX_REPORTED} more not listed", file=out)
+        print(file=out)
+
+    limited = [n for n in compared if n in NOT_REPRODUCIBLE]
+    if limited:
+        print("### Compared in part", file=out)
+        print(file=out)
+        for name in limited:
+            policy = NOT_REPRODUCIBLE[name]
+            print(
+                f"- `{name}`: only {', '.join(policy['compare'])} at "
+                f"{policy['relative']:.0e} — {policy['why']}",
+                file=out,
+            )
         print(file=out)
 
     networks = sorted({str(d.path).split(".")[0] for d in drifts})

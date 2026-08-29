@@ -179,8 +179,28 @@ def documents_nothing(text: str, after: int) -> bool:
     Offsets rather than lines, so that `/** orphan */ }` is read the same as the
     same two tokens on separate lines. Working in whole lines missed the first,
     and a rule that depends on where someone pressed return is not a rule.
+
+    Ordinary comments in between are stepped over. A `// revisit this` above the
+    closing brace does not give the doc comment something to document, and
+    stopping at one let the whole rule be defeated by a note.
+
+    A following *doc* comment is deliberately not stepped over. That pair is the
+    stacked rule's business, and skipping it would report the same orphan twice.
     """
-    rest = text[after:].lstrip()
+    scan = Scan(text)
+    scan.i = after
+    while scan.i < scan.n:
+        c = scan.text[scan.i]
+        if c.isspace():
+            scan.i += 1
+        elif scan.at("//"):
+            scan.skip_line_comment()
+        elif scan.at("/*") and not (scan.at("/**") and not scan.at("/**/")):
+            scan.skip_block_comment()
+        else:
+            break
+
+    rest = scan.text[scan.i:]
     if not rest:
         return True
     if rest[0] in "}])":

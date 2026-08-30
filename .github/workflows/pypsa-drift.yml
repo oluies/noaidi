@@ -341,12 +341,18 @@ jobs:
           summary=$(grep -E 'Test run .* finished:' sweep.log | tail -1 || true)
           total=$(sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p' <<<"$summary")
           ignored=$(sed -nE 's/.*[^0-9]([0-9]+) ignored.*/\1/p' <<<"$summary")
-          # No line anchor, and a character class rather than a bare space: this
-          # file already records that an ANSI-coloured `==> X` slips past the
-          # `sed` range below, and an ANSI-coloured `==> s` would slip past this
-          # identically -- returning 0, which reads as "nothing skipped". That is
-          # the same guard-that-does-not-guard this check was added to replace.
-          skipped=$(grep -cE '==> s [A-Za-z]' sweep.log || true)
+          # No line anchor, and nothing required after the marker. The character
+          # class this replaces was argued as tolerating colour and did the
+          # opposite: `[A-Za-z]` demands a letter immediately after `==> s `, and
+          # an escape sequence in that position -- which is where colour lands on
+          # the summary line this file pins -- fails it. That returns 0, reading
+          # as "nothing skipped", which is the guard-that-does-not-guard this
+          # check exists to replace.
+          #
+          # Over-counting is the safe direction here and under-counting is not: a
+          # spurious skip fails the job loudly, a missed one passes a sweep that
+          # ran nothing. Nothing else in an sbt log emits `==> s`.
+          skipped=$(grep -cE '==> s' sweep.log || true)
           echo "sweep: ${summary:-<no summary line>}"
           if [ -z "${total:-}" ] || [ "$total" -lt 1 ]; then
             echo "::error::the sweep reported no cases -- it did not run"
@@ -380,7 +386,7 @@ jobs:
             # schema that will not parse surfaces as a per-case `==> X` that the
             # range below catches. What is left is the start anchor missing a
             # failure that is there: an ANSI-coloured `==> X`, a renamed suite.
-            sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/Test run .* finished/p' sweep.log \
+            sed -n '/==> X.*SchemaSweepSuite/,/Test run .* finished/p' sweep.log \
               | grep -vE '^\s+at |^[0-9]+:' > sweep-full.txt || true
             # Truncation is stated rather than silent. It matters most in exactly
             # the case with the most new attributes, which is the one where a

@@ -359,10 +359,15 @@ jobs:
           # comment here claimed it was dead code.
           #
           # `^instance ` rather than a column list, so a reordered or renamed
-          # column does not send this back to the fallback. No anchor problem:
-          # the report comes from a forked JVM's own `println`, which sbt passes
-          # through uncoloured -- unlike its own `Test run` lines, where an
-          # anchored pattern is what broke the drift workflow's sweep guard.
+          # column does not send this back to the fallback.
+          #
+          # The anchor is safe because sbt colours the lines *it* logs and passes
+          # a program's own stdout through untouched, and this table is printed
+          # by `Report`'s `println`. Not because of `Test / fork`: an earlier
+          # version of this comment said so, and `primaValidation` does not set
+          # it -- the claim was wrong about the one module that writes this file.
+          # The `|| cat` below is what covers the case where that reasoning is
+          # wrong anyway, which is the whole reason it is not dead code.
           body=$(sed -n '/^instance /,$p' report.txt)
           [ -n "$body" ] || body=$(cat report.txt)
           {

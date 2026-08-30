@@ -81,6 +81,18 @@ jobs:
 
       - run: python3 .github/scripts/check_orphan_docs.py
 
+      # The patterns the workflows use to read sbt's own output. A grep in YAML
+      # has nothing behind it: a pattern that matches nothing looks exactly like
+      # a log with nothing in it, so a guard built on one reports the absence of
+      # evidence as evidence. `pypsa-drift.yml` anchored its sweep guard at `^`
+      # against a line sbt colours, and reported "the sweep reported no cases"
+      # over a log reading `0 failed, 0 ignored, 5 total` -- failing the weekly
+      # drift run continuously, which is worse than a false alarm because a job
+      # that always fails is a job nobody reads.
+      #
+      # Stdlib only and no sbt: the samples are real output, pinned.
+      - run: python3 .github/scripts/test_workflow_log_patterns.py
+
   test:
     name: Test (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
@@ -338,10 +350,20 @@ jobs:
       - name: Publish report to the job summary
         if: always()
         run: |
-          # `sed -n` exits 0 when its address never matches, so a `|| cat`
-          # fallback would be dead code and the summary would silently publish
-          # an empty block if the header ever changes.
-          body=$(sed -n '/instance .*size .*status/,$p' report.txt)
+          # `sed -n` exits 0 when its address never matches, so the `|| cat`
+          # fallback is what stops the summary publishing an empty block when the
+          # header changes. It is not a hypothetical: `instance .*size .*status`
+          # matched nothing, because this report's first header carries `size` and
+          # its later ones carry `status` and no line has both. The fallback has
+          # been publishing the whole file, correctly and silently, while the
+          # comment here claimed it was dead code.
+          #
+          # `^instance ` rather than a column list, so a reordered or renamed
+          # column does not send this back to the fallback. No anchor problem:
+          # the report comes from a forked JVM's own `println`, which sbt passes
+          # through uncoloured -- unlike its own `Test run` lines, where an
+          # anchored pattern is what broke the drift workflow's sweep guard.
+          body=$(sed -n '/^instance /,$p' report.txt)
           [ -n "$body" ] || body=$(cat report.txt)
           {
             echo "## Prima vs ojAlgo (JDK ${{ matrix.java }})"
@@ -356,7 +378,11 @@ jobs:
           # needs to see *which* instance diverged, rather than reading raw job
           # logs while the summary shows the LP report as if nothing happened.
           if [ -f milp-report.txt ]; then
-            milp=$(sed -n '/instance .*size .*int/,$p' milp-report.txt)
+            # `^instance ` for the reason the LP block above gives. This one
+            # does match today -- the MILP header happens to carry `size` and
+            # `int` in that order -- which is exactly how its sibling looked
+            # until a column moved.
+            milp=$(sed -n '/^instance /,$p' milp-report.txt)
             [ -n "$milp" ] || milp=$(cat milp-report.txt)
             {
               echo "## Prima vs ojAlgo, mixed-integer (JDK ${{ matrix.java }})"

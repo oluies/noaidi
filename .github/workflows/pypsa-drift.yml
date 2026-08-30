@@ -332,7 +332,13 @@ jobs:
           # actually catches that case, because `assume` fires before the println
           # it greps for; `skipped` is parsed here as well so the two guards do
           # not both depend on that one ordering.
-          summary=$(grep -E '^Test run .* finished:' sweep.log | tail -1 || true)
+          # No `^` anchor. sbt colours this line, so it begins with an escape
+          # sequence and not with `Test`: the anchored form matched nothing, took
+          # `total` to empty, and reported "the sweep reported no cases -- it did
+          # not run" over a log saying `0 failed, 0 ignored, 5 total`. The comment
+          # below already worked this out for `==> s` and the reasoning is the
+          # same three lines up.
+          summary=$(grep -E 'Test run .* finished:' sweep.log | tail -1 || true)
           total=$(sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p' <<<"$summary")
           ignored=$(sed -nE 's/.*[^0-9]([0-9]+) ignored.*/\1/p' <<<"$summary")
           # No line anchor, and a character class rather than a bare space: this
@@ -374,7 +380,7 @@ jobs:
             # schema that will not parse surfaces as a per-case `==> X` that the
             # range below catches. What is left is the start anchor missing a
             # failure that is there: an ANSI-coloured `==> X`, a renamed suite.
-            sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/^Test run .* finished/p' sweep.log \
+            sed -n '/==> X org.noaidi.network.SchemaSweepSuite/,/Test run .* finished/p' sweep.log \
               | grep -vE '^\s+at |^[0-9]+:' > sweep-full.txt || true
             # Truncation is stated rather than silent. It matters most in exactly
             # the case with the most new attributes, which is the one where a

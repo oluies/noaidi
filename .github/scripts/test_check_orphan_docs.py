@@ -277,6 +277,52 @@ class A:
   /** Documents y. */ val y = 2
 """
 
+# The non-firing direction of the same skip loop, and the shape a reader would
+# actually write. `LINE_COMMENT_ABOVE` and `BLOCK_COMMENT_ABOVE` put the note
+# *above* the doc comment, where the loop never looks; these put it between the
+# comment and the definition it documents, which is where the loop runs.
+NOTE_BEFORE_DEFINITION = """\
+package probe
+
+object Probe:
+
+  /** Documents target. */
+  // a note about the implementation, not documentation
+  def target: Int = 1
+"""
+
+BLOCK_NOTE_BEFORE_DEFINITION = """\
+package probe
+
+object Probe:
+
+  /** Documents target. */
+  /* a note, not documentation */
+  def target: Int = 1
+"""
+
+# Two rules that each correctly defer to the other, reporting nothing between
+# them. The stacked rule read whitespace only, so a note made the span non-empty
+# and it said nothing; the dangling rule stops at a following doc comment, so it
+# said nothing either. The orphan went unreported by both.
+STACKED_PAST_NOTE = """\
+class A {
+  /** Left behind. */
+  // revisit this
+  /** Real doc. */
+  def h = 2
+}
+"""
+
+STACKED_PAST_BLOCK_NOTE = """\
+class A {
+  /** Left behind. */
+  /* a note */
+  /** Real doc. */
+  def h = 2
+}
+"""
+
 # `/**/` is an empty block comment, not a doc comment that opens.
 EMPTY_BLOCK_COMMENT = """\
 package probe
@@ -308,7 +354,16 @@ CASES: list[tuple[str, dict[str, str], int, str]] = [
     ("a block-comment note between the orphan and the brace does not hide it",
      {"src/P.scala": DANGLING_PAST_BLOCK_COMMENT}, 1, "no definition after it"),
 
+    ("a note between two doc comments does not hide the orphan",
+     {"src/P.scala": STACKED_PAST_NOTE}, 1, "is followed by another"),
+    ("a block-comment note between two doc comments does not hide the orphan",
+     {"src/P.scala": STACKED_PAST_BLOCK_NOTE}, 1, "is followed by another"),
+
     ("a correctly documented file passes", {"src/P.scala": CLEAN}, 0, "every doc comment attaches"),
+    ("a note between a doc comment and its definition passes",
+     {"src/P.scala": NOTE_BEFORE_DEFINITION}, 0, "every doc comment attaches"),
+    ("a block-comment note between a doc comment and its definition passes",
+     {"src/P.scala": BLOCK_NOTE_BEFORE_DEFINITION}, 0, "every doc comment attaches"),
     ("definitions sharing a line with their comments are not stacked",
      {"src/P.scala": SAME_LINE_DEFINITIONS}, 0, "every doc comment attaches"),
     ("a line comment above a doc comment passes",
@@ -368,6 +423,13 @@ def unit_checks() -> list[str]:
         ("DANGLING_SAME_LINE", DANGLING_SAME_LINE, (3,)),
         ("DANGLING_PAST_LINE_COMMENT", DANGLING_PAST_LINE_COMMENT, (4,)),
         ("DANGLING_PAST_BLOCK_COMMENT", DANGLING_PAST_BLOCK_COMMENT, (4,)),
+        # One finding, not two: the stacked rule reports the orphan and the
+        # dangling rule must stay quiet about it, or sharing the cursor between
+        # them would double-report every stack.
+        ("STACKED_PAST_NOTE", STACKED_PAST_NOTE, (2,)),
+        ("STACKED_PAST_BLOCK_NOTE", STACKED_PAST_BLOCK_NOTE, (2,)),
+        ("NOTE_BEFORE_DEFINITION", NOTE_BEFORE_DEFINITION, ()),
+        ("BLOCK_NOTE_BEFORE_DEFINITION", BLOCK_NOTE_BEFORE_DEFINITION, ()),
     ):
         lines = tuple(line for line, _ in findings(fixture))
         if lines != expected:

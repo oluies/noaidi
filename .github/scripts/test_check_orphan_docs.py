@@ -323,6 +323,41 @@ class A {
 }
 """
 
+# `at_doc` has two call sites and only one had a fixture. `EMPTY_BLOCK_COMMENT`
+# below reaches it through `doc_comments`, where a `/**/` must not be collected as
+# a comment; these reach it through `next_significant`, where a `/**/` sits inside
+# the skip loop and must be stepped over. Were `at_doc` ever to call `/**/` a doc
+# comment, the loop would break at it and the dangling rule would silently return
+# False -- the exact miss the shared predicate was introduced to prevent.
+EMPTY_BLOCK_IN_SKIP_LOOP = """\
+class A {
+  /** Left behind. */
+  /**/
+}
+"""
+
+EMPTY_BLOCK_BETWEEN_DOCS = """\
+class A {
+  /** Left behind. */
+  /**/
+  /** Real doc. */
+  def h = 2
+}
+"""
+
+# The gap the module docstring records: an annotation stops the skip loop, so
+# neither rule reports the orphan. Pinned as it behaves rather than as it should,
+# so that closing it later fails here and prompts the docstring to be updated
+# alongside -- rather than the gap being rediscovered as a surprise a fourth time.
+ANNOTATION_BETWEEN_DOCS = """\
+class A {
+  /** Left behind. */
+  @deprecated("gone", "1.0")
+  /** Real doc. */
+  def h = 2
+}
+"""
+
 # `/**/` is an empty block comment, not a doc comment that opens.
 EMPTY_BLOCK_COMMENT = """\
 package probe
@@ -358,6 +393,11 @@ CASES: list[tuple[str, dict[str, str], int, str]] = [
      {"src/P.scala": STACKED_PAST_NOTE}, 1, "is followed by another"),
     ("a block-comment note between two doc comments does not hide the orphan",
      {"src/P.scala": STACKED_PAST_BLOCK_NOTE}, 1, "is followed by another"),
+
+    ("an empty block comment before a brace does not hide the orphan",
+     {"src/P.scala": EMPTY_BLOCK_IN_SKIP_LOOP}, 1, "no definition after it"),
+    ("an empty block comment between two doc comments does not hide the orphan",
+     {"src/P.scala": EMPTY_BLOCK_BETWEEN_DOCS}, 1, "is followed by another"),
 
     ("a correctly documented file passes", {"src/P.scala": CLEAN}, 0, "every doc comment attaches"),
     ("a note between a doc comment and its definition passes",
@@ -430,6 +470,12 @@ def unit_checks() -> list[str]:
         ("STACKED_PAST_BLOCK_NOTE", STACKED_PAST_BLOCK_NOTE, (2,)),
         ("NOTE_BEFORE_DEFINITION", NOTE_BEFORE_DEFINITION, ()),
         ("BLOCK_NOTE_BEFORE_DEFINITION", BLOCK_NOTE_BEFORE_DEFINITION, ()),
+        ("EMPTY_BLOCK_IN_SKIP_LOOP", EMPTY_BLOCK_IN_SKIP_LOOP, (2,)),
+        ("EMPTY_BLOCK_BETWEEN_DOCS", EMPTY_BLOCK_BETWEEN_DOCS, (2,)),
+        # Known gap, pinned as it is. If this starts reporting a finding the loop
+        # has been widened to step over annotations, which is good -- update the
+        # "A gap this does not close" section of `check_orphan_docs.py` with it.
+        ("ANNOTATION_BETWEEN_DOCS", ANNOTATION_BETWEEN_DOCS, ()),
     ):
         lines = tuple(line for line, _ in findings(fixture))
         if lines != expected:

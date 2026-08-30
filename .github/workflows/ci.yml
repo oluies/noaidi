@@ -197,12 +197,18 @@ jobs:
     # the job red on every PR: a benchmark that can block a merge is a gate
     # whatever its comment says.
     continue-on-error: true
-    # 50, not 30. The sweep is fourteen sbt invocations, eight of them
-    # width-limited, which is the slowest kind -- a `MaxVectorSize=16`
-    # solve took 34 s, and each invocation runs a cold solve and a warm one. If
-    # the job times out, `continue-on-error` keeps the workflow green and the
-    # summary is the only thing this job produces, so the failure would present
-    # as the benchmark silently returning nothing.
+    # A backstop, not the working limit. `continue-on-error` does not cover this:
+    # exceeding `timeout-minutes` *cancels* the job, a cancelled job carries the
+    # whole run to `cancelled` whatever this flag says, and the pull request then
+    # reads UNSTABLE -- so the benchmark gated a merge twice while its own comment
+    # said it never could. Cancellation also skips `if: always()`, so `Publish`
+    # never ran and the partial measurements were thrown away.
+    #
+    # The budget that actually bites is per-invocation, inside `Measure`, where
+    # overrunning is an ordinary step failure that `continue-on-error` does
+    # swallow and `Publish` still runs after. Fourteen invocations at 180 s is 42
+    # minutes, so this can no longer be reached by slowness -- only by a runner
+    # wedged in a way no `timeout` can interrupt.
     timeout-minutes: 50
 
     steps:
@@ -233,9 +239,22 @@ jobs:
             echo "=== pass $1 backend $2 MaxVectorSize ${3:-default} ===" | tee -a split.log
             local opts=""
             [ -n "${3:-}" ] && opts="set networkLopf/Test/javaOptions += \"-XX:MaxVectorSize=$3\"; "
-            sbt --batch \
+            # 180 s against a ~37 s invocation: five times the observed cost, so
+            # this fires on a wedged JVM rather than on a slow one. One arm hung
+            # for forty-two minutes on an otherwise identical tree and took the
+            # other six passes down with it; now it costs three minutes and the
+            # rest of the sweep still runs.
+            #
+            # `|| true` on the marker, and the failure recorded outside
+            # `split.log`: the reporter parses that file, and a line it does not
+            # expect is a second failure mode bolted onto the first.
+            if ! timeout 180 sbt --batch \
               "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
               2>&1 | tee -a split.log
+            then
+              echo "pass $1 backend $2 MaxVectorSize ${3:-default}" >> truncated.txt
+              echo "::warning::kernel-split pass $1/$2 did not finish within 180s"
+            fi
           }
           run 1 scala
           run 1 vector
@@ -275,6 +294,23 @@ jobs:
             echo "## Kernel split: no measurements" >> "$GITHUB_STEP_SUMMARY"
             echo "The measure step produced no log." >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+          # Named before the table rather than after it. A sweep missing an arm
+          # still prints rows, and rows under a heading that says nothing about
+          # what is absent read as the whole measurement -- which is the reading
+          # the ratios below are least able to survive, since an arm is only
+          # comparable to its counterpart at the same width.
+          if [ -f truncated.txt ]; then
+            {
+              echo "## Kernel split: incomplete"
+              echo
+              echo "These invocations did not finish inside the per-run budget and are"
+              echo "missing from everything below. Their counterpart arms are present, so"
+              echo "any ratio quoting one of these widths is comparing against nothing."
+              echo
+              sed 's/^/- /' truncated.txt
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
           # Captured rather than piped straight out, so an empty match is a
           # warning instead of a silently empty code block. sbt sends a forked

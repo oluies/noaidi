@@ -15,6 +15,28 @@ six times across four commits -- twice in the commit that was removing two other
 instances of it -- which is what a defect class invisible to the compiler looks
 like. Run against those commits the script reproduces all six.
 
+==A gap this does not close==
+
+An annotation between two doc comments still hides the first from both rules:
+
+    /** Left behind. */
+    @deprecated("gone", "1.0")
+    /** Real doc. */
+    def h = 2
+
+`next_significant` steps over whitespace and comments and stops at the `@`, so
+the stacked rule sees the two comments as non-adjacent and the dangling rule sees
+something that is neither a bracket nor `end`. Scala drops the first comment
+anyway.
+
+Recorded rather than fixed, deliberately. Widening the skip loop is what closed
+the last three holes here and opened one each time, and stepping over an
+annotation means scanning a balanced argument list with strings in it -- more new
+surface than the case is worth, since an orphan sitting between an annotation and
+its own doc comment is a shape nobody has written yet. `test_check_orphan_docs.py`
+pins the current behaviour, so closing this later shows up as that test failing
+rather than as a surprise.
+
 Two rules, both about a comment that documents nothing:
 
   stacked   Two or more doc comments separated by nothing but blank lines. All
@@ -216,6 +238,11 @@ def documents_nothing(text: str, after: int) -> bool:
     Offsets rather than lines, so that `/** orphan */ }` is read the same as the
     same two tokens on separate lines. Working in whole lines missed the first,
     and a rule that depends on where someone pressed return is not a rule.
+
+    Whitespace and ordinary comments in between are stepped over by
+    [[next_significant]], so a `// revisit this` above the closing brace does not
+    give the doc comment something to document. That is load-bearing: stopping at
+    one let the whole rule be defeated by a note.
     """
     rest = text[next_significant(text, after):]
     if not rest:

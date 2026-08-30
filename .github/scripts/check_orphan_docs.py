@@ -107,6 +107,16 @@ class Scan:
             if c == '"' or c == "\n":
                 return
 
+    def at_doc(self) -> bool:
+        """True where a doc comment opens.
+
+        One definition, because two rules and the scanner all have to agree on
+        it exactly -- including that `/**/` is an empty block comment and not a
+        doc comment that opens. Written out twice it was once plain and once
+        inverted inside a double negative, which is two chances to disagree.
+        """
+        return self.at("/**") and not self.at("/**/")
+
     def skip_char_literal(self) -> bool:
         """Skip `'x'` or `'\\n'`. Returns False if this quote is not one.
 
@@ -151,7 +161,7 @@ def doc_comments(text: str) -> list[tuple[int, int, int, int]]:
             scan.skip_line_comment()
         elif scan.at("/*"):
             begin = scan.i
-            is_doc = scan.at("/**") and not scan.at("/**/")
+            is_doc = scan.at_doc()
             end = scan.skip_block_comment()
             if is_doc:
                 starts.append((begin, end))
@@ -170,6 +180,33 @@ def doc_comments(text: str) -> list[tuple[int, int, int, int]]:
     return [(line_of[a], line_of.get(b - 1, line), a, b) for a, b in starts]
 
 
+def next_significant(text: str, after: int) -> int:
+    """The offset of the next thing that is not whitespace or an ordinary comment.
+
+    Both rules need this and for the same reason: a `// revisit this` between a
+    doc comment and whatever follows changes nothing about what the doc comment
+    documents. Having it in one rule and not the other is worse than having it in
+    neither -- the two then hand the case to each other and report nothing at all,
+    which is what happened when `documents_nothing` gained it alone.
+
+    A *doc* comment is deliberately not stepped over. Where the next thing is one,
+    that is the stacked rule's case, and this stopping there is what keeps a
+    single orphan from being reported by both rules.
+    """
+    scan = Scan(text)
+    scan.i = after
+    while scan.i < scan.n:
+        if scan.text[scan.i].isspace():
+            scan.i += 1
+        elif scan.at("//"):
+            scan.skip_line_comment()
+        elif scan.at("/*") and not scan.at_doc():
+            scan.skip_block_comment()
+        else:
+            break
+    return scan.i
+
+
 def documents_nothing(text: str, after: int) -> bool:
     """True if nothing after offset `after` can carry a doc comment.
 
@@ -179,28 +216,8 @@ def documents_nothing(text: str, after: int) -> bool:
     Offsets rather than lines, so that `/** orphan */ }` is read the same as the
     same two tokens on separate lines. Working in whole lines missed the first,
     and a rule that depends on where someone pressed return is not a rule.
-
-    Ordinary comments in between are stepped over. A `// revisit this` above the
-    closing brace does not give the doc comment something to document, and
-    stopping at one let the whole rule be defeated by a note.
-
-    A following *doc* comment is deliberately not stepped over. That pair is the
-    stacked rule's business, and skipping it would report the same orphan twice.
     """
-    scan = Scan(text)
-    scan.i = after
-    while scan.i < scan.n:
-        c = scan.text[scan.i]
-        if c.isspace():
-            scan.i += 1
-        elif scan.at("//"):
-            scan.skip_line_comment()
-        elif scan.at("/*") and not (scan.at("/**") and not scan.at("/**/")):
-            scan.skip_block_comment()
-        else:
-            break
-
-    rest = scan.text[scan.i:]
+    rest = text[next_significant(text, after):]
     if not rest:
         return True
     if rest[0] in "}])":
@@ -214,14 +231,20 @@ def findings(text: str) -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
 
     for (a_line, _, _, a_end), (b_line, _, b_start, _) in zip(comments, comments[1:]):
-        # The span between the two comments, not the lines between them. A
+        # The same cursor the dangling rule uses, not `text[a_end:b_start].strip()`.
+        # Whitespace alone missed `/** a */ // note /** b */`: the span is
+        # non-empty so this said nothing, and the dangling rule said nothing
+        # because it stops at the following doc comment. Two rules, each correctly
+        # deferring to the other, and the orphan reported by neither.
+        #
+        # Offsets rather than lines for the reason the whole file works in them: a
         # `/** a */ val x = 1` line carries its own definition, and reading whole
         # lines called that pair stacked when the first attaches correctly.
-        if not text[a_end:b_start].strip():
+        if next_significant(text, a_end) == b_start:
             out.append((
                 a_line,
-                f"doc comment is followed by another at line {b_line} with only blank lines between, "
-                "so this one is dropped and never reaches the docs",
+                f"doc comment is followed by another at line {b_line} with nothing but blank lines "
+                "or ordinary comments between, so this one is dropped and never reaches the docs",
             ))
 
     # Every comment, not just the last. A comment left behind at the end of a

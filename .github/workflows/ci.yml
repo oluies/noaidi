@@ -206,10 +206,20 @@ jobs:
     #
     # The budget that actually bites is per-invocation, inside `Measure`, where
     # overrunning is an ordinary step failure that `continue-on-error` does
-    # swallow and `Publish` still runs after. Fourteen invocations at 180 s is 42
-    # minutes, so this can no longer be reached by slowness -- only by a runner
-    # wedged in a way no `timeout` can interrupt.
-    timeout-minutes: 50
+    # swallow and `Publish` still runs after.
+    #
+    # 80, because fourteen invocations at the 300 s cap is 70 minutes plus setup.
+    # This said 50 while quoting "fourteen at 180 s is 42 minutes" -- true of the
+    # cap it was written for and false the moment that cap moved, which put the
+    # backstop back within reach of four wedged invocations. Reaching it is not a
+    # tolerable outcome here: cancellation skips `if: always()`, so it would
+    # discard the summary *and* the thread dumps, which is the evidence the
+    # watchdog above exists to collect.
+    #
+    # The cost is that a job wedged beyond `timeout`'s reach now occupies a runner
+    # for eighty minutes rather than fifty. That is worth paying once at 4%
+    # incidence to keep the diagnosis, on a job that gates nothing.
+    timeout-minutes: 80
 
     steps:
       - uses: actions/checkout@v7
@@ -276,14 +286,44 @@ jobs:
             # against the wrong arm -- evidence that points somewhere else is
             # worse than none. Checking the sentinel makes a stray watchdog inert
             # regardless of who won.
-            rm -f .pass-running
-            touch .pass-running
+            # Pass-scoped, not merely present. `.pass-running` carried no identity
+            # and the next pass recreated it, so a stray watchdog waking during a
+            # later pass found the file there and would have filed a dump under
+            # its own stale labels -- the wrong-arm attribution the comment above
+            # claimed it prevented. Comparing a token written before backgrounding
+            # means only the pass that wrote it can dump.
+            local token="$1-$2-${3:-default}-$$-$RANDOM"
+            echo "$token" > .pass-running
             ( sleep 240
-              [ -f .pass-running ] || exit 0
-              echo "=== pass $1 $2 ${3:-default}: still running at 240 s ==="
-              for jvm in $(pgrep -f 'KernelSplit|sbt-launch' 2>/dev/null); do
-                jcmd "$jvm" Thread.print 2>&1 || true
-              done ) >> stacks.txt 2>&1 &
+              [ "$(cat .pass-running 2>/dev/null)" = "$token" ] || exit 0
+              # `jcmd -l` enumerates JVMs. `pgrep -f` matched the
+              # `timeout 300 sbt --batch "...KernelSplit..."` process itself and
+              # the sbt wrapper -- neither a JVM -- and `jcmd` against those wrote
+              # its own error text into the dump.
+              captured=$(mktemp)
+              for jvm in $(jcmd -l 2>/dev/null | grep -E 'KernelSplit|sbt-launch' | cut -d' ' -f1); do
+                # Bounded, with a non-attach fallback. `jcmd` attaches, and attach
+                # needs the target to reach a safepoint -- which is exactly what a
+                # VM wedged the way this is hunting may never do. Unbounded, it
+                # would block for ever in the one scenario the watchdog exists for
+                # and leave `stacks.txt` empty. `kill -3` needs no safepoint and
+                # prints to the JVM's own stdout, which `tee` already routes into
+                # `split.log`.
+                if ! timeout 60 jcmd "$jvm" Thread.print >> "$captured" 2>&1; then
+                  echo "jcmd on $jvm did not return in 60 s -- sent SIGQUIT, stack goes to split.log" >> "$captured"
+                  kill -3 "$jvm" 2>/dev/null || true
+                fi
+              done
+              # The header only if something was captured. Written first, it made
+              # `stacks.txt` non-empty whether or not a stack was taken, so the
+              # `-s` test below meant "the watchdog woke" while the summary said
+              # "here is a thread dump".
+              if [ -s "$captured" ]; then
+                { echo "=== pass $1 $2 ${3:-default}: still running at 240 s ==="
+                  cat "$captured"
+                } >> stacks.txt
+              fi
+              rm -f "$captured" ) &
             local watchdog=$!
             if ! timeout 300 sbt --batch \
               "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
@@ -350,22 +390,47 @@ jobs:
               echo
               sed 's/^/- /' truncated.txt
               echo
-              # The dump is the whole reason the watchdog exists, so it goes where
-              # someone reading the failure will find it. Collecting a stack and
-              # leaving it in a file nobody opens is the same as not collecting it.
-              if [ -s stacks.txt ]; then
-                echo "<details><summary>Thread dump taken 60 s before the cap</summary>"
-                echo
-                echo '```'
-                head -400 stacks.txt
-                echo '```'
-                echo "</details>"
-                echo
-              else
-                echo "No thread dump: the watchdog did not reach 240 s, so the invocation"
-                echo "was killed by something other than its own slowness."
+              if [ ! -s stacks.txt ]; then
+                # Not "killed by something other than its own slowness", which is
+                # what this said and could not know: an attach that never returns
+                # leaves no dump either, and that is the failure mode the wedge
+                # this hunts would produce.
+                echo "No thread dump was captured: either the invocation stopped before"
+                echo "the watchdog reached 240 s, or every attach and SIGQUIT failed."
                 echo
               fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Outside the truncation block, deliberately. A pass that crosses 240 s
+          # and still finishes inside the cap leaves a dump and no truncation
+          # record -- an arm genuinely slower than the 74 s the cap is sized
+          # against, which is the near miss most worth seeing and which nothing
+          # else reports. Nested, its stack was collected and then thrown away
+          # with the workspace.
+          if [ -s stacks.txt ]; then
+            dump_lines=$(wc -l < stacks.txt)
+            {
+              if [ -f truncated.txt ]; then
+                echo "<details><summary>Thread dumps, taken 60 s before the cap</summary>"
+              else
+                echo "<details><summary>Thread dumps: a pass ran past 240 s but finished inside the cap</summary>"
+              fi
+              echo
+              echo '```'
+              head -800 stacks.txt
+              if [ "$dump_lines" -gt 800 ]; then
+                # Said, not silent. One JVM dump runs to several hundred lines and
+                # this file accumulates one per slow pass, so a fixed head cuts the
+                # later ones mid-stack -- and a stack that stops mid-frame reads as
+                # a complete one.
+                echo
+                echo "... $((dump_lines - 800)) of $dump_lines lines omitted."
+                echo "The full text is in the Measure step's log."
+              fi
+              echo '```'
+              echo "</details>"
+              echo
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           # Captured rather than piped straight out, so an empty match is a

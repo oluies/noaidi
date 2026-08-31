@@ -239,22 +239,62 @@ jobs:
             echo "=== pass $1 backend $2 MaxVectorSize ${3:-default} ===" | tee -a split.log
             local opts=""
             [ -n "${3:-}" ] && opts="set networkLopf/Test/javaOptions += \"-XX:MaxVectorSize=$3\"; "
-            # 180 s against a ~37 s invocation: five times the observed cost, so
-            # this fires on a wedged JVM rather than on a slow one. One arm hung
-            # for forty-two minutes on an otherwise identical tree and took the
-            # other six passes down with it; now it costs three minutes and the
-            # rest of the sweep still runs.
+            # 300 s, from the measurements rather than from an average. Most
+            # invocations take 26-31 s, but `vector` at `MaxVectorSize=16` takes
+            # 70-74 s across every successful run, and the first invocation of the
+            # job takes ~70 s because it compiles -- so the slowest legitimate one
+            # is 74 s and the cap is four times that. An earlier version said 180 s
+            # was "five times a ~37 s invocation": 37 s is the mean over fourteen
+            # passes, which is not a bound on any of them, and 180 s was 2.4x the
+            # arm that actually wedges.
+            #
+            # Sized against a false truncation rather than against a wedge. The
+            # wedge this exists for ran 46 minutes -- 37x the slowest legitimate
+            # invocation -- so anything from two minutes upward catches it, while
+            # a cap too close to 74 s throws away a real measurement and prints
+            # "incomplete" over a sweep that was fine.
+            #
+            # No arithmetic against `timeout-minutes` here. An earlier version
+            # picked the cap so fourteen of them fit inside the job budget, which
+            # sized the cap to make a sentence true; if enough invocations wedge to
+            # reach the backstop, the benchmark has nothing left to say and the
+            # backstop firing is the right outcome.
             #
             # `|| true` on the marker, and the failure recorded outside
             # `split.log`: the reporter parses that file, and a line it does not
             # expect is a second failure mode bolted onto the first.
-            if ! timeout 180 sbt --batch \
+            #
+            # A thread dump 60 s before the cap, so the next wedge is diagnosable.
+            # This one produced 46 minutes of nothing: no output, no crash, no
+            # stack -- so what it was doing is still unknown, and the only way to
+            # find out is to be holding a dump the next time it happens. The
+            # watchdog is killed on the normal path, where nothing runs long
+            # enough for it to fire.
+            # The sentinel, not just the `kill` below. Whether killing a sleeping
+            # subshell wins the race is a detail of the shell, and a watchdog that
+            # survives its pass fires 240 s into a *later* one and files a dump
+            # against the wrong arm -- evidence that points somewhere else is
+            # worse than none. Checking the sentinel makes a stray watchdog inert
+            # regardless of who won.
+            rm -f .pass-running
+            touch .pass-running
+            ( sleep 240
+              [ -f .pass-running ] || exit 0
+              echo "=== pass $1 $2 ${3:-default}: still running at 240 s ==="
+              for jvm in $(pgrep -f 'KernelSplit|sbt-launch' 2>/dev/null); do
+                jcmd "$jvm" Thread.print 2>&1 || true
+              done ) >> stacks.txt 2>&1 &
+            local watchdog=$!
+            if ! timeout 300 sbt --batch \
               "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
               2>&1 | tee -a split.log
             then
               echo "pass $1 backend $2 MaxVectorSize ${3:-default}" >> truncated.txt
-              echo "::warning::kernel-split pass $1/$2 did not finish within 180s"
+              echo "::warning::kernel-split pass $1/$2 did not finish within 300s"
             fi
+            rm -f .pass-running
+            kill "$watchdog" 2>/dev/null || true
+            wait "$watchdog" 2>/dev/null || true
           }
           run 1 scala
           run 1 vector
@@ -310,6 +350,22 @@ jobs:
               echo
               sed 's/^/- /' truncated.txt
               echo
+              # The dump is the whole reason the watchdog exists, so it goes where
+              # someone reading the failure will find it. Collecting a stack and
+              # leaving it in a file nobody opens is the same as not collecting it.
+              if [ -s stacks.txt ]; then
+                echo "<details><summary>Thread dump taken 60 s before the cap</summary>"
+                echo
+                echo '```'
+                head -400 stacks.txt
+                echo '```'
+                echo "</details>"
+                echo
+              else
+                echo "No thread dump: the watchdog did not reach 240 s, so the invocation"
+                echo "was killed by something other than its own slowness."
+                echo
+              fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           # Captured rather than piped straight out, so an empty match is a

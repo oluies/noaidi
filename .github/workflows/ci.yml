@@ -294,36 +294,54 @@ jobs:
             # means only the pass that wrote it can dump.
             local token="$1-$2-${3:-default}-$$-$RANDOM"
             echo "$token" > .pass-running
-            ( sleep 240
+            ( sleep 150
               [ "$(cat .pass-running 2>/dev/null)" = "$token" ] || exit 0
               # `jcmd -l` enumerates JVMs. `pgrep -f` matched the
               # `timeout 300 sbt --batch "...KernelSplit..."` process itself and
               # the sbt wrapper -- neither a JVM -- and `jcmd` against those wrote
               # its own error text into the dump.
-              captured=$(mktemp)
-              for jvm in $(jcmd -l 2>/dev/null | grep -E 'KernelSplit|sbt-launch' | cut -d' ' -f1); do
-                # Bounded, with a non-attach fallback. `jcmd` attaches, and attach
-                # needs the target to reach a safepoint -- which is exactly what a
-                # VM wedged the way this is hunting may never do. Unbounded, it
-                # would block for ever in the one scenario the watchdog exists for
-                # and leave `stacks.txt` empty. `kill -3` needs no safepoint and
-                # prints to the JVM's own stdout, which `tee` already routes into
-                # `split.log`.
-                if ! timeout 60 jcmd "$jvm" Thread.print >> "$captured" 2>&1; then
-                  echo "jcmd on $jvm did not return in 60 s -- sent SIGQUIT, stack goes to split.log" >> "$captured"
+              captured=$(mktemp); errs=$(mktemp)
+              # Flush whatever was collected if this subshell is killed mid-loop.
+              # `run()` SIGTERMs it the moment the pass ends, and without this the
+              # write below never runs: a dump taken from the first of two JVMs was
+              # discarded along with the temp file, which is the empty `stacks.txt`
+              # this whole block exists to stop.
+              flush() {
+                if grep -q "Full thread dump" "$captured" 2>/dev/null; then
+                  { echo "=== pass $1 $2 ${3:-default}: still running at 150 s ==="
+                    cat "$captured"
+                  } | tee -a stacks.txt
+                fi
+                rm -f "$captured" "$errs"
+              }
+              trap "flush $1 $2 ${3:-default}; exit 0" TERM INT
+              for jvm in $(jcmd -l 2>/dev/null | grep -E "KernelSplit|sbt-launch" | cut -d" " -f1); do
+                # 150 s and 30 s, not 240 s and 60 s. The fallback has to land while
+                # sbt, the JVM and the `tee` that carries its stdout are all still
+                # alive: at 240+60 the SIGQUIT fired at exactly the instant
+                # `timeout 300` reaped all three, so it raced a JVM being torn down
+                # and its output had nowhere left to go. 150+30 leaves two minutes.
+                rc=0
+                timeout 30 jcmd "$jvm" Thread.print >> "$captured" 2>>"$errs" || rc=$?
+                if [ "$rc" -eq 124 ]; then
+                  # Only 124 is the hang the fallback is for. Reporting every
+                  # failure as "did not return in 60 s" described an attach that
+                  # failed instantly as a timeout.
+                  echo "jcmd on $jvm did not return in 30 s -- SIGQUIT sent, stack goes to split.log" >> "$errs"
                   kill -3 "$jvm" 2>/dev/null || true
+                elif [ "$rc" -ne 0 ]; then
+                  # Routine: a new JVM starts every pass, so one can exit between
+                  # `jcmd -l` and the attach.
+                  echo "jcmd on $jvm failed with exit $rc without hanging" >> "$errs"
                 fi
               done
-              # The header only if something was captured. Written first, it made
-              # `stacks.txt` non-empty whether or not a stack was taken, so the
-              # `-s` test below meant "the watchdog woke" while the summary said
-              # "here is a thread dump".
-              if [ -s "$captured" ]; then
-                { echo "=== pass $1 $2 ${3:-default}: still running at 240 s ==="
-                  cat "$captured"
-                } >> stacks.txt
-              fi
-              rm -f "$captured" ) &
+              # `Full thread dump`, not `-s`. Errors went into the same file as the
+              # stacks, so an exception trace from a JVM that had already exited
+              # made it non-empty and the summary rendered a "Thread dumps" block
+              # containing only error text -- the condition the `-s` guard was
+              # introduced to fix, reintroduced by the redirect beside it.
+              flush "$1" "$2" "${3:-default}"
+              [ -s "$errs" ] && cat "$errs" || true ) &
             local watchdog=$!
             if ! timeout 300 sbt --batch \
               "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
@@ -411,11 +429,13 @@ jobs:
           if [ -s stacks.txt ]; then
             dump_lines=$(wc -l < stacks.txt)
             {
-              if [ -f truncated.txt ]; then
-                echo "<details><summary>Thread dumps, taken 60 s before the cap</summary>"
-              else
-                echo "<details><summary>Thread dumps: a pass ran past 240 s but finished inside the cap</summary>"
-              fi
+              # Neutral, because `truncated.txt` is job-global and `stacks.txt`
+              # accumulates across passes. Choosing the heading from it published a
+              # near-miss dump from pass 2 under "taken before the cap" whenever
+              # some *other* pass was the one truncated -- the wrong-arm
+              # attribution the per-pass sentinel guards against, one level up. The
+              # per-dump headers inside the block already say which pass each is.
+              echo "<details><summary>Thread dumps from passes still running at 150 s</summary>"
               echo
               echo '```'
               head -800 stacks.txt
@@ -424,9 +444,13 @@ jobs:
                 # this file accumulates one per slow pass, so a fixed head cuts the
                 # later ones mid-stack -- and a stack that stops mid-frame reads as
                 # a complete one.
+                #
+                # The pointer is true now and was not before: the watchdog wrote
+                # only to files, so nothing reached the step log and this note sent
+                # the reader somewhere the text did not exist. It `tee`s now.
                 echo
                 echo "... $((dump_lines - 800)) of $dump_lines lines omitted."
-                echo "The full text is in the Measure step's log."
+                echo "The full text is in the Measure step's log, which the watchdog tees to."
               fi
               echo '```'
               echo "</details>"

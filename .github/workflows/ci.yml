@@ -206,10 +206,20 @@ jobs:
     #
     # The budget that actually bites is per-invocation, inside `Measure`, where
     # overrunning is an ordinary step failure that `continue-on-error` does
-    # swallow and `Publish` still runs after. Fourteen invocations at 180 s is 42
-    # minutes, so this can no longer be reached by slowness -- only by a runner
-    # wedged in a way no `timeout` can interrupt.
-    timeout-minutes: 50
+    # swallow and `Publish` still runs after.
+    #
+    # 80, because fourteen invocations at the 300 s cap is 70 minutes plus setup.
+    # This said 50 while quoting "fourteen at 180 s is 42 minutes" -- true of the
+    # cap it was written for and false the moment that cap moved, which put the
+    # backstop back within reach of four wedged invocations. Reaching it is not a
+    # tolerable outcome here: cancellation skips `if: always()`, so it would
+    # discard the summary *and* the thread dumps, which is the evidence the
+    # watchdog above exists to collect.
+    #
+    # The cost is that a job wedged beyond `timeout`'s reach now occupies a runner
+    # for eighty minutes rather than fifty. That is worth paying once at 4%
+    # incidence to keep the diagnosis, on a job that gates nothing.
+    timeout-minutes: 80
 
     steps:
       - uses: actions/checkout@v7
@@ -239,22 +249,92 @@ jobs:
             echo "=== pass $1 backend $2 MaxVectorSize ${3:-default} ===" | tee -a split.log
             local opts=""
             [ -n "${3:-}" ] && opts="set networkLopf/Test/javaOptions += \"-XX:MaxVectorSize=$3\"; "
-            # 180 s against a ~37 s invocation: five times the observed cost, so
-            # this fires on a wedged JVM rather than on a slow one. One arm hung
-            # for forty-two minutes on an otherwise identical tree and took the
-            # other six passes down with it; now it costs three minutes and the
-            # rest of the sweep still runs.
+            # 300 s, from the measurements rather than from an average. Most
+            # invocations take 26-31 s, but `vector` at `MaxVectorSize=16` takes
+            # 70-74 s across every successful run, and the first invocation of the
+            # job takes ~70 s because it compiles -- so the slowest legitimate one
+            # is 74 s and the cap is four times that. An earlier version said 180 s
+            # was "five times a ~37 s invocation": 37 s is the mean over fourteen
+            # passes, which is not a bound on any of them, and 180 s was 2.4x the
+            # arm that actually wedges.
+            #
+            # Sized against a false truncation rather than against a wedge. The
+            # wedge this exists for ran 46 minutes -- 37x the slowest legitimate
+            # invocation -- so anything from two minutes upward catches it, while
+            # a cap too close to 74 s throws away a real measurement and prints
+            # "incomplete" over a sweep that was fine.
+            #
+            # No arithmetic against `timeout-minutes` here. An earlier version
+            # picked the cap so fourteen of them fit inside the job budget, which
+            # sized the cap to make a sentence true; if enough invocations wedge to
+            # reach the backstop, the benchmark has nothing left to say and the
+            # backstop firing is the right outcome.
             #
             # `|| true` on the marker, and the failure recorded outside
             # `split.log`: the reporter parses that file, and a line it does not
             # expect is a second failure mode bolted onto the first.
-            if ! timeout 180 sbt --batch \
+            #
+            # A thread dump 60 s before the cap, so the next wedge is diagnosable.
+            # This one produced 46 minutes of nothing: no output, no crash, no
+            # stack -- so what it was doing is still unknown, and the only way to
+            # find out is to be holding a dump the next time it happens. The
+            # watchdog is killed on the normal path, where nothing runs long
+            # enough for it to fire.
+            # The sentinel, not just the `kill` below. Whether killing a sleeping
+            # subshell wins the race is a detail of the shell, and a watchdog that
+            # survives its pass fires 240 s into a *later* one and files a dump
+            # against the wrong arm -- evidence that points somewhere else is
+            # worse than none. Checking the sentinel makes a stray watchdog inert
+            # regardless of who won.
+            # Pass-scoped, not merely present. `.pass-running` carried no identity
+            # and the next pass recreated it, so a stray watchdog waking during a
+            # later pass found the file there and would have filed a dump under
+            # its own stale labels -- the wrong-arm attribution the comment above
+            # claimed it prevented. Comparing a token written before backgrounding
+            # means only the pass that wrote it can dump.
+            local token="$1-$2-${3:-default}-$$-$RANDOM"
+            echo "$token" > .pass-running
+            ( sleep 240
+              [ "$(cat .pass-running 2>/dev/null)" = "$token" ] || exit 0
+              # `jcmd -l` enumerates JVMs. `pgrep -f` matched the
+              # `timeout 300 sbt --batch "...KernelSplit..."` process itself and
+              # the sbt wrapper -- neither a JVM -- and `jcmd` against those wrote
+              # its own error text into the dump.
+              captured=$(mktemp)
+              for jvm in $(jcmd -l 2>/dev/null | grep -E 'KernelSplit|sbt-launch' | cut -d' ' -f1); do
+                # Bounded, with a non-attach fallback. `jcmd` attaches, and attach
+                # needs the target to reach a safepoint -- which is exactly what a
+                # VM wedged the way this is hunting may never do. Unbounded, it
+                # would block for ever in the one scenario the watchdog exists for
+                # and leave `stacks.txt` empty. `kill -3` needs no safepoint and
+                # prints to the JVM's own stdout, which `tee` already routes into
+                # `split.log`.
+                if ! timeout 60 jcmd "$jvm" Thread.print >> "$captured" 2>&1; then
+                  echo "jcmd on $jvm did not return in 60 s -- sent SIGQUIT, stack goes to split.log" >> "$captured"
+                  kill -3 "$jvm" 2>/dev/null || true
+                fi
+              done
+              # The header only if something was captured. Written first, it made
+              # `stacks.txt` non-empty whether or not a stack was taken, so the
+              # `-s` test below meant "the watchdog woke" while the summary said
+              # "here is a thread dump".
+              if [ -s "$captured" ]; then
+                { echo "=== pass $1 $2 ${3:-default}: still running at 240 s ==="
+                  cat "$captured"
+                } >> stacks.txt
+              fi
+              rm -f "$captured" ) &
+            local watchdog=$!
+            if ! timeout 300 sbt --batch \
               "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
               2>&1 | tee -a split.log
             then
               echo "pass $1 backend $2 MaxVectorSize ${3:-default}" >> truncated.txt
-              echo "::warning::kernel-split pass $1/$2 did not finish within 180s"
+              echo "::warning::kernel-split pass $1/$2 did not finish within 300s"
             fi
+            rm -f .pass-running
+            kill "$watchdog" 2>/dev/null || true
+            wait "$watchdog" 2>/dev/null || true
           }
           run 1 scala
           run 1 vector
@@ -309,6 +389,47 @@ jobs:
               echo "any ratio quoting one of these widths is comparing against nothing."
               echo
               sed 's/^/- /' truncated.txt
+              echo
+              if [ ! -s stacks.txt ]; then
+                # Not "killed by something other than its own slowness", which is
+                # what this said and could not know: an attach that never returns
+                # leaves no dump either, and that is the failure mode the wedge
+                # this hunts would produce.
+                echo "No thread dump was captured: either the invocation stopped before"
+                echo "the watchdog reached 240 s, or every attach and SIGQUIT failed."
+                echo
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Outside the truncation block, deliberately. A pass that crosses 240 s
+          # and still finishes inside the cap leaves a dump and no truncation
+          # record -- an arm genuinely slower than the 74 s the cap is sized
+          # against, which is the near miss most worth seeing and which nothing
+          # else reports. Nested, its stack was collected and then thrown away
+          # with the workspace.
+          if [ -s stacks.txt ]; then
+            dump_lines=$(wc -l < stacks.txt)
+            {
+              if [ -f truncated.txt ]; then
+                echo "<details><summary>Thread dumps, taken 60 s before the cap</summary>"
+              else
+                echo "<details><summary>Thread dumps: a pass ran past 240 s but finished inside the cap</summary>"
+              fi
+              echo
+              echo '```'
+              head -800 stacks.txt
+              if [ "$dump_lines" -gt 800 ]; then
+                # Said, not silent. One JVM dump runs to several hundred lines and
+                # this file accumulates one per slow pass, so a fixed head cuts the
+                # later ones mid-stack -- and a stack that stops mid-frame reads as
+                # a complete one.
+                echo
+                echo "... $((dump_lines - 800)) of $dump_lines lines omitted."
+                echo "The full text is in the Measure step's log."
+              fi
+              echo '```'
+              echo "</details>"
               echo
             } >> "$GITHUB_STEP_SUMMARY"
           fi

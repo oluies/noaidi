@@ -59,6 +59,35 @@ is an issue, not a red cross — a new PyPSA release is not a defect in this
 repository. A generator that *cannot read the registry at all* does fail the
 job, because that means the API these files are derived from has changed shape.
 
+### Proving the drift harness actually detects drift
+
+Both comparators had never run against a PyPSA differing from the pin, because
+none existed: the newest release *is* the pinned one. So they were code that
+looked right and had never been asked the question they exist to answer.
+
+Installing an older PyPSA supplies a real version difference and points the
+harness at it backwards, which exercises the same comparison:
+
+```bash
+python3 -m venv /tmp/old && /tmp/old/bin/pip install "pypsa==1.2.4" highspy
+/tmp/old/bin/python reference/generate_goldens.py --into /tmp/old-goldens
+python3 reference/schema_drift.py  reference/goldens/schema.json /tmp/old-goldens/schema.json
+python3 reference/results_drift.py reference/goldens/results     /tmp/old-goldens/results
+```
+
+Run against 1.2.4 this reports 43 schema changes — the `piecewise` and
+`maintenance` attributes 1.3.0 added — and 42 numeric differences confined to
+`phase-shift` and `transformer-taps`, whose objective moves 8524.43 to 7800.0.
+That confinement is the reassuring part: those are the two fixtures for the
+feature the 1.3.0 bump brought in, so the comparator is finding the change that
+is really there rather than reporting noise across the board.
+
+It also found something the drift job had wrong. Against 1.2.4 the generator
+raises on a 1.3.0-only attribute *after* writing all twenty-two results, so
+`results/` looks complete while being the output of a run that stopped early.
+The job now guards on `manifest.json`, which is written last, rather than on the
+directory.
+
 ## What is here
 
 | Path | What it is |

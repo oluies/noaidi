@@ -2249,6 +2249,71 @@ carry `varying = true` so the fallback kept them right — but the fallback is t
 weaker signal, and a piecewise attribute that did not vary by snapshot would have
 been read as `Static` with its overrides silently dropped.
 
+## The modeling layer, and the third backend
+
+`prima-model` is names, expressions and duals; `LpSolver` was already the solver
+abstraction and this does not replace it. A model compiles to an `LpProblem` and
+is handed to a backend it does not name.
+
+Four things it decides, none of them obvious:
+
+**`Variable` and `LinearExpression` share a `Linear` trait rather than a
+conversion.** The alternative, `given Conversion[Variable, LinearExpression]`,
+needs `scala.language.implicitConversions` at every call site that writes a
+model — a lot of import for the privilege of writing `x + y`.
+
+**Terms are appended, not summed, until the model is compiled.** Summing on the
+way in makes every `+` walk the expression built so far, so a bus balance over a
+thousand generators becomes quadratic. `compile` collapses duplicates through an
+insertion-ordered map, which also makes two compilations of one model
+byte-identical — a hash-ordered one would make a golden-file comparison of a
+built problem depend on iteration order.
+
+**A coefficient that cancels to zero is dropped rather than stored.** A
+structural zero would be equilibrated and multiplied like any other entry and
+would change nothing but the cost.
+
+**A maximisation is negated on the way in and everything that carries the
+objective's sign is negated on the way out** — the value, the duals and the
+reduced costs. Negating the value alone would report a price whose sign says the
+opposite of what the model asked for.
+
+### OR-Tools reports an unbounded problem as infeasible
+
+`min -x` subject to `x >= 0` comes back `MPSOLVER_INFEASIBLE` from GLOP. Those
+are opposite answers, and `SolveStatus` already sets the standard here: for
+Prima, diverging without a certificate is an iteration limit and not an
+infeasibility.
+
+So `OrToolsSolver` does not pass the status through. On `INFEASIBLE` it re-solves
+with the objective thrown away: a feasible region that exists means the original
+was unbounded, one that does not means it really was infeasible. The cost is a
+second solve on a path that has already failed, and the probe runs with the
+disambiguation off, which is what stops the two from recursing.
+
+### Writing a test whose duals are worth asserting on
+
+The three-solver agreement fixture is a transport problem, and getting its
+numbers to have a unique dual took two tries. With total supply equal to total
+demand every supply row binds. With one plant's supply equal to one market's
+demand a basic variable sits at zero. Either way the optimal dual is a face
+rather than a point, the three solvers land on three different points of it, and
+the objective still agrees — which is the same thing `network-lopf`'s nodal
+prices do on the reference fixture, recorded above, and it is a property of the
+problem rather than a disagreement. The fixture now has slack in the cheaper
+plant and one binding row, and all three prices match to 1e-5.
+
+### What was not done
+
+`network-lopf` still keeps its own `(component, entity, snapshot) -> column`
+map. It is the obvious first consumer of this layer and it is deliberately not
+converted: the L2 model is gated on golden-file comparison against a pinned
+PyPSA, so rewriting how it is built is a change whose only honest test is that
+gate, and it should be made on its own rather than underneath something else.
+What `Lopf.solve` and `Sclopf.solve` did take is an `LpSolver`, which is the
+part that actually made them solver-dependent — and `SolverAgnosticSuite`
+reaches PyPSA's objective through ojAlgo on the same model Prima solves.
+
 ## Known gaps
 
 **Mixed precision stays opt-in, but no longer because of an unexplained

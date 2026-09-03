@@ -37,6 +37,8 @@ graph TD
     primaOjalgo["prima-ojalgo<br/><i>simplex backend + oracle</i>"]
     primaValidation["prima-validation<br/><i>cross-solver agreement</i>"]
     primaMps["prima-mps<br/><i>MPS reader</i>"]
+    primaModel["prima-model<br/><i>names, expressions, duals</i>"]
+    primaOrtools["prima-ortools<br/><i>GLOP backend</i>"]
 
     networkModel["network-model<br/><i>PyPSA data model, topology</i>"]
     networkLopf["network-lopf<br/><i>dispatch LP</i>"]
@@ -47,12 +49,16 @@ graph TD
     ojalgoLib["ojAlgo"]:::ext
     upickleLib["uPickle"]:::ext
     jhdfLib["jhdf"]:::ext
+    ortoolsLib["OR-Tools / GLOP"]:::ext
 
     primaZio --> primaCore
     primaOjalgo --> primaCore
     primaValidation --> primaCore
     primaValidation --> primaOjalgo
     primaMps --> primaCore
+    primaModel --> primaCore
+    primaOrtools --> primaCore
+    primaOrtools --> primaModel
     networkLopf --> networkModel
     networkLopf --> primaCore
     networkLopf --> networkPf
@@ -62,6 +68,7 @@ graph TD
     primaOjalgo -.-> ojalgoLib
     networkModel -.-> upickleLib
     networkIo -.-> jhdfLib
+    primaOrtools -.-> ortoolsLib
 
     classDef ext fill:#f6f6f6,stroke:#bbb,stroke-dasharray:4 3,color:#555;
 ```
@@ -100,6 +107,22 @@ effect system along. The effect system lives in `prima-zio`, one module out.
 `prima-validation` exists as a separate module rather than as tests inside
 `prima-ojalgo` because its job is to compare two backends, so it belongs to
 neither.
+
+`prima-model` depends on `prima-core` and on nothing else, which is the whole of
+what makes it a modeling layer rather than a front end. It compiles a model into
+an `LpProblem` and hands that to an `LpSolver`; it never names one. The three
+backends meet in `prima-ortools`'s test scope, because that is the only module
+that can see all of them at once, and one model solved by a first-order method,
+a pure-JVM simplex and GLOP agreeing on flows and prices is what the layer is
+for.
+
+`network-lopf` still keeps its own map from `(component, entity, snapshot)` to a
+column index rather than being written against `prima-model`. That is not an
+oversight and it is not a recommendation: the L2 model is gated on golden-file
+comparison against a pinned PyPSA, and rewriting how it is built is a change
+whose only honest test is that gate, so it is a change to make on its own. What
+it does now take is an `LpSolver`, which is the part that made it
+solver-dependent.
 
 ## The solve pipeline
 

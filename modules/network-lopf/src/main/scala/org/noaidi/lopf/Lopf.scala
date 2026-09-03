@@ -1,6 +1,6 @@
 package org.noaidi.lopf
 
-import org.noaidi.prima.{LpProblem, LpSolution, Pdhg, PdhgParams, RowTranslation, SolveStatus, Unsafe}
+import org.noaidi.prima.{LpProblem, LpSolution, LpSolver, Pdhg, PdhgParams, RowTranslation, SolveStatus, Unsafe}
 import org.noaidi.network.*
 import org.noaidi.pf.Branches
 import scala.collection.mutable
@@ -773,10 +773,25 @@ object Lopf:
     * constraints used rather than the `x = 0` a typed line carries in its file.
     */
   def solve(input: Network, params: PdhgParams = PdhgParams.default): LopfResult =
+    solve(input, Pdhg.Solver(params))
+
+  /** The same solve, with the backend chosen by the caller.
+    *
+    * The model is a linear program and nothing about it is Prima's: ojAlgo and
+    * OR-Tools solve it as well, and on a degenerate network they will report a
+    * different point of the same optimal dual face, which is worth being able
+    * to see rather than having to argue about. Naming the solver here rather
+    * than reaching for `Pdhg` inside is the whole of what makes that possible.
+    *
+    * The overload above stays because a `PdhgParams` is the more common thing
+    * to want to change, and routing it through an `LpSolver` would mean
+    * constructing one to adjust a tolerance.
+    */
+  def solve(input: Network, solver: LpSolver): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
     val model    = build(network)
-    val solution = Pdhg.solve(model.problem, params)
+    val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 
   /** Reject component classes the builder does not model.

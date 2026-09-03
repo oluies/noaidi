@@ -68,10 +68,14 @@ object Sclopf:
       outages: Option[IndexedSeq[Outage]] = None,
       params: PdhgParams = PdhgParams.default,
   ): LopfResult =
+    solve(input, outages, Pdhg.Solver(params))
+
+  /** The same solve, with the backend chosen by the caller. See `Lopf.solve`. */
+  def solve(input: Network, outages: Option[IndexedSeq[Outage]], solver: LpSolver): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
-    val model = build(network, outages)
-    val solution = Pdhg.solve(model.problem, params)
+    val model    = build(network, outages)
+    val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 
   /** Build the LP: the dispatch model plus one rating pair per (branch, outage,

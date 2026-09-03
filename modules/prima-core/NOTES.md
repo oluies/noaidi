@@ -234,17 +234,64 @@ few cost everything. A float32 device therefore removes only the cheap prefix,
 unless the caller's tolerance is loose enough that float32 can deliver the whole
 answer — which at 1e-6 it does for most of the ladder.
 
-**On dense random LPs at tight tolerance the float32 point is worse than
-starting from zero.** At 1e-6, random-600x400 costs 2,752 iterations cold and
-19,840 refining. Not merely unhelpful — actively harmful, and not yet explained.
-Dense random LPs are close to the worst case for a first-order method and are
-not representative of power-system LPs, but this is unresolved and is the reason
-`MixedPrecision` is opt-in rather than the default path.
+**The row that says the float32 point is worse than starting from zero is one
+draw, not a property.** At 1e-6, random-600x400 costs 2,752 iterations cold and
+19,840 refining, and that −621% was carried here as a finding about reduced
+precision on dense LPs. It is a finding about *that instance*. `random-600x400`
+is seed 3 of a family the report now sweeps ten draws of, and it is the only one
+of the ten where the hand-over costs more than a cold solve:
 
-The table above is a hand-filtered view: the validation report prints the two
-tolerance regimes as separate tables covering all twelve ladder instances, and
-the six rows here are the ones worth carrying. Run it to regenerate the
-underlying numbers, then merge.
+| tolerance | median saved | worst | best |
+| --- | --- | --- | --- |
+| 1e-6 | **26%** | −621% (seed 3) | 45% |
+| 1e-9 | −6% | −24% | 23% |
+
+At 1e-6 the other nine draws save between 11% and 45%. At 1e-9 the hand-over is
+roughly break-even across the family — which is the "float32 removes only the
+cheap prefix" result above, arrived at from ten instances instead of one.
+
+So what needed explaining was never a general regression. See '''Where seed 3's
+refinement goes''' below for what happens on the one instance, and why the
+obvious fix for it is worse than the problem.
+
+The tables above are a hand-filtered view: the validation report prints the two
+tolerance regimes as separate tables covering all twelve ladder instances, then
+the ten-draw sweep. Run it to regenerate the underlying numbers, then merge.
+
+### Where seed 3's refinement goes
+
+Tracing every evaluation point of both solves puts the loss in a 200-iteration
+window. The refinement starts from a point whose fp64 KKT error is genuinely
+good — primal residual 4.0e-3, against 8.6e+2 at the origin — and by iteration
+192 it has reached a weighted error of 3.5e-3, better than the cold solve
+reaches before iteration 2,300. A restart fires there on the sufficient-decay
+test and re-centres on the current iterate. By iteration 384 the error is 3.3, a
+thousandfold worse, and the next 19,000 iterations are spent getting back.
+
+The restart is not incidental to that. `restartAt` chooses between two
+candidates, the current iterate and the running average, and takes the better of
+them — but neither is compared against the point the period began from, whose
+weighted error is already in hand as `errorAtRestart`. So a restart can
+re-centre on a point worse than the one it started from, and when it does, the
+period's ground is lost along with its progress: `errorAtRestart` is reset
+upward and nothing records that a better point was ever held.
+
+**A third candidate is the obvious fix and it is a bad one.** Holding the
+period's starting point when both candidates are worse takes seed 3 from −621%
+to −7% at 1e-6, and the ten-draw median at 1e-9 from −6% to +12%. It also takes
+the `infeasible` fixture from 1,088 iterations to 391,616, and its refinement
+past the 500,000 limit. The reason is not subtle once seen: on an infeasible
+problem the iterates diverge along a ray, and that divergence *is* the
+certificate. The KKT error has to grow. A rule that refuses to restart onto a
+worse point is a rule that fights the only mechanism by which infeasibility is
+ever detected. Allowing one rewind per restart point keeps the infeasible
+fixture near its old cost — 1,856 iterations — and gives back most of the
+benefit with it: seed 3 returns to −407%.
+
+That is why the restart rule has two candidates rather than three, and the
+change is not made. What the trace does establish is that the anomaly is a
+restart landing badly on one draw, not the float32 arithmetic: the point handed
+over is a good one, and the refinement is at 3.5e-3 before anything goes wrong.
 
 ## L2: what LOPF reproduces, and what it does not
 
@@ -488,8 +535,8 @@ reaches an incumbent early — which is what makes pruning possible at all — a
 because a child differs from its parent in exactly one bound, so the parent's
 iterate warm-starts it well. That warm-start property is the reason a first-order
 method is attractive inside branch-and-bound in the first place, and it is
-asserted to leave the answer unchanged rather than assumed to, given the
-unexplained dense-instance warm-start regression recorded above.
+asserted to leave the answer unchanged rather than assumed to, given how far a
+warm start can move the iteration count on the dense instances recorded above.
 
 **Checked against ojAlgo's mixed-integer solver**, whose bound *is* exact, over
 random mixed instances with deliberately fractional relaxations. That cross-check
@@ -2204,12 +2251,18 @@ been read as `Static` with its overrides silently dropped.
 
 ## Known gaps
 
-**Why the float32 warm start hurts on dense instances is unexplained.** The
-prime suspects are the restart schedule — `errorAtRestart` is seeded from an
-already-small error, so the sufficient-decay test needs a fivefold reduction
-from a low base and rarely fires — and a step size the adaptive rule settled on
-while measuring float32 noise. Neither has been confirmed. Until it is, do not
-enable mixed precision by default.
+**Mixed precision stays opt-in, but no longer because of an unexplained
+regression.** The −621% on one dense instance was the reason given, and the
+ten-draw sweep shows it is that draw rather than the method: the median saving
+at 1e-6 is 26%. What is left is real and much smaller — at 1e-9 the hand-over is
+break-even across the family, and on a dense instance a restart can land badly
+enough to cost several times a cold solve. Both are properties of the instance
+class rather than a defect waiting to be found. See '''The expensive part is the
+tail''' and '''Where seed 3's refinement goes'''.
+
+The step size the float32 pass settles on was the other named suspect, and it is
+not the culprit: dropping it, halving it, tenthing it, and substituting the cold
+solve's own final value all leave seed 3 between −363% and −972%.
 
 **No GPU backend yet, but the gating question is answered.** `Kernels` is the
 seam, and `KernelContractSuite` is written against the trait so a new backend

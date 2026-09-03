@@ -105,8 +105,9 @@ final case class BnbParams(
       * A child differs from its parent in exactly one variable bound, so the
       * parent's iterate is usually an excellent starting point — this is the
       * property that makes a first-order method attractive inside
-      * branch-and-bound at all. Left switchable because NOTES records a
-      * warm-start regression on dense instances that is not yet explained.
+      * branch-and-bound at all. Left switchable because NOTES records how far a
+      * warm start can move the iteration count on a dense instance, in either
+      * direction.
       */
     warmStart: Boolean = true,
 )

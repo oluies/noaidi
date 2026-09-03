@@ -21,10 +21,10 @@ import org.noaidi.prima.kernels.{Kernels, ScalaKernels}
   * reason.''' On structured, sparse instances — the LOPF workload this is meant
   * for — the refinement removes most of the double-precision work: 75% on the
   * dispatch fixture at a 1e-9 tolerance and all of it at 1e-6. On dense random
-  * LPs at tight tolerance the float32 point is measurably a *worse* starting
-  * point than zero, and refinement can cost several times a cold solve. That is
-  * unexplained. See `NOTES.md` for the measurements before enabling this on a
-  * new class of problem.
+  * LPs it saves a median 26% at 1e-6 over ten draws and is break-even at 1e-9,
+  * and on one draw in ten it costs several times a cold solve — a restart
+  * landing badly, not the float32 arithmetic. See `NOTES.md` for the
+  * measurements before enabling this on a new class of problem.
   *
   * What does hold unconditionally is the answer: the reported result always
   * comes from the double-precision pass, so accuracy never depends on which

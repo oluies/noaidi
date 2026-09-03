@@ -112,6 +112,13 @@ object Report:
     reportMixedPrecision(instances, 1e-9)
     reportMixedPrecision(instances, 1e-6)
 
+    // The ladder carries one dense instance per size, and a single instance
+    // cannot distinguish a property of reduced precision from a property of
+    // that draw. It did not: `random-600x400` is one seed of this family and
+    // the only one of ten where the hand-over costs several times a cold solve.
+    reportWarmStartSpread(1e-6)
+    reportWarmStartSpread(1e-9)
+
   /** Reduced precision followed by a double-precision finish, against a cold
     * double-precision solve.
     *
@@ -154,5 +161,47 @@ object Report:
           f"${result.reducedIterations}%10d ${result.refinementIterations}%8d $delta $saved"
       )
     }
+
+  /** The same hand-over, over ten draws of one dense random shape.
+    *
+    * Printed per seed rather than as a summary because the distribution is the
+    * finding: at 1e-6 nine of the ten save between a tenth and a half of the
+    * double-precision work and one costs several times a cold solve, and a
+    * median alone would hide both halves of that.
+    *
+    * The cold column is what the saving is measured against, and on these
+    * instances it is itself unstable — the last iterate oscillates by orders of
+    * magnitude between evaluation points, so which checkpoint first passes the
+    * test moves a long way on small changes. A saving computed against it is a
+    * ratio of two noisy numbers, which is the other reason to print ten.
+    */
+  private def reportWarmStartSpread(tolerance: Double): Unit =
+    val params = PdhgParams(epsAbs = tolerance, epsRel = tolerance, maxIterations = 500_000)
+
+    println(f"%n%nFloat32 hand-over over ${ValidationLadder.denseSeeds.size}%d dense random draws at tolerance $tolerance%.0e")
+    println(
+      f"${"instance"}%-20s ${"status"}%-17s ${"cold fp64"}%10s ${"fp32 pass"}%10s " +
+        f"${"refine"}%8s ${"fp64 work saved"}%16s"
+    )
+    println("-" * 84)
+
+    val savings = ValidationLadder.denseSpread.map { (name, problem) =>
+      val device = Float32Kernels()
+      val result =
+        try MixedPrecision.solve(problem, params, device)
+        finally device.close()
+      val cold = Pdhg.solve(problem, params)
+
+      val saved = 100.0 * (1.0 - result.refinementIterations.toDouble / cold.iterations)
+      println(
+        f"$name%-20s ${result.solution.status}%-17s ${cold.iterations}%10d " +
+          f"${result.reducedIterations}%10d ${result.refinementIterations}%8d $saved%15.1f%%"
+      )
+      saved
+    }
+
+    val sorted = savings.sorted
+    val median = (sorted(sorted.size / 2) + sorted((sorted.size - 1) / 2)) / 2.0
+    println(f"  median $median%.1f%%   worst ${sorted.head}%.1f%%   best ${sorted.last}%.1f%%")
 
 end Report

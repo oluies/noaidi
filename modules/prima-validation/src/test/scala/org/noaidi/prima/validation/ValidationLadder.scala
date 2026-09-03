@@ -66,3 +66,20 @@ object ValidationLadder:
     * still catching an order-of-magnitude regression.
     */
   val worstGapBound: Double = 1e-8
+
+  /** Dense random instances of one shape over a spread of seeds.
+    *
+    * The ladder carries a single dense instance per size, which is enough to
+    * show the shape of the method's behaviour and not enough to say anything
+    * about its spread. It was taken for the latter once — a mixed-precision
+    * result on `random-600x400` alone was published as a property of reduced
+    * precision — and the instance turned out to be an outlier. So the sweep
+    * exists to keep a claim about dense random LPs from resting on one draw.
+    *
+    * `random-600x400` is `seed = 3` of this family, so the ladder entry and the
+    * sweep agree by construction rather than by two similar-looking calls.
+    */
+  val denseSeeds: Seq[Int] = 1 to 10
+
+  def denseSpread: Seq[(String, LpProblem)] =
+    denseSeeds.map(seed => s"dense-seed-$seed" -> LpFixtures.randomFeasible(seed, 600, 120, 280, 0.04))

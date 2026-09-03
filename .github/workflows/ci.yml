@@ -173,7 +173,7 @@ jobs:
           # gets muted. A floor only fails when coverage goes backwards, which is
           # when someone should look. Raise it when the suite grows enough to be
           # worth re-anchoring; it does not need to track the total.
-          MINIMUM_TESTS=690
+          MINIMUM_TESTS=730
           if [ "$total" -lt "$MINIMUM_TESTS" ]; then
             echo "::error::Only $total tests ran, below the floor of $MINIMUM_TESTS -- either the suite shrank or something stopped running."
             exit 1
@@ -183,10 +183,36 @@ jobs:
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only
       # the Maven artifacts, and it reaches into prima-core's package-private
-      # internals — so without this step a refactor there would break the spike
-      # silently, and only surface the next time someone with a GPU opened it.
-      - name: Compile the GPU spike
+      # internals — so without this step a refactor there would break the
+      # backend silently, and only surface the next time someone with a GPU
+      # opened it.
+      - name: Compile the GPU backend
         run: sbt --batch "primaCyfra/Test/compile"
+
+      # prima-ortools is out of the root aggregate for a different reason --
+      # `ortools-java` declares every platform's natives as runtime
+      # dependencies -- and unlike Vulkan, the one this runner needs is on Maven
+      # Central and loads here. So it is *run*, not merely compiled: a third
+      # backend nothing exercises is code that looks right and has never been
+      # asked the question it exists to answer, which is the failure this
+      # repository has already been caught by once.
+      - name: Test the OR-Tools backend
+        run: |
+          set -euo pipefail
+          sbt --batch "primaOrtools/testFull" 2>&1 | tee sbt-ortools.log
+          total=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-ortools.log \
+            | grep -oE '[0-9]+ total' \
+            | grep -oE '^[0-9]+' \
+            | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          total=${total:-0}
+          # A floor here too, and for the same reason: `testFull` exiting 0
+          # having run nothing looks exactly like a passing suite. Low, because
+          # this is one small module rather than the whole build.
+          if [ "$total" -lt 6 ]; then
+            echo "::error::Only $total OR-Tools tests ran -- the backend's suite did not execute."
+            exit 1
+          fi
+          echo "$total OR-Tools tests passed" >> "$GITHUB_STEP_SUMMARY"
 
   # The lane-count question, which no machine here can answer.
   #

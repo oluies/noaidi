@@ -212,7 +212,7 @@ graph TD
 
     ref["ScalaKernels<br/>fp64 reference oracle"]
     f32["Float32Kernels<br/>reduced-precision CPU"]
-    cyfra["CyfraKernels<br/>SPIR-V / Vulkan<br/><i>SpMV proven, rest pending</i>"]:::todo
+    cyfra["CyfraKernels<br/>SPIR-V / Vulkan<br/><i>all 8, ~4 ms per iteration</i>"]
     mlx["MlxKernels<br/>Metal, via Panama"]:::todo
     cuda["Nd4jKernels<br/>CUDA"]:::todo
     spatial["SpatialKernels<br/>Chisel to Verilog"]:::todo

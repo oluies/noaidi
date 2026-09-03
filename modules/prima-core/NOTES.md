@@ -2264,7 +2264,8 @@ The step size the float32 pass settles on was the other named suspect, and it is
 not the culprit: dropping it, halving it, tenthing it, and substituting the cold
 solve's own final value all leave seed 3 between −363% and −972%.
 
-**No GPU backend yet, but the gating question is answered.** `Kernels` is the
+**There is a GPU backend, it is correct, and it is far too slow to use.**
+`Kernels` is the
 seam, and `KernelContractSuite` is written against the trait so a new backend
 inherits the whole contract by supplying one method. What was unknown was
 whether Cyfra's DSL could express the one kernel PDHG cannot do without.
@@ -2311,8 +2312,9 @@ Three constraints the spike surfaced, none fatal:
 
   Buffer **residency** across dispatches — the matrix staying on the device
   while only `x` is rewritten, which is what `Kernels.allocate`/`upload`/
-  `download` would depend on — is still not exercised. That is the next thing to
-  demonstrate before a backend is written against this.
+  `download` depend on — was the next thing to demonstrate, and `CyfraKernels`
+  demonstrates it: one allocation holds every vector and both matrices for the
+  life of a solve.
 - **`limit` needs a static cap**, satisfied by the maximum row non-zero count,
   which is a plain Scala `Int` at construction time. A pathological matrix with
   one very long row makes every invocation's loop bound that long, though
@@ -2323,10 +2325,93 @@ Three constraints the spike surfaced, none fatal:
   into the root build — `sbt testFull` does not run it — since no CI runner is
   guaranteed a working Vulkan stack.
 
-Still open: a full `CyfraKernels` implementing all eight operations, and any
-performance measurement at all. The spike establishes feasibility, not value.
-And the licensing question stands: Cyfra is LGPL-2.1 where the rest of this
-build is Apache-2.0, which is why the backend lives in its own module.
+### The backend, and what it costs
+
+`CyfraKernels` implements all eight operations and passes
+`KernelContractSuite` unchanged — the first backend to test the claim that seam
+was built on rather than repeat it. `CyfraSolveSuite` then runs whole solves
+through it: `MixedPrecision` with the GPU as the reduced pass reaches the same
+objective as the reference on `economic-dispatch`, `random-60x30` and
+`random-200x120`, to the 1e-6 the caller asked for, because the refinement that
+produces the answer is still fp64 on the host.
+
+Two pieces of plumbing the spike did not need:
+
+- **An allocation that outlives one dispatch.** Cyfra hands out an `Allocation`
+  only for the duration of a callback, which is the right shape for a one-shot
+  dispatch and the wrong one for a solver that allocates once and calls in a few
+  hundred thousand times. `DeviceLoop` parks that callback on a thread of its
+  own and feeds it through a queue. The thread is required rather than
+  convenient: the command pool and descriptor-set manager come from a
+  `VulkanThreadContext`, so one allocation is one thread's.
+- **`writeArray` is not usable on this release.** It copies its byte buffer to
+  the device and *then* fills it from the array, so it uploads whatever the
+  fresh allocation happened to contain. `GBuffer(array)` does the same two steps
+  in the right order, and the backend builds the byte buffer and calls `write`
+  itself for the same reason.
+
+**And it is three orders of magnitude slower than the CPU.** Microseconds per
+iteration, fp32 in both cases:
+
+| instance | CPU fp64 | CPU fp32 | GPU fp32 |
+| --- | --- | --- | --- |
+| economic-dispatch (21v) | 0.8 | 1.1 | **4,261** |
+| random-60x30 | 0.9 | 3.2 | **4,113** |
+| random-200x120 | 2.5 | 2.8 | **4,020** |
+
+The number to look at is not the ratio, it is that the GPU column barely moves
+across a tenfold change in problem size. A cost that does not scale with the
+work is not the work, and measuring the three kinds of operation over a
+thousandfold range of vector length says where it goes:
+
+| operation | 64 | 1,024 | 4,096 | 65,536 |
+| --- | --- | --- | --- | --- |
+| `copy` — a bare dispatch | 45 | 46 | 53 | 42 |
+| `axpby` — dispatch plus a scalar | 251 | 251 | 220 | 225 |
+| `squaredNorm` — dispatch plus a read back | 462 | 473 | 459 | 432 |
+
+Flat, all of it, in microseconds. The arithmetic is free and the launch is
+everything. A PDHG iteration is about seventeen of these, which is the 4 ms.
+
+Three findings behind those numbers, in the order they matter:
+
+- **A scalar costs five times a dispatch.** Every `GBuffer` Cyfra allocates is
+  `Buffer.DeviceBuffer`, and there is no host-visible one to ask for, so writing
+  `alpha` and `beta` means a staging buffer, a copy command buffer and a pending
+  execution — 180 microseconds for eight bytes. Eight of the seventeen
+  operations in an iteration carry a scalar, so this alone is a third of the
+  cost. The DSL body cannot read a dispatch parameter, and the one escape from
+  that, a uniform built from `Params`, handles `Int32` and nothing else on this
+  release.
+- **Batching the submissions changes nothing.** The interface invites the
+  opposite conclusion — `Kernels` describes reductions as "the only
+  synchronisation points on an asynchronous device", which reads as an
+  instruction to record everything else and submit once. Recording 1, 4, 16 and
+  64 operations before submitting gives 4,191, 4,178, 4,194 and 4,180
+  microseconds per iteration. The cost is per dispatch, not per submission.
+- **Batching the *dispatches* does help, by about half.** Sixteen dispatches
+  chained into one `GExecution` cost 192 microseconds against 328 issued
+  separately. That is a finding about the seam rather than about the device:
+  `Kernels` is a call-at-a-time interface, so a backend behind it cannot use
+  this. A batched seam is where a Cyfra backend would have to go — and halving
+  4 ms still leaves it a thousand times the CPU.
+
+So the honest reading is that this settles the *feasibility* question completely
+and answers the value question in the negative for this release of Cyfra. What
+would change it is not a bigger problem — the flat columns above say size is not
+what the GPU is losing on — but a path that does not pay a command buffer and a
+staging copy per operation. That is the same conclusion `HPC.md` reaches from
+the other direction, and it is why the module is a spike rather than a
+dependency.
+
+Two things a GPU backend still cannot be validated against here: cuPDLP-C,
+which needs CUDA hardware this port has not had access to, and fp64, which no
+accelerator in prospect offers at all.
+
+The licensing question stands: Cyfra is LGPL-2.1 where the rest of this build is
+Apache-2.0, which is why the backend lives in its own module — and the module is
+still not aggregated into the root build, since no CI runner is guaranteed a
+working Vulkan stack. `sbt primaCyfra/testOnly *` is how it is run.
 
 **Presolve does only the exact reductions.** Fixed variables, empty rows and
 columns, and singleton rows are removed; forcing rows, dominated rows and

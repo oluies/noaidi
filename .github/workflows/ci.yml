@@ -8,6 +8,17 @@ on:
   # changes. Scala Steward's own updates arrive as pull requests and are covered
   # by the trigger above.
   workflow_dispatch:
+    inputs:
+      wedge_kernel_pass:
+        description: >-
+          Hang one kernel-split invocation on purpose, to prove the watchdog
+          fires. Give a pass number (1-7); empty means normal. The watchdog's
+          firing path has only ever been exercised by a local emulation of
+          `timeout`, so on a real runner it is untested -- and this job's whole
+          history is of instrumentation that looked right and produced nothing
+          when it mattered. This makes that one dispatch away.
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -233,6 +244,8 @@ jobs:
       - uses: sbt/setup-sbt@v1
 
       - name: Measure
+        env:
+          WEDGE_PASS: ${{ inputs.wedge_kernel_pass }}
         run: |
           set -euo pipefail
           # ABBA, not ABAB. Interleaving alone does not counterbalance: with
@@ -292,6 +305,22 @@ jobs:
             # its own stale labels -- the wrong-arm attribution the comment above
             # claimed it prevented. Comparing a token written before backgrounding
             # means only the pass that wrote it can dump.
+            # The deliberate wedge, when dispatched with `wedge_kernel_pass`.
+            #
+            # A tighter tolerance rather than a `sleep`, because the part that
+            # needs proving on a runner is that `jcmd -l | grep -E
+            # "KernelSplit|sbt-launch"` matches the real JVM's command line and
+            # that the attach returns a real dump. Sleeping in front of sbt would
+            # mean no JVM exists when the watchdog wakes, so it would find nothing
+            # and the test would pass while proving the opposite of what it claims.
+            # `maxIterations` is 500,000 and the tolerance drives the iteration
+            # count, so 1e-14 keeps a genuine KernelSplit JVM doing genuine work
+            # well past 150 s.
+            local tol="1e-4"
+            if [ "${WEDGE_PASS:-}" = "$1" ]; then
+              tol="1e-14"
+              echo "=== pass $1 backend $2: wedged on purpose (tolerance $tol) ===" | tee -a split.log
+            fi
             local token="$1-$2-${3:-default}-$$-$RANDOM"
             echo "$token" > .pass-running
             ( sleep 150
@@ -344,7 +373,7 @@ jobs:
               [ -s "$errs" ] && cat "$errs" || true ) &
             local watchdog=$!
             if ! timeout 300 sbt --batch \
-              "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de 1e-4 $2" \
+              "${opts}networkLopf/Test/runMain org.noaidi.lopf.KernelSplit scigrid-de $tol $2" \
               2>&1 | tee -a split.log
             then
               echo "pass $1 backend $2 MaxVectorSize ${3:-default}" >> truncated.txt
@@ -550,7 +579,19 @@ jobs:
           # The `|| cat` below is what covers the case where that reasoning is
           # wrong anyway, which is the whole reason it is not dead code.
           body=$(sed -n '/^instance /,$p' report.txt)
-          [ -n "$body" ] || body=$(cat report.txt)
+          if [ -z "$body" ]; then
+            # Which path was taken, said out loud. Both produce a passing job and
+            # a plausible summary, so nothing distinguished them and the previous
+            # pattern sat here broken for as long as it took a reviewer to read
+            # it. The fallback is correct behaviour, not a failure -- it publishes
+            # the whole file -- but a fallback firing every run means the pattern
+            # above matches nothing, and that should be visible without someone
+            # going to look.
+            echo "::warning::the report summary fell back to the whole file: /^instance / matched nothing in report.txt"
+            body=$(cat report.txt)
+          else
+            echo "::notice::the report summary matched /^instance / and published the table"
+          fi
           {
             echo "## Prima vs ojAlgo (JDK ${{ matrix.java }})"
             echo
@@ -569,6 +610,11 @@ jobs:
             # `int` in that order -- which is exactly how its sibling looked
             # until a column moved.
             milp=$(sed -n '/^instance /,$p' milp-report.txt)
+            if [ -z "$milp" ]; then
+              echo "::warning::the MILP summary fell back: /^instance / matched nothing in milp-report.txt"
+            else
+              echo "::notice::the MILP summary matched /^instance /"
+            fi
             [ -n "$milp" ] || milp=$(cat milp-report.txt)
             {
               echo "## Prima vs ojAlgo, mixed-integer (JDK ${{ matrix.java }})"

@@ -106,14 +106,29 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          if [ ! -d "$RUNNER_TEMP/latest/results" ]; then
+          # `manifest.json`, not the results directory. A generation that dies
+          # partway still leaves a `results/` holding twenty-two files that look
+          # exactly like a complete set -- measured, by running the generator
+          # against PyPSA 1.2.4, where it raises on a 1.3.0-only attribute after
+          # writing every result. Guarding on the directory let that through and
+          # compared answers from a run that never finished. The manifest is
+          # written last, after the networks, the unsupported fixtures and the
+          # standard types, so its presence is the only thing here that means
+          # "this generation completed".
+          if [ ! -f "$RUNNER_TEMP/latest/manifest.json" ]; then
             {
-              echo "## PyPSA ${{ steps.install.outputs.latest }} — no results to compare"
+              echo "## PyPSA ${{ steps.install.outputs.latest }} — no complete generation to compare"
               echo
               echo "The generator exited ${{ steps.generate.outputs.status }} without writing a"
-              echo "results directory. That is not a comparison failure: the newest PyPSA could"
-              echo "not produce the goldens at all, and the generator needs looking at before"
-              echo "any drift question can be asked."
+              echo "manifest, so it did not finish. That is not a comparison failure: the newest"
+              echo "PyPSA could not produce the goldens, and the generator needs looking at"
+              echo "before any drift question can be asked."
+              echo
+              if [ -d "$RUNNER_TEMP/latest/results" ]; then
+                echo "A \`results/\` directory is present and is **not** compared. It can look"
+                echo "complete while being the output of a run that stopped early, and a drift"
+                echo "verdict over those is worth less than no verdict."
+              fi
             } > results-drift.md
             echo "drifted=true" >> "$GITHUB_OUTPUT"
             exit 0

@@ -159,6 +159,14 @@ final class CompiledModel private[model] (
       solution.primal.length == variables.length,
       s"solution has ${solution.primal.length} variables, this model has ${variables.length}",
     )
+    // The dual side is checked too. `originalDuals` indexes the standard-form
+    // vector by the rows this translation knows about, so a solution from a
+    // different problem reaches it and throws an array index rather than saying
+    // what went wrong.
+    require(
+      solution.dual.length == problem.numConstraints,
+      s"solution has ${solution.dual.length} duals, this model compiled to ${problem.numConstraints} rows",
+    )
     // A maximisation was handed to the solver negated, so everything that
     // carries the objective's sign has to come back the other way: the value
     // itself, the duals, and the reduced costs. Leaving the duals alone would
@@ -191,9 +199,26 @@ final class Solution private[model] (
 
   def apply(variable: Variable): Double = value(variable)
 
+  /** Ownership is not enough on its own.
+    *
+    * `Model` invites the case this guards: the compiled form is a snapshot, so
+    * a model may keep growing after a solution has been taken from it — and a
+    * variable created after that `compile()` belongs to the same model, passes
+    * the ownership check, and then indexes past the end of a snapshot that
+    * never had a column for it. An `ArrayIndexOutOfBoundsException` from inside
+    * the layer says nothing about why.
+    */
+  private def within(index: Int, size: Int, what: String, name: String): Int =
+    require(
+      index < size,
+      s"$name has no $what in this solution: it was created after the model was compiled, " +
+        s"which took a snapshot of $size",
+    )
+    index
+
   def value(variable: Variable): Double =
     require(variable.owner eq model, s"${variable.name} belongs to a different model")
-    primal(variable.column)
+    primal(within(variable.column, primal.length, "column", variable.name))
 
   /** The multiplier on a row, in the orientation the row was written in.
     *
@@ -204,11 +229,11 @@ final class Solution private[model] (
     */
   def dual(constraint: ConstraintRef): Double =
     require(constraint.owner eq model, s"${constraint.name} belongs to a different model")
-    duals(constraint.row)
+    duals(within(constraint.row, duals.length, "row", constraint.name))
 
   def reducedCost(variable: Variable): Double =
     require(variable.owner eq model, s"${variable.name} belongs to a different model")
-    reducedCosts(variable.column)
+    reducedCosts(within(variable.column, reducedCosts.length, "column", variable.name))
 
   def isOptimal: Boolean = status == SolveStatus.Optimal
 

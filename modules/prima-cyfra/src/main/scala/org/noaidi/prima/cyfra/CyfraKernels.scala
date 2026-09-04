@@ -77,8 +77,14 @@ final class CyfraKernels extends Kernels:
 
   private val workgroup = 64
 
-  private val elementwise = mutable.Map.empty[(String, Int), GProgram[Unit, ?]]
-  private val spmvPrograms = mutable.Map.empty[(Int, Int, Int), GProgram[Unit, Spmv]]
+  // Keyed by everything the program captures, as a tuple. An encoding -- one
+  // Int mixing the length with the equality split, say -- collides inside the
+  // reachable domain, and a collision here returns a program with the wrong row
+  // count baked into its guard, its dispatch size and its buffer lengths. It
+  // would come back through an unchecked cast as a wrong dual vector rather
+  // than as an error.
+  private val elementwise  = mutable.Map.empty[(String, Int, Int), GProgram[Unit, ?]]
+  private val spmvPrograms = mutable.Map.empty[(Int, Int, Int, Int), GProgram[Unit, Spmv]]
   private val partials     = mutable.Map.empty[Int, GBuffer[Float32]]
 
   // Recorded but unsubmitted work, tracked by the buffer each operation wrote.
@@ -94,6 +100,14 @@ final class CyfraKernels extends Kernels:
 
   private val partialsHost = new Array[Float](ReduceLanes)
 
+  // Reused rather than allocated per call. `setScalars` runs on eight of the
+  // seventeen operations in an iteration, and `BufferUtils.createByteBuffer`
+  // allocates off-heap with a `Cleaner` registration each time -- 160,000 of
+  // them over a 20,000-iteration solve, reclaimed only when GC gets round to
+  // it, on the exact path this backend's cost is about.
+  private val scalarHost  = new Array[Float](4)
+  private val scalarBytes = org.lwjgl.BufferUtils.createByteBuffer(4 * java.lang.Float.BYTES)
+
   private def groups(n: Int): Int = math.max(1, (n + workgroup - 1) / workgroup)
 
   private def onDevice[A](body: (VkCyfraRuntime, Allocation) => A): A =
@@ -104,19 +118,22 @@ final class CyfraKernels extends Kernels:
     if scalars == null then scalars = GBuffer(new Array[Float](4))
     scalars
 
-  private def setScalars(values: Double*)(using Allocation): Unit =
-    val packed = new Array[Float](4)
-    values.zipWithIndex.foreach((v, i) => packed(i) = v.toFloat)
-    val bytes = org.lwjgl.BufferUtils.createByteBuffer(4 * java.lang.Float.BYTES)
-    io.computenode.cyfra.core.GCodec.toByteBuffer[Float32, Float](bytes, packed)
+  private def setScalars(first: Double, second: Double = 0.0)(using Allocation): Unit =
+    scalarHost(0) = first.toFloat
+    scalarHost(1) = second.toFloat
+    io.computenode.cyfra.core.GCodec.toByteBuffer[Float32, Float](scalarBytes, scalarHost)
     // Written through `write` rather than `writeArray`: on this release
     // `writeArray` copies the byte buffer to the device *before* filling it
     // from the array, so it uploads whatever the fresh allocation happened to
     // contain. Building the byte buffer here and handing it over is the same
     // path `GBuffer(array)` takes, and that one is correct.
-    scalarBuffer.write(bytes, 0)
+    scalarBuffer.write(scalarBytes, 0)
 
-  private def record(out: GBuffer[Float32]): Unit = unsubmitted += out
+  private var dispatched = false
+
+  private def record(out: GBuffer[Float32]): Unit =
+    dispatched = true
+    unsubmitted += out
 
   /** Put everything recorded so far on the queue.
     *
@@ -167,6 +184,28 @@ final class CyfraKernels extends Kernels:
   def uploadMatrix(m: SparseMatrix): Mat =
     onDevice { (_, alloc) =>
       given Allocation = alloc
+      // A new matrix means a new solve, and a program built for the last one
+      // may not be dispatched again here.
+      //
+      // This is a correctness fix and not an optimisation. A cached `GProgram`
+      // re-dispatched against buffers allocated after its earlier dispatches
+      // were cleaned up returns wrong answers rather than failing:
+      // `economic-dispatch` solved twice on one backend gave the right answer
+      // and then `NumericalError` at iteration two, with the primal still at
+      // the origin. A second solve of a *different* shape was always fine,
+      // which is what points at the cache -- that path builds new programs.
+      // Rebuilding them costs SPIR-V compilation once per solve, which is the
+      // per-solve cost the spike measured and called tolerable.
+      //
+      // It matters beyond a benchmark: `BranchAndBound.solveWith` deliberately
+      // holds one set of kernels for a whole search and solves a relaxation per
+      // node, so without this every node after the first would be silently
+      // wrong.
+      if dispatched then
+        elementwise.clear()
+        spmvPrograms.clear()
+        partials.clear()
+        dispatched = false
       val nnz = math.max(m.nnz, 1)
       val maxRow =
         math.max(1, (0 until m.rows).foldLeft(0)((acc, r) => math.max(acc, m.rowPtr(r + 1) - m.rowPtr(r))))
@@ -195,7 +234,7 @@ final class CyfraKernels extends Kernels:
   )(using VkCyfraRuntime): GProgram[Unit, Unary] =
     elementwise
       .getOrElseUpdate(
-        (name, n),
+        (name, n, 0),
         GProgram[Unit, Unary](
           layout = _ =>
             Unary(
@@ -217,7 +256,7 @@ final class CyfraKernels extends Kernels:
   )(using VkCyfraRuntime): GProgram[Unit, Binary] =
     elementwise
       .getOrElseUpdate(
-        (name, n),
+        (name, n, 0),
         GProgram[Unit, Binary](
           layout = _ =>
             Binary(
@@ -237,7 +276,11 @@ final class CyfraKernels extends Kernels:
 
   private def spmvProgram(m: DeviceMatrix)(using VkCyfraRuntime): GProgram[Unit, Spmv] =
     spmvPrograms.getOrElseUpdate(
-      (m.rows, m.cols, m.maxRowNnz),
+      // `nnz` is in the key because the layout captures it: `colIndices` and
+      // `values` are declared at that length, and a program shared by two
+      // matrices agreeing on the rest would declare buffer sizes that do not
+      // match the ones bound at dispatch.
+      (m.rows, m.cols, m.maxRowNnz, m.nnz),
       GProgram[Unit, Spmv](
         layout = _ =>
           Spmv(
@@ -269,7 +312,7 @@ final class CyfraKernels extends Kernels:
     val chunk = math.max(1, (n + ReduceLanes - 1) / ReduceLanes)
     elementwise
       .getOrElseUpdate(
-        ("reduce", n),
+        ("reduce", n, 0),
         GProgram[Unit, Reduce](
           layout = _ =>
             Reduce(
@@ -407,7 +450,7 @@ final class CyfraKernels extends Kernels:
         val n = out.size
         val program = elementwise
           .getOrElseUpdate(
-            ("primalStep", n),
+            ("primalStep", n, 0),
             GProgram[Unit, Primal](
               layout = _ =>
                 Primal(
@@ -426,10 +469,13 @@ final class CyfraKernels extends Kernels:
               GIO.when(i < n) {
                 val step =
                   GIO.read(l.x, i) - GIO.read(l.params, 0) * (GIO.read(l.cost, i) - GIO.read(l.ktY, i))
-                // `min` then `max`, matching the reference's two comparisons: an
-                // infinite bound has to pass the candidate through rather than
-                // return the bound, which is what a clamp against an infinity
-                // would do to an infinite candidate.
+                // `min` then `max` rather than a clamp, so an infinite bound
+                // passes the candidate through rather than returning the
+                // bound -- which is what a clamp would do to an infinite
+                // candidate. This agrees with the reference's two comparisons
+                // wherever `lower <= upper`, and only there: on a degenerate
+                // box the reference returns `upper` and this returns `lower`.
+                // `LpProblem.apply` rejects such a box, so no solve reaches it.
                 GIO.write(l.out, i, max(min(step, GIO.read(l.upper, i)), GIO.read(l.lower, i)))
               }
             },
@@ -465,7 +511,7 @@ final class CyfraKernels extends Kernels:
         // never notices: it is fixed for the whole life of a problem.
         val program = elementwise
           .getOrElseUpdate(
-            ("dualStep", m * 31 + numEqualities),
+            ("dualStep", m, numEqualities),
             GProgram[Unit, Dual](
               layout = _ =>
                 Dual(

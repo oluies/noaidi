@@ -5,7 +5,6 @@ import io.computenode.cyfra.core.Allocation
 import io.computenode.cyfra.runtime.VkCyfraRuntime
 
 import java.util.concurrent.{CompletableFuture, LinkedBlockingQueue}
-import scala.util.control.NonFatal
 
 /** A Vulkan runtime and one open allocation, held for as long as the caller
   * wants them, on the single thread that is allowed to touch them.
@@ -44,14 +43,34 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
             queue.take() match
               case Stop => running = false
               case Run(work, done) =>
+                // `Throwable`, not `NonFatal`. The failure this thread most
+                // has to survive is a `LinkageError` -- `UnsatisfiedLinkError`
+                // from a host with no natives, `NoClassDefFoundError` from a
+                // Cyfra class first touched inside a dispatch -- and
+                // `NonFatal` excludes every one of them by definition. An
+                // unmatched throw here unwinds the loop, kills the thread, and
+                // leaves the caller parked on `done.join()` with no timeout:
+                // a hang where the whole point was to report a nameable error.
                 try done.complete(work(runtime, allocation))
-                catch case NonFatal(e) => done.completeExceptionally(e)
+                catch case e: Throwable => done.completeExceptionally(e)
         }
       finally runtime.close()
     catch
-      // A failure before the allocation opens -- no Vulkan driver, no device --
-      // would otherwise leave every caller blocked on `ready` forever.
-      case NonFatal(e) => ready.completeExceptionally(e)
+      // Likewise, and for the reason `build.sbt` gives in so many words: a host
+      // without the LWJGL natives classifier fails here with an
+      // `UnsatisfiedLinkError`, which is a `LinkageError` and not `NonFatal`.
+      // Leaving it unmatched would leave every caller blocked on `ready`.
+      case e: Throwable => ready.completeExceptionally(e)
+    finally
+      // Belt and braces. Every path above completes one of the two, but a
+      // future edit that adds a `return`, or a `Throwable` thrown from inside
+      // a catch block, would not -- and the cost of that mistake is a hang
+      // rather than a stack trace. Completing an already-completed future is a
+      // no-op, so this is free when nothing went wrong.
+      ready.completeExceptionally(
+        new IllegalStateException("the Cyfra device thread ended before the allocation opened")
+      ): Unit
+      drainPending()
 
   private val thread = new Thread(body, "prima-cyfra-device")
   thread.setDaemon(true)
@@ -69,10 +88,34 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
     if !thread.isAlive then throw new IllegalStateException("the Cyfra device loop has been closed")
     val done = new CompletableFuture[Any]()
     queue.put(Run(body, done))
+    // Re-checked after the put, not only before it. The thread can die between
+    // the two, and a task that lands on a queue nobody is reading is a hang.
+    // Completing an already-completed future is a no-op, so the ordinary path
+    // is unaffected.
+    if !thread.isAlive then
+      done.completeExceptionally(
+        new IllegalStateException("the Cyfra device thread is no longer running")
+      ): Unit
     try done.join().asInstanceOf[A]
     catch
       case e: java.util.concurrent.CompletionException if e.getCause != null =>
         throw e.getCause
+
+  /** Fail everything still queued when the device thread is gone.
+    *
+    * A caller that had already put its task on the queue would otherwise wait
+    * on a `CompletableFuture` nobody is left to complete.
+    */
+  private def drainPending(): Unit =
+    var task = queue.poll()
+    while task != null do
+      task match
+        case Run(_, done) =>
+          done.completeExceptionally(
+            new IllegalStateException("the Cyfra device thread is no longer running")
+          ): Unit
+        case Stop => ()
+      task = queue.poll()
 
   /** Idempotent, and joins: the allocation's buffers are destroyed on the
     * device thread as it unwinds, and a caller that returned before that

@@ -42,8 +42,8 @@ optimisation.
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-753 tests pass in the aggregated build and 8 more in `prima-ortools`, which CI
-runs as a separate step, plus 48 in the opt-in Netlib module and 18 in
+755 tests pass in the aggregated build and 9 more in `prima-ortools`, which CI
+runs as a separate step, plus 48 in the opt-in Netlib module and 19 in
 `prima-cyfra`, which need hardware and a corpus no runner has.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
@@ -137,11 +137,17 @@ than the CPU.** `CyfraKernels` implements all eight operations, passes
 to — and solves whole LPs to the reference objective with `MixedPrecision`
 finishing on the host. Microseconds per iteration:
 
-| instance | CPU fp64 | CPU fp32 | GPU fp32 |
-| --- | --- | --- | --- |
-| economic-dispatch (21 variables) | 0.8 | 1.1 | **4,261** |
-| random-60x30 | 0.9 | 3.2 | **4,113** |
-| random-200x120 | 2.5 | 2.8 | **4,020** |
+| instance | CPU fp64 | CPU fp32 | GPU fp32 | GPU setup |
+| --- | --- | --- | --- | --- |
+| economic-dispatch (21 variables) | under noise | under noise | **4,176** | 8.8 ms |
+| random-60x30 | under noise | under noise | **4,187** | 8.4 ms |
+| random-200x120 | 2.4 | 3.1 | **4,039** | 24.0 ms |
+
+Each figure is a slope rather than a division: every backend runs the same solve
+under two iteration caps, so what an iteration costs is separated from what
+starting one costs instead of being averaged together with it. "Under noise"
+means both caps finished inside a tenth of a millisecond, where the difference
+is smaller than the clock.
 
 The ratio is not the point; the flatness is. Across a tenfold change in problem
 size the GPU column does not move, and neither does the cost of a single

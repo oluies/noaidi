@@ -61,6 +61,22 @@ class OrToolsSolverSuite extends munit.FunSuite:
     }
   }
 
+  test("reduced costs carry the same sign convention too") {
+    // A separate convention from the duals, read from a separate OR-Tools API
+    // (`MPVariable.reducedCost`) against Prima's `c - K'y`, and therefore just
+    // as capable of being off by a sign. It is not a detail on this fixture:
+    // `economic-dispatch` puts the line limit on a *variable bound* rather than
+    // on a row, so the congestion price its docstring advertises lives entirely
+    // in a reduced cost and nothing else here would notice it flipping.
+    val instance = LpFixtures.conclusive.find(_.name == "economic-dispatch").get
+    val theirs   = ortools.solve(instance.problem)
+    val mine     = prima.solve(instance.problem)
+    assert(theirs.reducedCosts.exists(c => math.abs(c) > 1e-6), "every reduced cost was zero")
+    theirs.reducedCosts.indices.foreach { j =>
+      assertEqualsDouble(theirs.reducedCosts(j), mine.reducedCosts(j), 1e-5, s"variable $j")
+    }
+  }
+
   test("an infeasible problem yields NaN rather than a number OR-Tools does not have") {
     val instance = LpFixtures.conclusive.find(_.expectedStatus == SolveStatus.PrimalInfeasible).get
     val solution = ortools.solve(instance.problem)

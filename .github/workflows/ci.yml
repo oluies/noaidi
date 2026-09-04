@@ -206,13 +206,23 @@ jobs:
             | awk '{ sum += $1 } END { print sum + 0 }' || true)
           total=${total:-0}
           # A floor here too, and for the same reason: `testFull` exiting 0
-          # having run nothing looks exactly like a passing suite. Low, because
-          # this is one small module rather than the whole build.
-          if [ "$total" -lt 6 ]; then
-            echo "::error::Only $total OR-Tools tests ran -- the backend's suite did not execute."
+          # having run nothing looks exactly like a passing suite.
+          #
+          # Set at the module's whole count, not at a fraction of it. The
+          # aggregate floor above can afford 3% of slack because it covers
+          # hundreds of cases across nine modules; here there are two suites,
+          # and a floor with room for one of them to vanish would let the
+          # agreement suite -- the module's entire point, and the half most
+          # exposed, since it is the only one reaching across three backends --
+          # stop reporting while the step still went green. Raise it when the
+          # suite grows.
+          MINIMUM_ORTOOLS_TESTS=9
+          if [ "$total" -lt "$MINIMUM_ORTOOLS_TESTS" ]; then
+            echo "::error::Only $total OR-Tools tests ran, below the floor of $MINIMUM_ORTOOLS_TESTS -- either the suite shrank or something stopped running."
             exit 1
           fi
-          echo "$total OR-Tools tests passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "$total OR-Tools tests passed (floor $MINIMUM_ORTOOLS_TESTS)"
+          echo "$total OR-Tools tests passed (floor $MINIMUM_ORTOOLS_TESTS)" >> "$GITHUB_STEP_SUMMARY"
 
   # The lane-count question, which no machine here can answer.
   #

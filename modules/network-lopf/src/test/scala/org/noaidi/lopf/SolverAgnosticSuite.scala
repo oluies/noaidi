@@ -2,7 +2,7 @@ package org.noaidi.lopf
 
 import org.noaidi.network.*
 import org.noaidi.prima.ojalgo.OjAlgoSolver
-import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
+import org.noaidi.prima.{PdhgParams, SolveStatus}
 
 import java.nio.file.Files
 

@@ -33,8 +33,14 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
     * Dropping the objective decides it. A feasible region that exists means the
     * original was unbounded; one that does not means it really was infeasible.
     * The cost is a second solve, paid only on a path that has already failed.
+    *
+    * '''Three answers, not two.''' A probe that returns `NOT_SOLVED` or
+    * `ABNORMAL` has not proved anything, and collapsing that into "infeasible"
+    * would publish a conclusive status on no evidence -- exactly what this
+    * method exists to stop the caller doing. `Unknown` becomes a
+    * `NumericalError`, which is what a solver that could not decide should say.
     */
-  private def feasibilityOf(problem: LpProblem): Boolean =
+  private def feasibilityOf(problem: LpProblem): OrToolsSolver.Feasibility =
     val stripped = LpProblem(
       objective = IArray.fill(problem.numVariables)(0.0),
       constraintMatrix = problem.constraintMatrix,
@@ -43,10 +49,14 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
       variableLower = problem.variableLower,
       variableUpper = problem.variableUpper,
     )
-    val probe = new OrToolsSolver(options.copy(disambiguate = false))
+    // The probe gets no time limit of its own to inherit. Sharing the caller's
+    // would let a budget already spent on the real solve decide a question of
+    // feasibility by exhaustion, and report the answer as if it were proved.
+    val probe = new OrToolsSolver(options.copy(disambiguate = false, timeLimitMillis = None))
     probe.solve(stripped).status match
-      case SolveStatus.Optimal | SolveStatus.TimeLimit => true
-      case _                                           => false
+      case SolveStatus.Optimal          => OrToolsSolver.Feasibility.Feasible
+      case SolveStatus.PrimalInfeasible => OrToolsSolver.Feasibility.Infeasible
+      case _                            => OrToolsSolver.Feasibility.Unknown
 
   def solve(problem: LpProblem): LpSolution =
     OrToolsSolver.load()
@@ -54,7 +64,16 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
 
     val solver = MPSolver.createSolver(options.backend)
     require(solver != null, s"OR-Tools has no solver named ${options.backend}")
+    // `createSolver` returns a SWIG proxy over a native model. Left to GC it is
+    // reclaimed only when the JVM feels heap pressure, which a few hundred
+    // bytes of proxy never generates -- so a scenario sweep or a
+    // branch-and-bound loop would accumulate native models indefinitely.
+    // `OjAlgoSolver` has no such obligation, so the pattern is not transferable
+    // from the sibling backend.
+    try solveWith(problem, solver, started)
+    finally solver.delete()
 
+  private def solveWith(problem: LpProblem, solver: MPSolver, started: Long): LpSolution =
     val variables: Array[MPVariable] = Array.tabulate(problem.numVariables) { i =>
       // OR-Tools takes infinities directly, and its own infinity is the one to
       // hand it: `MPSolver.infinity()` is not required to be `Double.Infinity`
@@ -94,7 +113,10 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
     val status =
       OrToolsSolver.mapStatus(
         resultStatus,
-        () => options.disambiguate && feasibilityOf(problem),
+        () =>
+          if options.disambiguate then feasibilityOf(problem)
+          else OrToolsSolver.Feasibility.Infeasible,
+        options.timeLimitMillis.isDefined,
       )
 
     val primal = Array.tabulate(problem.numVariables)(j => variables(j).solutionValue())
@@ -175,14 +197,31 @@ object OrToolsSolver:
       loaded = true
   }
 
-  private def mapStatus(status: MPSolver.ResultStatus, feasible: () => Boolean): SolveStatus = status match
-    case MPSolver.ResultStatus.OPTIMAL     => SolveStatus.Optimal
-    case MPSolver.ResultStatus.INFEASIBLE  =>
-      if feasible() then SolveStatus.DualInfeasible else SolveStatus.PrimalInfeasible
-    case MPSolver.ResultStatus.UNBOUNDED   => SolveStatus.DualInfeasible
+  /** What a probe solve established, which is not always one of two things. */
+  private[ortools] enum Feasibility:
+    case Feasible, Infeasible, Unknown
+
+  private def mapStatus(
+      status: MPSolver.ResultStatus,
+      feasible: () => Feasibility,
+      timeLimited: Boolean,
+  ): SolveStatus = status match
+    case MPSolver.ResultStatus.OPTIMAL    => SolveStatus.Optimal
+    case MPSolver.ResultStatus.INFEASIBLE =>
+      feasible() match
+        case Feasibility.Feasible   => SolveStatus.DualInfeasible
+        case Feasibility.Infeasible => SolveStatus.PrimalInfeasible
+        case Feasibility.Unknown    => SolveStatus.NumericalError
+    case MPSolver.ResultStatus.UNBOUNDED => SolveStatus.DualInfeasible
     // `FEASIBLE` means the solver stopped with a point it has not proved
     // optimal, which is what a time limit looks like from here.
-    case MPSolver.ResultStatus.FEASIBLE    => SolveStatus.TimeLimit
-    case MPSolver.ResultStatus.ABNORMAL    => SolveStatus.NumericalError
-    case MPSolver.ResultStatus.NOT_SOLVED  => SolveStatus.Interrupted
-    case other                             => SolveStatus.NumericalError
+    case MPSolver.ResultStatus.FEASIBLE => SolveStatus.TimeLimit
+    case MPSolver.ResultStatus.ABNORMAL => SolveStatus.NumericalError
+    // Not `Interrupted`, whose own definition is "the caller asked the solve to
+    // stop before it reached any conclusion". Nothing here supports caller
+    // interruption, and a time-limited GLOP abort with no feasible point is the
+    // likely producer -- so a solve that ran out of budget would be reported as
+    // a cancellation nobody requested.
+    case MPSolver.ResultStatus.NOT_SOLVED =>
+      if timeLimited then SolveStatus.TimeLimit else SolveStatus.NumericalError
+    case _ => SolveStatus.NumericalError

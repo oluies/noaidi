@@ -157,6 +157,16 @@ CASES = [
         [],
         "the MILP table",
     ),
+    Case(
+        "ci.yml",
+        r"grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total'",
+        [MUNIT_SUMMARY_CI, MUNIT_SUMMARY_PLAIN],
+        [],
+        "the test-count guard, at both call sites: this is how the aggregate step and the "
+        "OR-Tools step establish that tests ran at all, and if sbt's summary format moves "
+        "they both silently count zero and both floors fail with a message about the suite "
+        "shrinking",
+    ),
 ]
 
 

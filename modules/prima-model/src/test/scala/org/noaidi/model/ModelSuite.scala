@@ -117,6 +117,55 @@ class ModelSuite extends munit.FunSuite:
     assertEqualsDouble(answer.objectiveValue, 106.0, 1e-6)
   }
 
+  test("a reduced cost is reported, and flips with the objective's direction") {
+    // The reduced cost of a variable pinned at a bound is the rate at which the
+    // objective would change if the bound moved -- and `Solution.reducedCost`
+    // applies the same sign flip to it that `objectiveValue` and `dual` get, so
+    // a maximisation has to report it in the maximisation's own terms. Nothing
+    // else in this suite touches that path.
+    val min = Model("min")
+    val x   = min.variable("x", 0.0, 4.0)
+    min.subjectTo("floor", x >= 0.0)
+    min.minimise(x * -3.0)
+    val minimised = min.solve(prima)
+    assertEqualsDouble(minimised(x), 4.0, 1e-6)
+    // Minimising -3x drives x to its upper bound; relaxing that bound by one
+    // would buy another -3 of objective.
+    assertEqualsDouble(minimised.reducedCost(x), -3.0, 1e-6)
+
+    val max = Model("max")
+    val y   = max.variable("y", 0.0, 4.0)
+    max.subjectTo("floor", y >= 0.0)
+    max.maximise(y * 3.0)
+    val maximised = max.solve(prima)
+    assertEqualsDouble(maximised(y), 4.0, 1e-6)
+    // The same problem written the other way round: one more unit of headroom
+    // is worth +3 to a model that is maximising.
+    assertEqualsDouble(maximised.reducedCost(y), 3.0, 1e-6)
+  }
+
+  test("a handle made after the model was compiled is refused, not indexed") {
+    // `Model`'s own scaladoc invites this: the compiled form is a snapshot, so
+    // a model may keep growing after a solution has been taken from it. A
+    // variable created afterwards belongs to the same model and passes the
+    // ownership check, so without a bound check it would read past the end of
+    // the snapshot.
+    val m      = Model("growing")
+    val x      = m.variable("x", 1.0, 4.0)
+    val row    = m.subjectTo("floor", x >= 1.0)
+    m.minimise(x)
+    val answer = m.solve(prima)
+
+    val later    = m.variable("later", 0.0, 1.0)
+    val laterRow = m.subjectTo("later-row", later <= 1.0)
+
+    assertEqualsDouble(answer(x), 1.0, 1e-6)
+    assert(answer.dual(row).isFinite)
+    intercept[IllegalArgumentException](answer(later))
+    intercept[IllegalArgumentException](answer.reducedCost(later))
+    intercept[IllegalArgumentException](answer.dual(laterRow))
+  }
+
   test("a variable from another model is refused") {
     val one = Model("one")
     val two = Model("two")

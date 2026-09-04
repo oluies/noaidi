@@ -2416,13 +2416,29 @@ Two pieces of plumbing the spike did not need:
   itself for the same reason.
 
 **And it is three orders of magnitude slower than the CPU.** Microseconds per
-iteration, fp32 in both cases:
+iteration, fp32 in both cases, with the cost of starting the solve separated
+out:
 
-| instance | CPU fp64 | CPU fp32 | GPU fp32 |
-| --- | --- | --- | --- |
-| economic-dispatch (21v) | 0.8 | 1.1 | **4,261** |
-| random-60x30 | 0.9 | 3.2 | **4,113** |
-| random-200x120 | 2.5 | 2.8 | **4,020** |
+| instance | CPU fp64 | CPU fp32 | GPU fp32 | GPU setup |
+| --- | --- | --- | --- | --- |
+| economic-dispatch (21v) | under noise | under noise | **4,176** | 8.8 ms |
+| random-60x30 | under noise | under noise | **4,187** | 8.4 ms |
+| random-200x120 | 2.4 | 3.1 | **4,039** | 24.0 ms |
+
+Each figure is a slope, not a division. A single timed solve cannot separate
+what an iteration costs from what starting one costs, and on the GPU the second
+is a Vulkan instance, a logical device, the SPIR-V compilation of every program
+and the first touch of every buffer. So each backend runs the same solve under
+two iteration caps and the slope between the two points is what an iteration
+costs — the intercept, reported alongside, is what it cost to get to the first.
+The first version of this measurement divided the whole solve by its iteration
+count, which reports a fixed cost as a per-iteration one; it happened to give
+much the same answer, but only because the setup is small next to a two-second
+solve, which is not something it demonstrated.
+
+Where the CPU says "under noise", both caps ran in under a tenth of a
+millisecond and the difference is smaller than the clock's resolution. That is
+the honest entry: a slope taken there comes out negative.
 
 The number to look at is not the ratio, it is that the GPU column barely moves
 across a tenfold change in problem size. A cost that does not scale with the
@@ -2448,6 +2464,16 @@ Three findings behind those numbers, in the order they matter:
   cost. The DSL body cannot read a dispatch parameter, and the one escape from
   that, a uniform built from `Params`, handles `Int32` and nothing else on this
   release.
+- **A program cannot be re-dispatched after its earlier dispatches are cleaned
+  up.** `economic-dispatch` solved twice on one `CyfraKernels` gave the right
+  answer and then `NumericalError` at iteration two, with the primal still at
+  the origin — silently, not as a failure. A second solve of a *different* shape
+  was always fine, which is what pointed at the program cache: that path builds
+  new programs. `uploadMatrix` now rebuilds them, which costs SPIR-V compilation
+  once per solve. This is not a benchmark artifact:
+  `BranchAndBound.solveWith` deliberately holds one set of kernels for a whole
+  search and solves a relaxation per node, so every node after the first would
+  have been wrong.
 - **Batching the submissions changes nothing.** The interface invites the
   opposite conclusion — `Kernels` describes reductions as "the only
   synchronisation points on an asynchronous device", which reads as an

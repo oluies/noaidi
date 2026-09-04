@@ -142,21 +142,38 @@ jobs:
         run: |
           set -euo pipefail
           sbt --batch "Test/compile; testFull" 2>&1 | tee sbt-test.log
-          # `|| true` matters: when grep matches nothing -- which is precisely
-          # the case being guarded against -- it exits 1, and under `pipefail`
-          # plus `set -e` that would abort the step here, before the explicit
-          # check below could report why.
-          # Summed from munit's per-suite lines, not from sbt's per-project
-          # `Passed: Total`. The aggregate undercounts when sbt's action cache is
-          # warm -- observed locally at 628 against a true 733, with `prima-core`
-          # reporting 76 where its suites total 181 -- and this job exists to
-          # notice tests *not* running, so a counter that silently loses a third
-          # of them is the wrong instrument. The per-suite lines come from the
-          # test framework and are one per suite that actually reported.
-          total=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-test.log \
+          # `|| true` matters on every grep below: when one matches nothing --
+          # which is precisely the case being guarded against -- it exits 1, and
+          # under `pipefail` plus `set -e` that would abort the step here, before
+          # the explicit check could report why.
+          #
+          # Two counters, and the larger wins, because each is blind in a
+          # different direction and sbt's action cache is what blinds them.
+          #
+          #   per-suite  munit's own `finished:` lines, one per suite that
+          #              actually reported. Accurate when the tests run, and
+          #              *absent entirely* when sbt replays a cached test action
+          #              -- which is not hypothetical: `primaOrtools/testFull`
+          #              did exactly that on JDK 25, printing `Passed: Total 10`
+          #              with no framework lines at all, and this guard read it
+          #              as zero and failed a job whose tests had all passed.
+          #   summary    sbt's own `Passed: Total`. Survives a replay, and
+          #              undercounts when the cache is warm -- 613 against a
+          #              true 755 locally, with whole modules reporting short.
+          #
+          # Neither alone is a liveness signal. The maximum is: it is wrong only
+          # when both are, which is the case the floor exists for.
+          suites=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-test.log \
             | grep -oE '[0-9]+ total' \
             | grep -oE '^[0-9]+' \
             | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          summary=$(grep -oE 'Passed: Total [0-9]+' sbt-test.log \
+            | grep -oE '[0-9]+$' \
+            | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          suites=${suites:-0}
+          summary=${summary:-0}
+          if [ "${suites}" -ge "${summary}" ]; then total=$suites; else total=$summary; fi
+          echo "test count: $suites from per-suite lines, $summary from sbt's summary"
           total=${total:-0}
           echo "Total tests run across all modules: $total"
           # A floor, not a bare "more than zero". `-lt 1` catches sbt reporting
@@ -200,10 +217,20 @@ jobs:
         run: |
           set -euo pipefail
           sbt --batch "primaOrtools/testFull" 2>&1 | tee sbt-ortools.log
-          total=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-ortools.log \
+          # Both counters, larger wins. See the aggregate step above for why:
+          # this is the step that found it, by failing on JDK 25 with all ten
+          # tests passed and no per-suite lines in the log.
+          suites=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-ortools.log \
             | grep -oE '[0-9]+ total' \
             | grep -oE '^[0-9]+' \
             | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          summary=$(grep -oE 'Passed: Total [0-9]+' sbt-ortools.log \
+            | grep -oE '[0-9]+$' \
+            | awk '{ sum += $1 } END { print sum + 0 }' || true)
+          suites=${suites:-0}
+          summary=${summary:-0}
+          if [ "${suites}" -ge "${summary}" ]; then total=$suites; else total=$summary; fi
+          echo "OR-Tools test count: $suites from per-suite lines, $summary from sbt's summary"
           total=${total:-0}
           # A floor here too, and for the same reason: `testFull` exiting 0
           # having run nothing looks exactly like a passing suite.

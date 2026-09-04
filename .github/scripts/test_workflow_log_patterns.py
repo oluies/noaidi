@@ -96,6 +96,16 @@ MUNIT_FAILURE_PLAIN = (
 )
 MUNIT_FAILURE_VARIANTS = _with_escapes(MUNIT_FAILURE_PLAIN)
 
+# sbt's own per-project total, as opposed to the framework's per-suite lines
+# above. Coloured the same way, and load-bearing for a different reason: it is
+# the only counter that survives sbt 2's action cache replaying a whole test
+# task, where the framework never runs and emits nothing.
+SBT_SUMMARY_PLAIN = "[info] Passed: Total 10, Failed 0, Errors 0, Passed 10"
+SBT_SUMMARY_CI = (
+    "\x1b[0J\x1b[0m[\x1b[0m\x1b[0minfo\x1b[0m] \x1b[0m\x1b[0mPassed: Total 10, "
+    "Failed 0, Errors 0, Passed 10\x1b[0m\x1b[0J"
+)
+
 # Printed by the report program itself via `println`. sbt passes a program's
 # stdout through untouched, which is why `^` is safe on these and not on the
 # framework's own lines above. Captured locally; the workflow keeps its `|| cat`
@@ -174,6 +184,24 @@ CASES = [
         [],
         "the second stage of the same pipeline; it reads the first stage's output, which is "
         "why the summary line serves as the sample for both",
+    ),
+    Case(
+        "ci.yml",
+        r"grep -oE 'Passed: Total [0-9]+'",
+        [SBT_SUMMARY_CI, SBT_SUMMARY_PLAIN],
+        [],
+        "the second counter. sbt's own total survives an action-cache replay, which the "
+        "per-suite lines do not -- `primaOrtools/testFull` replayed on JDK 25 and printed "
+        "this line with no framework output at all, and the guard read that as zero tests. "
+        "It is the fallback, so it has to keep matching for the fallback to exist",
+    ),
+    Case(
+        "ci.yml",
+        r"grep -oE '[0-9]+$'",
+        ["Passed: Total 10"],
+        [],
+        "the second counter's second stage; `$`-anchored against the previous stage's output, "
+        "which is a single `Passed: Total N`",
     ),
     Case(
         "ci.yml",

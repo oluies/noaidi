@@ -167,6 +167,24 @@ CASES = [
         "they both silently count zero and both floors fail with a message about the suite "
         "shrinking",
     ),
+    Case(
+        "ci.yml",
+        r"grep -oE '[0-9]+ total'",
+        [MUNIT_SUMMARY_CI, MUNIT_SUMMARY_PLAIN],
+        [],
+        "the second stage of the same pipeline; it reads the first stage's output, which is "
+        "why the summary line serves as the sample for both",
+    ),
+    Case(
+        "ci.yml",
+        r"grep -oE '^[0-9]+'",
+        ["9 total"],
+        [],
+        "the third stage, and the one worth pinning: it is `^`-anchored, which is the exact "
+        "shape that produced the pypsa-drift outage this file exists for. It is safe only "
+        "because it reads the previous stage's output rather than sbt's, and that is a "
+        "property of the pipeline someone could break by reordering it",
+    ),
 ]
 
 

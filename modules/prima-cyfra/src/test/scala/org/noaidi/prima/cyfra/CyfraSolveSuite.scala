@@ -74,6 +74,44 @@ class CyfraSolveSuite extends munit.FunSuite:
     finally k.close()
   }
 
+  test("a backend holds up over many solves, and does not slow down") {
+    // Rebuilding the programs at every `uploadMatrix` raises the obvious
+    // objection: does a long run of solves accumulate compiled programs on the
+    // device? It does not, and the reason is that `VkCyfraRuntime` caches
+    // shaders on `SpirvProgram.shaderHash` -- a digest of the SPIR-V, the entry
+    // point, the workgroup size and the binding tags -- so an identically
+    // rebuilt program resolves to the same `ComputePipeline`.
+    //
+    // That is a claim about a pinned release's internals, so it is measured
+    // rather than cited: twelve consecutive solves, every answer checked, and
+    // the last four timed against the first four. A per-solve pipeline build
+    // would show up here as drift.
+    //
+    // What does accumulate is buffers, because `Kernels` has no deallocation.
+    // That is in the scaladoc and is not what this pins.
+    val problem = LpFixtures.conclusive.find(_.name == "economic-dispatch").get.problem
+    val p = params.copy(epsAbs = 1e-5, epsRel = 1e-5, maxIterations = 20_000, infeasibilityTolerance = 1e-5)
+
+    val k = CyfraKernels()
+    try
+      val timings = (1 to 12).map { _ =>
+        val started  = System.nanoTime()
+        val solution = Pdhg.solveWith(problem, p, k)
+        assertEquals(solution.status, SolveStatus.Optimal)
+        assertEqualsDouble(solution.objectiveValue, 3700.0, 1e-2)
+        (System.nanoTime() - started) / 1000000.0
+      }
+      // The first solve pays JVM and driver warm-up, so the comparison starts
+      // after it.
+      val early = timings.slice(1, 5).sum / 4.0
+      val late  = timings.takeRight(4).sum / 4.0
+      assert(
+        late < 2.0 * early,
+        f"solves drifted from ${early}%.0f ms to ${late}%.0f ms, so something is accumulating per solve",
+      )
+    finally k.close()
+  }
+
   test("where the time goes, against the CPU running the same arithmetic") {
     // Two points per backend rather than one, because a single timed solve
     // cannot separate what an iteration costs from what starting the solve
@@ -97,20 +135,31 @@ class CyfraSolveSuite extends munit.FunSuite:
       val reducedParams =
         params.copy(epsAbs = 1e-5, epsRel = 1e-5, maxIterations = 20_000, infeasibilityTolerance = 1e-5)
 
-      def measure(label: String, backend: () => Kernels, solveParams: PdhgParams): Unit =
+      // How many times to run each point before taking the difference.
+      //
+      // A slope is a difference of two timings, and on the 21-variable fixture
+      // the CPU runs both caps in well under a millisecond, where the
+      // difference is smaller than the clock. Raising the caps does not help:
+      // both would then sit past the iteration where the solve converges, and
+      // the two points would coincide. Repeating does, and it costs nothing on
+      // a backend that is already microseconds -- which is exactly the backend
+      // that needs it.
+      def measure(label: String, backend: () => Kernels, solveParams: PdhgParams, repeats: Int): Unit =
         def run(cap: Int): (Int, Double) =
-          val k = backend()
-          try
-            val started  = System.nanoTime()
-            val solution = Pdhg.solveWith(problem, solveParams.copy(maxIterations = cap), k)
-            (solution.iterations, (System.nanoTime() - started) / 1000.0)
-          finally k.close()
+          var iterations = 0
+          val started    = System.nanoTime()
+          (0 until repeats).foreach { _ =>
+            val k = backend()
+            try iterations = Pdhg.solveWith(problem, solveParams.copy(maxIterations = cap), k).iterations
+            finally k.close()
+          }
+          (iterations, (System.nanoTime() - started) / 1000.0 / repeats)
 
         // One discarded pair first: on the CPU the JIT warm-up is
         // process-global and would otherwise land entirely in the short run,
         // making the slope negative.
-        run(short)
-        run(long)
+        run(short): Unit
+        run(long): Unit
 
         val (shortIters, shortMicros) = run(short)
         val (longIters, longMicros)   = run(long)
@@ -125,14 +174,21 @@ class CyfraSolveSuite extends munit.FunSuite:
         // 21-variable fixture the CPU runs both caps in under a tenth of a
         // millisecond and the slope comes out negative. Saying so is better
         // than printing a number that cannot be true.
-        val reliable = longMicros - shortMicros > 500.0
+        val reliable = (longMicros - shortMicros) * repeats > 500.0
         val slopeText = if reliable then f"${perIteration}%9.1f" else f"${"under noise"}%9s"
-        val setupText = if reliable then f"${setup / 1000.0}%10.1f" else f"${"-"}%10s"
+        // The intercept is an extrapolation back from two points, so it can
+        // come out below zero when the setup is smaller than the run-to-run
+        // spread. Printing a negative fixed cost would be worse than saying
+        // that is what happened.
+        val setupText =
+          if !reliable then f"${"-"}%10s"
+          else if setup < 0.0 then f"${"~0"}%10s"
+          else f"${setup / 1000.0}%10.1f"
         println(f"$name%-20s $label%-10s $slopeText $setupText ${longMicros / 1000.0}%8.1f")
 
-      measure("cpu fp64", () => ScalaKernels(), params)
-      measure("cpu fp32", () => Float32Kernels(), reducedParams)
-      measure("gpu fp32", () => CyfraKernels(), reducedParams)
+      measure("cpu fp64", () => ScalaKernels(), params, repeats = 200)
+      measure("cpu fp32", () => Float32Kernels(), reducedParams, repeats = 200)
+      measure("gpu fp32", () => CyfraKernels(), reducedParams, repeats = 1)
     }
   }
 
@@ -181,7 +237,7 @@ class CyfraSolveSuite extends munit.FunSuite:
           f"n=$n%6d  copy ${copyMicros}%6.1f us   axpby ${axpbyMicros}%6.1f us   " +
             f"squaredNorm ${normMicros}%6.1f us"
         )
-        flatness += (n -> copyMicros)
+        flatness.update(n, copyMicros)
       finally k.close()
     }
 

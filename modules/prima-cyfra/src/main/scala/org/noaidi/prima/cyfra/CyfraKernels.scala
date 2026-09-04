@@ -28,6 +28,13 @@ import scala.collection.mutable
   * contract suite holds this backend to single precision and not to the
   * reference's.
   *
+  * '''One backend accumulates.''' [[Kernels]] has no deallocation -- a vector
+  * is freed when the backend is closed and not before -- so a `CyfraKernels`
+  * driven through many solves holds every solve's buffers until `close()`.
+  * That is a property of the interface rather than of this backend, and it
+  * bounds how one should be used: cycle it rather than holding a single
+  * instance across an arbitrarily long run of solves.
+  *
   * '''Work is recorded, not run, until a number is needed.''' Cyfra's `execute`
   * records a command buffer and registers it as pending; `submitLayout` is what
   * puts it on the queue. Nothing here forces a submission except `download` and
@@ -121,6 +128,11 @@ final class CyfraKernels extends Kernels:
   private def setScalars(first: Double, second: Double = 0.0)(using Allocation): Unit =
     scalarHost(0) = first.toFloat
     scalarHost(1) = second.toFloat
+    // No `clear()` here, and not by omission: `GCodec.toByteBuffer` opens with
+    // `inBuf.clear()` and closes with `position(...).flip()`, so it both resets
+    // the buffer it is handed and leaves it at position zero with the right
+    // limit. A second `clear()` would read as though the reuse were unsafe
+    // without one.
     io.computenode.cyfra.core.GCodec.toByteBuffer[Float32, Float](scalarBytes, scalarHost)
     // Written through `write` rather than `writeArray`: on this release
     // `writeArray` copies the byte buffer to the device *before* filling it
@@ -187,15 +199,28 @@ final class CyfraKernels extends Kernels:
       // A new matrix means a new solve, and a program built for the last one
       // may not be dispatched again here.
       //
-      // This is a correctness fix and not an optimisation. A cached `GProgram`
-      // re-dispatched against buffers allocated after its earlier dispatches
-      // were cleaned up returns wrong answers rather than failing:
-      // `economic-dispatch` solved twice on one backend gave the right answer
-      // and then `NumericalError` at iteration two, with the primal still at
-      // the origin. A second solve of a *different* shape was always fine,
-      // which is what points at the cache -- that path builds new programs.
-      // Rebuilding them costs SPIR-V compilation once per solve, which is the
-      // per-solve cost the spike measured and called tolerable.
+      // This is a correctness fix and not an optimisation. `economic-dispatch`
+      // solved twice on one backend gave the right answer and then
+      // `NumericalError` at iteration two, with the primal still at the origin
+      // -- silently, not as a failure. A second solve of a *different* shape
+      // was always fine, which is what points at the cache: that path builds
+      // new programs.
+      //
+      // What that establishes is the trigger, not the mechanism. Solve
+      // boundaries are where it was reproduced and where it is guarded. It is
+      // not "a program dispatched against buffers allocated after its earlier
+      // dispatches were cleaned up", which was the first guess and is
+      // contradicted from inside a single solve: `partialsFor` allocates on the
+      // first reduction, after every elementwise program has been built and
+      // dispatched, and that path is correct. NOTES records the open question.
+      //
+      // Rebuilding is cheaper than it sounds. `VkCyfraRuntime` caches shaders
+      // on `SpirvProgram.shaderHash` -- a digest of the SPIR-V, the entry
+      // point, the workgroup size and the binding tags -- so an identically
+      // rebuilt program resolves to the same `ComputePipeline` and no pipeline
+      // is built twice. Forty consecutive solves on one backend hold at ~700 ms
+      // each with no drift, which is what that predicts and what a recompile
+      // per solve would not.
       //
       // It matters beyond a benchmark: `BranchAndBound.solveWith` deliberately
       // holds one set of kernels for a whole search and solves a relaxation per

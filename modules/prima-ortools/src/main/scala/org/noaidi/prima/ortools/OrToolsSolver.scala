@@ -54,9 +54,14 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
     // feasibility by exhaustion, and report the answer as if it were proved.
     val probe = new OrToolsSolver(options.copy(disambiguate = false, timeLimitMillis = None))
     probe.solve(stripped).status match
-      case SolveStatus.Optimal          => OrToolsSolver.Feasibility.Feasible
-      case SolveStatus.PrimalInfeasible => OrToolsSolver.Feasibility.Infeasible
-      case _                            => OrToolsSolver.Feasibility.Unknown
+      // `TimeLimit` is proof, not an inconclusive answer. On this backend it
+      // comes from exactly one place -- `MPSolver.ResultStatus.FEASIBLE`, which
+      // means GLOP is holding a feasible point -- because the probe carries no
+      // time limit, so the other producer of `TimeLimit` cannot fire here.
+      // A feasible point is the whole question this probe asks.
+      case SolveStatus.Optimal | SolveStatus.TimeLimit => OrToolsSolver.Feasibility.Feasible
+      case SolveStatus.PrimalInfeasible                => OrToolsSolver.Feasibility.Infeasible
+      case _                                           => OrToolsSolver.Feasibility.Unknown
 
   def solve(problem: LpProblem): LpSolution =
     OrToolsSolver.load()
@@ -116,7 +121,12 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
         () =>
           if options.disambiguate then feasibilityOf(problem)
           else OrToolsSolver.Feasibility.Infeasible,
-        options.timeLimitMillis.isDefined,
+        // Whether the limit was *reached*, not whether one was configured. A
+        // `NOT_SOLVED` from any other cause -- a model the backend rejects, an
+        // immediate abort -- would otherwise be reported as a time limit
+        // whenever one merely happened to be set, which is the same
+        // conclusive-sounding status on no evidence this method exists to stop.
+        options.timeLimitMillis.exists(elapsed >= _),
       )
 
     val primal = Array.tabulate(problem.numVariables)(j => variables(j).solutionValue())
@@ -201,10 +211,16 @@ object OrToolsSolver:
   private[ortools] enum Feasibility:
     case Feasible, Infeasible, Unknown
 
-  private def mapStatus(
+  /** The whole status table, visible to a test.
+    *
+    * `private[ortools]` rather than `private`: no fixture drives GLOP to
+    * `ABNORMAL`, `NOT_SOLVED` or `FEASIBLE`, so the only way to hold this
+    * mapping to anything is to call it.
+    */
+  private[ortools] def mapStatus(
       status: MPSolver.ResultStatus,
       feasible: () => Feasibility,
-      timeLimited: Boolean,
+      timeLimitReached: Boolean,
   ): SolveStatus = status match
     case MPSolver.ResultStatus.OPTIMAL    => SolveStatus.Optimal
     case MPSolver.ResultStatus.INFEASIBLE =>
@@ -223,5 +239,5 @@ object OrToolsSolver:
     // likely producer -- so a solve that ran out of budget would be reported as
     // a cancellation nobody requested.
     case MPSolver.ResultStatus.NOT_SOLVED =>
-      if timeLimited then SolveStatus.TimeLimit else SolveStatus.NumericalError
+      if timeLimitReached then SolveStatus.TimeLimit else SolveStatus.NumericalError
     case _ => SolveStatus.NumericalError

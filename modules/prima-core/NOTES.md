@@ -2421,9 +2421,9 @@ out:
 
 | instance | CPU fp64 | CPU fp32 | GPU fp32 | GPU setup |
 | --- | --- | --- | --- | --- |
-| economic-dispatch (21v) | under noise | under noise | **4,176** | 8.8 ms |
-| random-60x30 | under noise | under noise | **4,187** | 8.4 ms |
-| random-200x120 | 2.4 | 3.1 | **4,039** | 24.0 ms |
+| economic-dispatch (21v) | 0.2 | 0.3 | **4,082** | ~0 |
+| random-60x30 | 0.6 | 0.8 | **3,787** | 22 ms |
+| random-200x120 | 2.2 | 4.3 | **3,679** | 41 ms |
 
 Each figure is a slope, not a division. A single timed solve cannot separate
 what an iteration costs from what starting one costs, and on the GPU the second
@@ -2436,9 +2436,16 @@ count, which reports a fixed cost as a per-iteration one; it happened to give
 much the same answer, but only because the setup is small next to a two-second
 solve, which is not something it demonstrated.
 
-Where the CPU says "under noise", both caps ran in under a tenth of a
-millisecond and the difference is smaller than the clock's resolution. That is
-the honest entry: a slope taken there comes out negative.
+Two details of the method. Raising the caps until the CPU's difference clears
+the clock does not work — both would then sit past the iteration where the solve
+converges, and the two points would coincide — so the cheap backends run each
+point two hundred times instead, which costs nothing on a backend that is
+already microseconds. And the intercept is an extrapolation back from two
+points, so where it comes out below zero the setup is simply smaller than the
+run-to-run spread; `~0` says that rather than printing a negative fixed cost.
+
+The GPU column moves by about ten per cent between runs, so read it as "about
+four milliseconds" rather than as four significant figures.
 
 The number to look at is not the ratio, it is that the GPU column barely moves
 across a tenfold change in problem size. A cost that does not scale with the
@@ -2464,16 +2471,34 @@ Three findings behind those numbers, in the order they matter:
   cost. The DSL body cannot read a dispatch parameter, and the one escape from
   that, a uniform built from `Params`, handles `Int32` and nothing else on this
   release.
-- **A program cannot be re-dispatched after its earlier dispatches are cleaned
-  up.** `economic-dispatch` solved twice on one `CyfraKernels` gave the right
-  answer and then `NumericalError` at iteration two, with the primal still at
-  the origin — silently, not as a failure. A second solve of a *different* shape
-  was always fine, which is what pointed at the program cache: that path builds
-  new programs. `uploadMatrix` now rebuilds them, which costs SPIR-V compilation
-  once per solve. This is not a benchmark artifact:
-  `BranchAndBound.solveWith` deliberately holds one set of kernels for a whole
-  search and solves a relaxation per node, so every node after the first would
-  have been wrong.
+- **A cached program cannot be re-dispatched across a solve boundary, and why
+  is not settled.** `economic-dispatch` solved twice on one `CyfraKernels` gave
+  the right answer and then `NumericalError` at iteration two, with the primal
+  still at the origin — silently, not as a failure. A second solve of a
+  *different* shape was always fine, which is what pointed at the program cache:
+  that path builds new programs. `uploadMatrix` rebuilds them now.
+
+  What that establishes is the trigger and not the mechanism. The first guess —
+  "a program dispatched against buffers allocated after its earlier dispatches
+  were cleaned up" — is contradicted from inside a single solve, where
+  `partialsFor` allocates its buffer on the first reduction, after every
+  elementwise program has been built and dispatched, and that path is correct.
+  So the guard covers the boundary the failure was reproduced at, and the
+  narrower condition is open.
+
+  Rebuilding costs less than it sounds: `VkCyfraRuntime` caches shaders on
+  `SpirvProgram.shaderHash`, a digest of the SPIR-V, the entry point, the
+  workgroup size and the binding tags, so an identically rebuilt program
+  resolves to the same `ComputePipeline`. Twelve consecutive solves hold at the
+  same time each, which is what that predicts and what a pipeline build per
+  solve would not — and the suite asserts it rather than citing it.
+
+  None of this is a benchmark artifact: `BranchAndBound.solveWith` deliberately
+  holds one set of kernels for a whole search and solves a relaxation per node,
+  so every node after the first would have been wrong. What a long run *does*
+  accumulate is buffers, because `Kernels` has no deallocation — a property of
+  the interface, recorded in `CyfraKernels`'s own scaladoc, and the reason to
+  cycle a backend rather than hold one indefinitely.
 - **Batching the submissions changes nothing.** The interface invites the
   opposite conclusion — `Kernels` describes reductions as "the only
   synchronisation points on an asynchronous device", which reads as an

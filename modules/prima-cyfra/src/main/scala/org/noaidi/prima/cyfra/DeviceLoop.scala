@@ -32,6 +32,16 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
   private val queue = new LinkedBlockingQueue[Task]()
   private val ready = new CompletableFuture[Unit]()
 
+  /** Set before the queue is drained, and the only honest liveness answer.
+    *
+    * `Thread.isAlive` is not one: the drain is the last thing the thread does,
+    * so the thread is alive throughout it and for the interval between its
+    * return and actual termination. A `submit` whose `put` lands in that window
+    * sees `isAlive` twice and is never drained by anyone -- the hang the
+    * re-check was written to remove.
+    */
+  @volatile private var dead = false
+
   private val body: Runnable = () =>
     try
       val runtime = VkCyfraRuntime()
@@ -70,6 +80,10 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
       ready.completeExceptionally(
         new IllegalStateException("the Cyfra device thread ended before the allocation opened")
       ): Unit
+      // Ordered: anything put after this is seen by `submit`'s own check, and
+      // anything put before it is on the queue for the drain. There is no
+      // interval where a task is neither.
+      dead = true
       drainPending()
 
   private val thread = new Thread(body, "prima-cyfra-device")
@@ -85,14 +99,14 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
     * that is where the latency that matters is hidden or not.
     */
   def submit[A](body: (VkCyfraRuntime, Allocation) => A): A =
-    if !thread.isAlive then throw new IllegalStateException("the Cyfra device loop has been closed")
+    if dead then throw new IllegalStateException("the Cyfra device loop has been closed")
     val done = new CompletableFuture[Any]()
     queue.put(Run(body, done))
-    // Re-checked after the put, not only before it. The thread can die between
-    // the two, and a task that lands on a queue nobody is reading is a hang.
-    // Completing an already-completed future is a no-op, so the ordinary path
-    // is unaffected.
-    if !thread.isAlive then
+    // Re-checked after the put, not only before it, and against `dead` rather
+    // than against the thread: a task that lands on a queue nobody will read
+    // again has to be failed by whoever put it there, because the drain has
+    // already run.
+    if dead then
       done.completeExceptionally(
         new IllegalStateException("the Cyfra device thread is no longer running")
       ): Unit
@@ -123,7 +137,7 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
     * holding the first one's memory.
     */
   def close(): Unit =
-    if thread.isAlive then
+    if !dead && thread.isAlive then
       queue.put(Stop)
       thread.join()
 

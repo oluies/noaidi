@@ -83,3 +83,38 @@ class OrToolsSolverSuite extends munit.FunSuite:
     assertEquals(solution.status, SolveStatus.PrimalInfeasible)
     assert(solution.dual.forall(_.isNaN), "duals should be NaN where no solution exists")
   }
+
+  test("the status table, including the cases no fixture reaches") {
+    // GLOP does not produce `ABNORMAL`, `NOT_SOLVED` or `FEASIBLE` on any
+    // fixture here, so calling `mapStatus` is the only way to hold the mapping
+    // to anything -- and this is the part of the backend that has already been
+    // wrong twice, in both directions: an unbounded problem reported as
+    // infeasible, then a probe that had a feasible point in hand reporting that
+    // it had established nothing.
+    import com.google.ortools.linearsolver.MPSolver.ResultStatus
+    import OrToolsSolver.Feasibility
+
+    def mapped(status: ResultStatus, feasible: Feasibility = Feasibility.Unknown, reached: Boolean = false) =
+      OrToolsSolver.mapStatus(status, () => feasible, reached)
+
+    assertEquals(mapped(ResultStatus.OPTIMAL), SolveStatus.Optimal)
+    assertEquals(mapped(ResultStatus.UNBOUNDED), SolveStatus.DualInfeasible)
+
+    // The three ways an `INFEASIBLE` is resolved. Only two of them are
+    // conclusive, which is the whole point of the probe returning three
+    // answers rather than a boolean.
+    assertEquals(mapped(ResultStatus.INFEASIBLE, Feasibility.Feasible), SolveStatus.DualInfeasible)
+    assertEquals(mapped(ResultStatus.INFEASIBLE, Feasibility.Infeasible), SolveStatus.PrimalInfeasible)
+    assertEquals(mapped(ResultStatus.INFEASIBLE, Feasibility.Unknown), SolveStatus.NumericalError)
+
+    // A feasible point that was not proved optimal is what a time limit looks
+    // like from here.
+    assertEquals(mapped(ResultStatus.FEASIBLE), SolveStatus.TimeLimit)
+    assertEquals(mapped(ResultStatus.ABNORMAL), SolveStatus.NumericalError)
+
+    // `NOT_SOLVED` turns on whether the limit was reached, not on whether one
+    // was configured -- and it is never `Interrupted`, which means the caller
+    // asked the solve to stop and nothing here supports that.
+    assertEquals(mapped(ResultStatus.NOT_SOLVED, reached = true), SolveStatus.TimeLimit)
+    assertEquals(mapped(ResultStatus.NOT_SOLVED, reached = false), SolveStatus.NumericalError)
+  }

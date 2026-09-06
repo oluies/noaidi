@@ -9,10 +9,18 @@ The counter this exercises is the only thing standing between "sbt exited 0" and
   - reading only sbt's `Passed: Total` undercounts a partially warm cache, which
     is why the aggregate step stopped using it.
 
-So the fixtures are the four states, and the expectations are what a human read
-off each log by hand. Each fixture holds the lines the counters actually read,
+So the fixtures are the log states the counter has to survive, and the
+expectations are what a human read off each log by hand. Each fixture holds the lines the counters actually read,
 extracted verbatim from a real run -- `test_workflow_log_patterns.py` gives the
 reason in full: a check written against an invented sample tests the invention.
+
+One of them is coloured, and that is not decoration. sbt writes terminal control
+sequences when CI is attached to its logger and not when a local run is piped to
+a file, so uncoloured fixtures alone would leave the form CI reads unexercised --
+and an anchored pattern, the mistake behind the pypsa-drift outage, matches a
+coloured line nowhere while passing every uncoloured fixture. `sbt-ortools-coloured.log`
+comes from run 34013731543 via `gh run view --log`, whose caret notation was
+decoded back to the escape bytes `tee` captures inside the step.
 
     python3 .github/scripts/test_count_tests.py
 """
@@ -55,6 +63,18 @@ CASES = (
         "This is the shape that failed CI on JDK 25",
     ),
     (
+        "sbt-ortools-coloured.log",
+        14,
+        14,
+        14,
+        False,
+        "an ordinary run as it reaches the counters inside Actions, with sbt's terminal "
+        "control sequences intact -- a different run from the uncoloured fixture above, and "
+        "the only one here in the form CI actually reads. Tightening either pattern to "
+        "`^Test run` or `^[info] Passed:` passes every other fixture and matches nothing at "
+        "all in this one, which is the pypsa-drift outage exactly",
+    ),
+    (
         "sbt-nothing.log",
         0,
         0,
@@ -65,24 +85,64 @@ CASES = (
 )
 
 
-def run(fixture: str) -> tuple[dict[str, int], str]:
+# What the script must refuse, and with which message.
+#
+# Separate from CASES because these have no counts to compare -- the script is
+# expected not to reach the counting at all. Without them the guard at
+# `count_tests.sh`'s head has no coverage: deleting it outright, or replacing it
+# with a no-op, left this file green at five for five. That is the same defect
+# this file was written to fix one level up, and it shipped in the commit that
+# fixed it.
+REFUSALS = (
+    (
+        ["does-not-exist.log"],
+        1,
+        "cannot read",
+        "a path that is not there must name the path, not report an empty suite",
+    ),
+    (
+        [],
+        1,
+        "usage:",
+        "no argument at all is a caller error, not a log with no tests in it",
+    ),
+)
+
+
+def run(*arguments: str) -> tuple[int, str, str]:
+    """Run the script, returning (code, stdout, stderr).
+
+    The exit code is returned rather than raised -- `check=True` would turn a
+    refusal into a traceback, which is why the guard it protects could not be
+    tested at all. The two sibling harnesses, `test_check_action_pins.py` and
+    `test_check_orphan_docs.py`, return the same triple for the same reason.
+    """
     result = subprocess.run(
-        ["bash", str(SCRIPT), str(FIXTURES / fixture)],
+        ["bash", str(SCRIPT), *arguments],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    return result.returncode, result.stdout, result.stderr
+
+
+def counts_of(stdout: str) -> dict[str, int]:
     counts = {}
-    for line in result.stdout.splitlines():
+    for line in stdout.splitlines():
         key, _, value = line.partition("=")
         counts[key] = int(value)
-    return counts, result.stderr
+    return counts
 
 
 def main() -> int:
     failures = 0
     for fixture, suites, summary, total, note, why in CASES:
-        counts, stderr = run(fixture)
+        code, stdout, stderr = run(str(FIXTURES / fixture))
+        if code != 0:
+            failures += 1
+            print(f"FAIL  {fixture}: exited {code} on a log it should have counted -- {stderr.strip()}")
+            continue
+        counts = counts_of(stdout)
         expected = {"suites": suites, "summary": summary, "total": total}
         if counts != expected:
             failures += 1
@@ -107,7 +167,16 @@ def main() -> int:
             failures += 1
             print(f"FAIL  {fixture}: reported nothing ran while a counter saw tests")
 
-    print(f"\n{len(CASES)} sbt log states counted")
+    for arguments, expected_code, expected_text, why in REFUSALS:
+        code, stdout, stderr = run(*arguments)
+        if code != expected_code or expected_text not in stderr:
+            failures += 1
+            print(f"FAIL  {arguments}: expected exit {expected_code} mentioning {expected_text!r} -- {why}")
+            print(f"      got exit {code}: {(stdout + stderr).strip()}")
+            continue
+        print(f"ok    {arguments or 'no argument'}: refused -- {why}")
+
+    print(f"\n{len(CASES)} sbt log states counted, {len(REFUSALS)} refusals")
     return 1 if failures else 0
 
 

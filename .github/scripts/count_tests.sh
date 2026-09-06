@@ -47,6 +47,12 @@ set -euo pipefail
 
 log=${1:?usage: count_tests.sh <log-file>}
 
+# Checked, because the failure mode otherwise is a lie. A path that does not
+# exist makes every grep below match nothing, `|| true` swallows the exit, awk
+# prints 0, and the caller reports "either the suite shrank or something stopped
+# running" -- a diagnosis about the test suite for what is a typo in a filename.
+[ -r "$log" ] || { echo "count_tests.sh: cannot read $log" >&2; exit 1; }
+
 # `|| true` on each: a grep that matches nothing exits 1, which under `pipefail`
 # and `set -e` would abort here -- and matching nothing is precisely the case
 # being measured.

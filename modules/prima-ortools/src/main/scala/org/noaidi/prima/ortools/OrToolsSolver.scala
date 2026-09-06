@@ -39,8 +39,16 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
     * would publish a conclusive status on no evidence -- exactly what this
     * method exists to stop the caller doing. `Unknown` becomes a
     * `NumericalError`, which is what a solver that could not decide should say.
+    *
+    * `private[ortools]` rather than `private`, for the reason [[mapStatus]]
+    * gives for the same widening: this is only reachable through a solve that
+    * returns `INFEASIBLE`, and the probe -- solving a strict sub-problem under
+    * the same inherited `iteration_limit` -- always converges before the outer
+    * solve does. So no end-to-end fixture can starve the probe without
+    * starving the outer solve first and never reaching here. Calling it is the
+    * only way to hold it to anything.
     */
-  private def feasibilityOf(problem: LpProblem): OrToolsSolver.Feasibility =
+  private[ortools] def feasibilityOf(problem: LpProblem): OrToolsSolver.Feasibility =
     val stripped = LpProblem(
       objective = IArray.fill(problem.numVariables)(0.0),
       constraintMatrix = problem.constraintMatrix,
@@ -54,11 +62,19 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
     // feasibility by exhaustion, and report the answer as if it were proved.
     val probe = new OrToolsSolver(options.copy(disambiguate = false, timeLimitMillis = None))
     probe.solve(stripped).status match
-      // `TimeLimit` is proof, not an inconclusive answer. On this backend it
-      // comes from exactly one place -- `MPSolver.ResultStatus.FEASIBLE`, which
-      // means GLOP is holding a feasible point -- because the probe carries no
-      // time limit, so the other producer of `TimeLimit` cannot fire here.
-      // A feasible point is the whole question this probe asks.
+      // `TimeLimit` is proof, not an inconclusive answer: it comes from
+      // `MPSolver.ResultStatus.FEASIBLE`, which means the solver is holding a
+      // feasible point, and a feasible point is the whole question this probe
+      // asks.
+      //
+      // The other producer of `TimeLimit` cannot fire here, and the reason is
+      // narrower than "the probe carries no time limit". `options.copy` keeps
+      // `parameters`, so a PDLP probe *does* inherit `iteration_limit` -- but a
+      // limit-terminated PDLP returns `NOT_SOLVED`, and `NOT_SOLVED` reaches
+      // `TimeLimit` only when a time limit was set and reached, which the probe
+      // never does. So an exhausted probe lands on `Unknown` and the caller is
+      // told nothing was established, rather than being handed a conclusive
+      // `DualInfeasible` derived from a non-converged iterate.
       case SolveStatus.Optimal | SolveStatus.TimeLimit => OrToolsSolver.Feasibility.Feasible
       case SolveStatus.PrimalInfeasible                => OrToolsSolver.Feasibility.Infeasible
       case _                                           => OrToolsSolver.Feasibility.Unknown
@@ -258,9 +274,15 @@ object OrToolsSolver:
         // cap at all. The asymmetry is what makes it matter: Prima's side of
         // the comparison carries `maxIterations`, so a divergent Prima fails a
         // status assertion, while a divergent PDLP would hang the job until the
-        // CI timeout with nothing to read. With a limit it returns a feasible
-        // point it has not proved optimal, which is `TimeLimit` here, and the
-        // comparison fails on the status with the counts in hand.
+        // CI timeout with nothing to read.
+        //
+        // On hitting the limit PDLP returns `NOT_SOLVED`, not a feasible point
+        // it has not proved optimal -- measured, and pinned by
+        // `PdlpComparisonSuite`, because an earlier version of this comment
+        // asserted the opposite and the difference decides whether the
+        // feasibility probe above can be fooled. With no time limit set that
+        // maps to `NumericalError`, so the comparison fails on the status with
+        // both counts in hand.
         parameters = Some(
           s"termination_criteria { iteration_limit: $iterationLimit " +
             s"simple_optimality_criteria { eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"

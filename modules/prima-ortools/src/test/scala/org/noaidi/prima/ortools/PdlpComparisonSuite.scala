@@ -169,10 +169,15 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // probe cannot report `Feasible` -- is pinned by the next test, which has to
     // call `feasibilityOf` directly; see there for why no end-to-end fixture
     // reaches it.
-    val problem = LpFixtures.randomFeasible(3, 600, 120, 280, 0.04)
+    val problem = ladder.find(_.name == "random-600x400").get.problem
     val starved = OrToolsSolver.pdlp(tolerance, iterationLimit = 4).solve(problem)
 
     assertEquals(starved.status, SolveStatus.NumericalError)
+    // Measured rather than assumed: PDLP reports exactly the limit at 1, 2, 3,
+    // 4, 5, 8, 16, 63, 64, 65 and 100 on this instance and this pinned
+    // OR-Tools, so it does not round up to the termination-check frequency.
+    // If a future bump changes that, this failing is the correct outcome --
+    // the premise two comments in `OrToolsSolver` rest on would have moved.
     assert(starved.iterations <= 4, s"asked for at most 4 iterations, got ${starved.iterations}")
 
     // And the same solver, given room, still reaches the answer -- so the
@@ -196,7 +201,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // exhausted probe must land on `Unknown`, so the caller is told nothing was
     // established. Were it to answer `Feasible`, `mapStatus` would publish a
     // conclusive `DualInfeasible` derived from a non-converged iterate.
-    val problem = LpFixtures.randomFeasible(1, 60, 10, 20, 0.25)
+    val problem = ladder.find(_.name == "random-60x30").get.problem
 
     assertEquals(
       OrToolsSolver.pdlp(tolerance, iterationLimit = 4).feasibilityOf(problem),
@@ -209,5 +214,40 @@ class PdlpComparisonSuite extends munit.FunSuite:
     assertEquals(
       OrToolsSolver.pdlp(tolerance).feasibilityOf(problem),
       OrToolsSolver.Feasibility.Feasible,
+    )
+  }
+
+  test("the probe drops the caller's time limit, and would be foolable if it did not") {
+    // `feasibilityOf` guards itself with `options.copy(disambiguate = false,
+    // timeLimitMillis = None)`, and its comment leans on both halves. The first
+    // is pinned by the `infeasible` fixture -- drop `disambiguate = false` and
+    // the probe recurses. The second was pinned by nothing: every other test
+    // here builds its solver through `OrToolsSolver.pdlp`, which never sets a
+    // time limit, so deleting `timeLimitMillis = None` left the whole suite
+    // green at sixteen of sixteen.
+    //
+    // It matters because of what the caller's budget does to an exhausted
+    // probe. `NOT_SOLVED` maps to `TimeLimit` when a limit was set and reached,
+    // `TimeLimit` is read as proof of a feasible point, and `mapStatus` then
+    // publishes a conclusive `DualInfeasible` derived from an iterate that
+    // never converged -- the outcome the comment two tests above says cannot
+    // happen. So this asks for the probe with a budget it must ignore.
+    //
+    // The instance is the large one deliberately: `timeLimitReached` is
+    // `solveMillis >= limit`, so a solve that finishes inside a millisecond
+    // would leave the mutation invisible for a second reason and prove nothing.
+    val problem = ladder.find(_.name == "random-600x400").get.problem
+    val timed = OrToolsSolver(
+      OrToolsSolver.Options(
+        backend = "PDLP",
+        timeLimitMillis = Some(1),
+        parameters = Some(OrToolsSolver.pdlpParameters(tolerance, iterationLimit = 4)),
+      )
+    )
+
+    assertEquals(
+      timed.feasibilityOf(problem),
+      OrToolsSolver.Feasibility.Unknown,
+      "the probe honoured the caller's time limit and read its own exhaustion as feasibility",
     )
   }

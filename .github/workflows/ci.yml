@@ -567,6 +567,21 @@ jobs:
   validation-report:
     name: Solver validation report (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
+    # A backstop only, and generous on purpose. The budget that actually bites
+    # is per-invocation, inside the two steps below, for the reason the
+    # kernel-split job records at length: exceeding `timeout-minutes` *cancels*
+    # the job, and cancellation skips `if: always()` -- which here would throw
+    # away the very report the job exists to publish. An overrun inside a step
+    # is an ordinary failure, so `Publish` still runs after it.
+    #
+    # 30, because two steps at their 10-minute caps is 20 plus setup. Both
+    # normally finish inside 90 seconds: this job ran 55, 58, 59, 75 and 86
+    # seconds over its last five green runs, and then wedged for nearly two
+    # hours in `MilpReport` on JDK 21 while its JDK 25 twin did the same work in
+    # 47 seconds. With no limit anywhere it would have held a runner until
+    # GitHub's six-hour default. `BnbParams` bounds the search at 50,000 nodes
+    # and 200,000 LP iterations, which is a bound in work and not in wall time.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -588,11 +603,19 @@ jobs:
 
       - uses: sbt/setup-sbt@v1
 
+      # `timeout` rather than the job's `timeout-minutes`, so an overrun is an
+      # ordinary step failure that `Publish` still runs after. See the job's own
+      # comment above.
       - name: Prima vs ojAlgo
         run: |
           set -euo pipefail
-          sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.Report" \
-            | tee report.txt
+          status=0
+          timeout 600 sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.Report" \
+            | tee report.txt || status=$?
+          if [ "$status" -eq 124 ]; then
+            echo "::error::Report exceeded its 10-minute budget -- it normally finishes in under a minute, so this is a hang rather than a slow runner."
+          fi
+          exit "$status"
 
       # The mixed-integer counterpart. Kept as a separate step so a MILP
       # regression is attributed to branch-and-bound rather than to the LP
@@ -602,8 +625,13 @@ jobs:
       - name: Prima vs ojAlgo (mixed-integer)
         run: |
           set -euo pipefail
-          sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
-            | tee milp-report.txt
+          status=0
+          timeout 600 sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
+            | tee milp-report.txt || status=$?
+          if [ "$status" -eq 124 ]; then
+            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. This is the step that wedged for nearly two hours on JDK 21 while JDK 25 did the same work in 47 seconds; the search is deterministic, so a repeat is a branch-and-bound defect rather than a slow runner."
+          fi
+          exit "$status"
 
       - name: Publish report to the job summary
         if: always()

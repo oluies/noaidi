@@ -241,14 +241,19 @@ precision on dense LPs. It is a finding about *that instance*. `random-600x400`
 is seed 3 of a family the report now sweeps ten draws of, and it is the only one
 of the ten where the hand-over costs more than a cold solve:
 
-| tolerance | median saved | worst | best |
-| --- | --- | --- | --- |
-| 1e-6 | **26%** | −621% (seed 3) | 45% |
-| 1e-9 | −6% | −24% | 23% |
+| tolerance | median saved | worst | best | |
+| --- | --- | --- | --- | --- |
+| 1e-6 | **26%** | −621% (seed 3) | 45% | macOS/aarch64 |
+| 1e-6 | **24%** | −443% (seed 3) | 56% | Linux/x86_64 |
+| 1e-9 | −6% | −24% | 23% | macOS/aarch64 |
+| 1e-9 | +1% | −81% | 18% | Linux/x86_64 |
 
-At 1e-6 the other nine draws save between 11% and 45%. At 1e-9 the hand-over is
-roughly break-even across the family — which is the "float32 removes only the
-cheap prefix" result above, arrived at from ten instances instead of one.
+Both platforms are given because they differ, and the report prints whichever
+one ran it — see '''Iteration counts are platform-specific''' below. The finding
+is the same on both: at 1e-6 seed 3 is the outlier and the median saving is
+around a quarter of the double-precision work; at 1e-9 the hand-over is roughly
+break-even across the family, which is the "float32 removes only the cheap
+prefix" result above, arrived at from ten instances instead of one.
 
 So what needed explaining was never a general regression. See '''Where seed 3's
 refinement goes''' below for what happens on the one instance, and why the
@@ -258,10 +263,39 @@ The tables above are a hand-filtered view: the validation report prints the two
 tolerance regimes as separate tables covering all twelve ladder instances, then
 the ten-draw sweep. Run it to regenerate the underlying numbers, then merge.
 
+### Iteration counts are platform-specific
+
+`ValidationLadder.worstGapBound` already records that the worst oracle gap is
+4.9e-10 on macOS/aarch64 and 5.9e-10 on Linux/x86_64. Iteration counts vary the
+same way and by far more, and every number in this file is from the platform its
+paragraph names.
+
+The two largest dense instances are where it shows. Prima and PDLP, both at
+1e-9:
+
+| instance | Prima mac | Prima Linux | PDLP mac | PDLP Linux |
+| --- | --- | --- | --- | --- |
+| everything up to random-60x30 | \- | identical | \- | identical |
+| random-200x120 | 6,464 | 6,784 | 4,288 | 3,968 |
+| random-600x400 | 35,392 | **26,048** | 32,832 | 32,832 |
+
+It is not a Prima quirk: PDLP moves too, in the other direction on
+random-200x120, and it is a separate C++ implementation. The arithmetic is
+IEEE-754 double on both hosts and the algorithm is deterministic, so what moves
+is the order operations are contracted and rounded in, which perturbs the
+trajectory enough to change which checkpoint a restart fires at. On instances
+that converge inside a few restart periods there is no room for it and both
+agree exactly.
+
+The practical consequence is that a *ratio* between two solvers on one host is
+evidence and an absolute count is a measurement of that host. That is why
+`PdlpComparisonSuite` bounds the ratio rather than pinning counts.
+
 ### Where seed 3's refinement goes
 
-Tracing every evaluation point of both solves puts the loss in a 200-iteration
-window. The refinement starts from a point whose fp64 KKT error is genuinely
+Traced on macOS/aarch64; the shape holds on Linux, where the same seed costs
+−443% rather than −621%. Tracing every evaluation point of both solves puts the
+loss in a 200-iteration window. The refinement starts from a point whose fp64 KKT error is genuinely
 good — primal residual 4.0e-3, against 8.6e+2 at the origin — and by iteration
 192 it has reached a weighted error of 3.5e-3, better than the cold solve
 reaches before iteration 2,300. A restart fires there on the sufficient-decay
@@ -2535,21 +2569,26 @@ iterations or twenty thousand.
 OR-Tools ships PDLP, which is that implementation, and `prima-ortools` already
 carried OR-Tools. Held to 1e-9 on both sides:
 
-| instance | Prima | PDLP | ratio |
-| --- | --- | --- | --- |
-| the six hand-written fixtures | 2–128 | 2–128 | **1.00** |
-| economic-dispatch | 256 | 192 | 1.33 |
-| infeasible | 1,088 | 768 | 1.42 |
-| random-60x30 | 1,280 | 1,024 | 1.25 |
-| random-200x120 | 6,464 | 4,288 | 1.51 |
-| random-600x400 | 35,392 | 32,832 | **1.08** |
+| instance | Prima | PDLP | ratio | |
+| --- | --- | --- | --- | --- |
+| the six hand-written fixtures | 2–128 | 2–128 | **1.00** | both hosts |
+| economic-dispatch | 256 | 192 | 1.33 | both hosts |
+| infeasible | 1,088 | 768 | 1.42 | both hosts |
+| random-60x30 | 1,280 | 1,024 | 1.25 | both hosts |
+| random-200x120 | 6,464 | 4,288 | 1.51 | macOS |
+| random-200x120 | 6,784 | 3,968 | 1.71 | Linux |
+| random-600x400 | 35,392 | 32,832 | **1.08** | macOS |
+| random-600x400 | 26,048 | 32,832 | **0.79** | Linux |
 
 Identical on every instance that converges inside a few restart periods, and
-within a tenth on the one that needs thirty-five thousand iterations. `PdlpComparisonSuite`
-holds the ratio inside threefold either way — loose on purpose, since the two
-have different presolves and different scalings and an OR-Tools bump should not
-fail a build, while an order of magnitude would mean Prima's restart schedule
-had moved.
+inside a factor of two on the two that do not — on the largest, Prima is 8%
+worse than the reference on one host and 21% *better* on the other, which is
+the platform effect above rather than anything about either implementation.
+`PdlpComparisonSuite` holds the ratio inside threefold either way — loose on
+purpose, since the observed band is already 0.79 to 1.71 across two hosts, the
+two have different presolves and different scalings, and an OR-Tools bump should
+not fail a build. An order of magnitude would mean Prima's restart schedule had
+moved.
 
 Three details that had to be got right for the comparison to mean anything:
 

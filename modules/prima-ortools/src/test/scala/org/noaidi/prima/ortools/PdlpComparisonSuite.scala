@@ -59,13 +59,15 @@ class PdlpComparisonSuite extends munit.FunSuite:
       name -> ratio
     }
 
-    // Threefold either way. The observed spread is 1.00 to 1.51, so this is not
-    // a tight bound and is not meant to be: the two have different presolves
-    // and different scalings, and pinning the ratio would fail on an OR-Tools
-    // bump that changed neither implementation's algorithm. What it catches is
-    // the thing worth catching -- a change to Prima's restart schedule or
-    // step-size rule that costs it an order of magnitude against a reference
-    // that did not move.
+    // Threefold either way, and deliberately loose. The observed spread is
+    // already 0.79 to 1.71 across two hosts -- iteration counts on the largest
+    // dense instances are platform-specific, for both implementations, which
+    // NOTES records under "Iteration counts are platform-specific" -- and on
+    // top of that the two have different presolves and different scalings, so
+    // pinning the ratio would fail on an OR-Tools bump that changed neither
+    // algorithm. What it catches is the thing worth catching: a change to
+    // Prima's restart schedule or step-size rule that costs it an order of
+    // magnitude against a reference that did not move.
     ratios.foreach { (name, ratio) =>
       assert(
         ratio > 1.0 / 3.0 && ratio < 3.0,

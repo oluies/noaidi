@@ -283,12 +283,21 @@ object OrToolsSolver:
         // feasibility probe above can be fooled. With no time limit set that
         // maps to `NumericalError`, so the comparison fails on the status with
         // both counts in hand.
-        parameters = Some(
-          s"termination_criteria { iteration_limit: $iterationLimit " +
-            s"simple_optimality_criteria { eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"
-        ),
+        parameters = Some(pdlpParameters(tolerance, iterationLimit)),
       )
     )
+
+  /** The parameter string [[pdlp]] builds, named so a test can ask for the same
+    * one rather than retyping it.
+    *
+    * A test that needs a PDLP configured differently -- with a time limit, say,
+    * which `pdlp` never sets -- would otherwise have to spell the proto text out
+    * a second time, and the two copies would drift the moment the deprecated
+    * spelling below has to change again.
+    */
+  private[ortools] def pdlpParameters(tolerance: Double, iterationLimit: Int): String =
+    s"termination_criteria { iteration_limit: $iterationLimit " +
+      s"simple_optimality_criteria { eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"
 
   /** OR-Tools' natives load once per JVM, and loading twice is not an error but
     * is not free either.

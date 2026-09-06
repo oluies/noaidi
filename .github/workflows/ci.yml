@@ -228,7 +228,7 @@ jobs:
           # all four backends at once -- or `PdlpComparisonSuite`, which is the
           # only check on Prima's iteration counts, stop reporting while the
           # step still went green. Raise it when the suite grows.
-          MINIMUM_ORTOOLS_TESTS=16
+          MINIMUM_ORTOOLS_TESTS=17
           if [ "$total" -lt "$MINIMUM_ORTOOLS_TESTS" ]; then
             echo "::error::Only $total OR-Tools tests ran, below the floor of $MINIMUM_ORTOOLS_TESTS -- either the suite shrank or something stopped running."
             exit 1

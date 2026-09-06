@@ -10,9 +10,10 @@ The counter this exercises is the only thing standing between "sbt exited 0" and
     is why the aggregate step stopped using it.
 
 So the fixtures are the log states the counter has to survive, and the
-expectations are what a human read off each log by hand. Each fixture holds the lines the counters actually read,
-extracted verbatim from a real run -- `test_workflow_log_patterns.py` gives the
-reason in full: a check written against an invented sample tests the invention.
+expectations are what a human read off each log by hand. Each fixture holds the
+lines the counters actually read, extracted verbatim from a real run --
+`test_workflow_log_patterns.py` gives the reason in full: a check written
+against an invented sample tests the invention.
 
 One of them is coloured, and that is not decoration. sbt writes terminal control
 sequences when CI is attached to its logger and not when a local run is piped to
@@ -95,10 +96,16 @@ CASES = (
 # fixed it.
 REFUSALS = (
     (
-        ["does-not-exist.log"],
+        [str(FIXTURES / "does-not-exist.log")],
         1,
-        "cannot read",
+        str(FIXTURES / "does-not-exist.log"),
         "a path that is not there must name the path, not report an empty suite",
+    ),
+    (
+        [str(FIXTURES)],
+        1,
+        str(FIXTURES),
+        "a directory is readable, so `-r` alone let it through to the same false zero",
     ),
     (
         [],

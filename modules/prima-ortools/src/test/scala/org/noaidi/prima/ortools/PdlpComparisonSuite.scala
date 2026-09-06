@@ -45,6 +45,10 @@ class PdlpComparisonSuite extends munit.FunSuite:
   /** `unbounded` is compared separately: PDLP does not classify it. */
   private val comparable = ladder.filterNot(_.name == "unbounded")
 
+  /** A ladder instance by name, failing with the name rather than `None.get`. */
+  private def instance(name: String): LpProblem =
+    ladder.find(_.name == name).getOrElse(fail(s"no ladder instance named $name")).problem
+
   test("two implementations of the same algorithm take the same order of iterations") {
     println(f"%n${"instance"}%-20s ${"prima"}%9s ${"pdlp"}%9s ${"ratio"}%7s  status")
     val ratios = comparable.map { instance =>
@@ -169,7 +173,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // probe cannot report `Feasible` -- is pinned by the next test, which has to
     // call `feasibilityOf` directly; see there for why no end-to-end fixture
     // reaches it.
-    val problem = ladder.find(_.name == "random-600x400").get.problem
+    val problem = instance("random-600x400")
     val starved = OrToolsSolver.pdlp(tolerance, iterationLimit = 4).solve(problem)
 
     assertEquals(starved.status, SolveStatus.NumericalError)
@@ -201,7 +205,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // exhausted probe must land on `Unknown`, so the caller is told nothing was
     // established. Were it to answer `Feasible`, `mapStatus` would publish a
     // conclusive `DualInfeasible` derived from a non-converged iterate.
-    val problem = ladder.find(_.name == "random-60x30").get.problem
+    val problem = instance("random-60x30")
 
     assertEquals(
       OrToolsSolver.pdlp(tolerance, iterationLimit = 4).feasibilityOf(problem),
@@ -236,7 +240,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // The instance is the large one deliberately: `timeLimitReached` is
     // `solveMillis >= limit`, so a solve that finishes inside a millisecond
     // would leave the mutation invisible for a second reason and prove nothing.
-    val problem = ladder.find(_.name == "random-600x400").get.problem
+    val problem = instance("random-600x400")
     val timed = OrToolsSolver(
       OrToolsSolver.Options(
         backend = "PDLP",
@@ -245,9 +249,36 @@ class PdlpComparisonSuite extends munit.FunSuite:
       )
     )
 
+    // The premise first. Under correct code the assertion below is `Unknown`,
+    // which is `feasibilityOf`'s fall-through, so it holds whatever the timing
+    // does -- and the mutation is only visible if the truncated solve actually
+    // reaches the limit, since `timeLimitReached` is `solveMillis >= limit`.
+    // Leaving that unasserted would let a faster host or an OR-Tools bump carry
+    // this test on passing while it silently stopped pinning anything, which is
+    // the failure this test exists to remove, one level up. Measured: 7 ms on
+    // this instance, and 0 ms on `random-60x30`, which is why it is not used.
+    assertEquals(
+      timed.solve(problem).status,
+      SolveStatus.TimeLimit,
+      "the truncated solve no longer reaches its time limit, so the check below proves nothing",
+    )
+
     assertEquals(
       timed.feasibilityOf(problem),
       OrToolsSolver.Feasibility.Unknown,
       "the probe honoured the caller's time limit and read its own exhaustion as feasibility",
     )
+
+    // The control, as the sibling test above has: the same options with room to
+    // converge must establish feasibility. Without it any other cause of a
+    // non-converged probe -- an `ABNORMAL`, or a future options shape that
+    // silently dropped the parameter string -- would also read as `Unknown`.
+    val roomy = OrToolsSolver(
+      OrToolsSolver.Options(
+        backend = "PDLP",
+        timeLimitMillis = Some(1),
+        parameters = Some(OrToolsSolver.pdlpParameters(tolerance, iterationLimit = 500_000)),
+      )
+    )
+    assertEquals(roomy.feasibilityOf(problem), OrToolsSolver.Feasibility.Feasible)
   }

@@ -263,8 +263,6 @@ object OrToolsSolver:
     * answer, and is silent.
     */
   def pdlp(tolerance: Double, iterationLimit: Int = 500_000): OrToolsSolver =
-    require(tolerance > 0.0, s"tolerance must be positive, got $tolerance")
-    require(iterationLimit > 0, s"iterationLimit must be positive, got $iterationLimit")
     OrToolsSolver(
       Options(
         backend = "PDLP",
@@ -296,6 +294,12 @@ object OrToolsSolver:
     * spelling below has to change again.
     */
   private[ortools] def pdlpParameters(tolerance: Double, iterationLimit: Int): String =
+    // Checked here rather than in `pdlp`, because a caller that needs a PDLP
+    // configured differently -- with a time limit, which `pdlp` never sets --
+    // reaches this directly and would otherwise emit a proto field OR-Tools
+    // interprets rather than one this refuses.
+    require(tolerance > 0.0, s"tolerance must be positive, got $tolerance")
+    require(iterationLimit > 0, s"iterationLimit must be positive, got $iterationLimit")
     s"termination_criteria { iteration_limit: $iterationLimit " +
       s"simple_optimality_criteria { eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"
 

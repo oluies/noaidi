@@ -14,6 +14,14 @@ off each log by hand. Each fixture holds the lines the counters actually read,
 extracted verbatim from a real run -- `test_workflow_log_patterns.py` gives the
 reason in full: a check written against an invented sample tests the invention.
 
+One of them is coloured, and that is not decoration. sbt writes terminal control
+sequences when CI is attached to its logger and not when a local run is piped to
+a file, so uncoloured fixtures alone would leave the form CI reads unexercised --
+and an anchored pattern, the mistake behind the pypsa-drift outage, matches a
+coloured line nowhere while passing every uncoloured fixture. `sbt-ortools-coloured.log`
+comes from run 34013731543 via `gh run view --log`, whose caret notation was
+decoded back to the escape bytes `tee` captures inside the step.
+
     python3 .github/scripts/test_count_tests.py
 """
 
@@ -53,6 +61,18 @@ CASES = (
         True,
         "a replayed test action: sbt reports its cached total and the framework emits nothing. "
         "This is the shape that failed CI on JDK 25",
+    ),
+    (
+        "sbt-ortools-coloured.log",
+        14,
+        14,
+        14,
+        False,
+        "the same run as it reaches the counters inside Actions, with sbt's terminal control "
+        "sequences intact. This is the form CI actually reads and the uncoloured fixtures do "
+        "not cover: tightening either pattern to `^Test run` or `^[info] Passed:` passes every "
+        "other fixture here and matches nothing at all in this one, which is the pypsa-drift "
+        "outage exactly",
     ),
     (
         "sbt-nothing.log",

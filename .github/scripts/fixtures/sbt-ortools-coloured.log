@@ -1,0 +1,4 @@
+[0JTest run [36morg.noaidi.prima.ortools.OrToolsSolverSuite[0m finished: 0 failed, 0 ignored, 8 total [90m0.692s[0m[0J
+[0JTest run [36morg.noaidi.prima.ortools.SolverAgreementSuite[0m finished: 0 failed, 0 ignored, 2 total [90m0.693s[0m[0J
+[0JTest run [36morg.noaidi.prima.ortools.PdlpComparisonSuite[0m finished: 0 failed, 0 ignored, 4 total [90m1.87s[0m[0J
+[0J[0m[[0m[0minfo[0m] [0m[0mPassed: Total 14, Failed 0, Errors 0, Passed 14[0m[0J

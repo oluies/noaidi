@@ -157,3 +157,29 @@ class PdlpComparisonSuite extends munit.FunSuite:
       s"threw for the wrong reason: ${thrown.getMessage}",
     )
   }
+
+  test("a limit-terminated PDLP says it solved nothing, and cannot fool the probe") {
+    // Two comments in `OrToolsSolver` turn on which status PDLP gives when it
+    // runs out of iterations, and one of them said the wrong one. It is
+    // `NOT_SOLVED`, not `FEASIBLE`, so:
+    //
+    //   - a divergent reference fails this suite's status assertion as
+    //     `NumericalError` rather than as `TimeLimit`;
+    //   - the feasibility probe, which inherits `iteration_limit` through
+    //     `options.copy`, cannot report an exhausted run as proof of
+    //     feasibility -- `NOT_SOLVED` reaches `TimeLimit` only when a time
+    //     limit was set and reached, and the probe sets none.
+    //
+    // The second is the one that matters: the other way round, a probe that
+    // merely ran out of iterations would hand the caller a conclusive
+    // `DualInfeasible` derived from a non-converged iterate.
+    val problem = LpFixtures.randomFeasible(3, 600, 120, 280, 0.04)
+    val starved = OrToolsSolver.pdlp(tolerance, iterationLimit = 4).solve(problem)
+
+    assertEquals(starved.status, SolveStatus.NumericalError)
+    assert(starved.iterations <= 4, s"asked for at most 4 iterations, got ${starved.iterations}")
+
+    // And the same solver, given room, still reaches the answer -- so the
+    // status above is the limit talking and not the instance.
+    assertEquals(pdlp.solve(problem).status, SolveStatus.Optimal)
+  }

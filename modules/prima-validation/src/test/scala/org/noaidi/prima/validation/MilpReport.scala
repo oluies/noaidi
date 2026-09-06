@@ -54,6 +54,7 @@ object MilpReport:
 
   def main(args: Array[String]): Unit =
     java.util.Locale.setDefault(java.util.Locale.ROOT)
+    println(ValidationLadder.host)
 
     val params = MilpLadder.params
     val lp     = params.lp

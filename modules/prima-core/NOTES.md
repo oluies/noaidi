@@ -207,7 +207,9 @@ and refines on the CPU in double precision from that warm start. The reported
 result always comes from the double-precision pass, so accuracy does not depend
 on which device did the bulk of the work.
 
-Iterations of double-precision work removed, against a cold fp64 solve:
+Iterations of double-precision work removed, against a cold fp64 solve.
+Measured on macOS/aarch64 — see '''Iteration counts are platform-specific''';
+the two largest instances here move between hosts and the rest do not:
 
 | instance | at 1e-9 | at 1e-6 |
 | --- | --- | --- |
@@ -229,7 +231,8 @@ is why `WarmStart` carries `stepSize` and `primalWeight`.
 
 **The expensive part is the tail, and float32 cannot reach it.** On
 random-600x400 the float32 pass reaches 1e-5 in 1,792 iterations while the cold
-solve needs 35,392 for 1e-9. The first few digits are nearly free and the last
+solve needs 35,392 for 1e-9 — 26,048 on Linux, where the ratio still says the
+same thing and the pair does not. The first few digits are nearly free and the last
 few cost everything. A float32 device therefore removes only the cheap prefix,
 unless the caller's tolerance is loose enough that float32 can deliver the whole
 answer — which at 1e-6 it does for most of the ladder.
@@ -241,7 +244,7 @@ precision on dense LPs. It is a finding about *that instance*. `random-600x400`
 is seed 3 of a family the report now sweeps ten draws of, and it is the only one
 of the ten where the hand-over costs more than a cold solve:
 
-| tolerance | median saved | worst | best | |
+| tolerance | median saved | worst | best | host |
 | --- | --- | --- | --- | --- |
 | 1e-6 | **26%** | −621% (seed 3) | 45% | macOS/aarch64 |
 | 1e-6 | **24%** | −443% (seed 3) | 56% | Linux/x86_64 |
@@ -270,12 +273,12 @@ the ten-draw sweep. Run it to regenerate the underlying numbers, then merge.
 same way and by far more, and every number in this file is from the platform its
 paragraph names.
 
-The two largest dense instances are where it shows. Prima and PDLP, both at
-1e-9:
+Prima and PDLP, both at 1e-9. Everything up to and including `random-60x30`
+gives an identical count on both hosts, for both implementations. The two
+largest instances do not:
 
 | instance | Prima mac | Prima Linux | PDLP mac | PDLP Linux |
 | --- | --- | --- | --- | --- |
-| everything up to random-60x30 | \- | identical | \- | identical |
 | random-200x120 | 6,464 | 6,784 | 4,288 | 3,968 |
 | random-600x400 | 35,392 | **26,048** | 32,832 | 32,832 |
 
@@ -2353,7 +2356,7 @@ reaches PyPSA's objective through ojAlgo on the same model Prima solves.
 **Mixed precision stays opt-in, but no longer because of an unexplained
 regression.** The −621% on one dense instance was the reason given, and the
 ten-draw sweep shows it is that draw rather than the method: the median saving
-at 1e-6 is 26%. What is left is real and much smaller — at 1e-9 the hand-over is
+at 1e-6 is 26% on macOS/aarch64 and 24% on Linux/x86_64. What is left is real and much smaller — at 1e-9 the hand-over is
 break-even across the family, and on a dense instance a restart can land badly
 enough to cost several times a cold solve. Both are properties of the instance
 class rather than a defect waiting to be found. See '''The expensive part is the
@@ -2523,9 +2526,12 @@ Three findings behind those numbers, in the order they matter:
   Rebuilding costs less than it sounds: `VkCyfraRuntime` caches shaders on
   `SpirvProgram.shaderHash`, a digest of the SPIR-V, the entry point, the
   workgroup size and the binding tags, so an identically rebuilt program
-  resolves to the same `ComputePipeline`. Twelve consecutive solves hold at the
-  same time each, which is what that predicts and what a pipeline build per
-  solve would not — and the suite asserts it rather than citing it.
+  resolves to the same `ComputePipeline`. The spike's own control measures that
+  directly — building a second identical program after the path is warm is free.
+  What the twelve-solve test adds is narrower than it first claimed: it holds
+  the per-solve cost flat, which rules out anything *accumulating*, and would
+  not notice a constant per-solve pipeline build, because all twelve would pay
+  it alike.
 
   None of this is a benchmark artifact: `BranchAndBound.solveWith` deliberately
   holds one set of kernels for a whole search and solves a relaxation per node,
@@ -2569,12 +2575,12 @@ iterations or twenty thousand.
 OR-Tools ships PDLP, which is that implementation, and `prima-ortools` already
 carried OR-Tools. Held to 1e-9 on both sides:
 
-| instance | Prima | PDLP | ratio | |
+| instance | Prima | PDLP | ratio | host |
 | --- | --- | --- | --- | --- |
-| the six hand-written fixtures | 2–128 | 2–128 | **1.00** | both hosts |
-| economic-dispatch | 256 | 192 | 1.33 | both hosts |
-| infeasible | 1,088 | 768 | 1.42 | both hosts |
-| random-60x30 | 1,280 | 1,024 | 1.25 | both hosts |
+| the six hand-written fixtures | 2–128 | 2–128 | **1.00** | both |
+| economic-dispatch | 256 | 192 | 1.33 | both |
+| infeasible | 1,088 | 768 | 1.42 | both |
+| random-60x30 | 1,280 | 1,024 | 1.25 | both |
 | random-200x120 | 6,464 | 4,288 | 1.51 | macOS |
 | random-200x120 | 6,784 | 3,968 | 1.71 | Linux |
 | random-600x400 | 35,392 | 32,832 | **1.08** | macOS |

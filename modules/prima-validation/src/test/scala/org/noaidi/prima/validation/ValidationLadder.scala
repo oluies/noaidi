@@ -67,6 +67,25 @@ object ValidationLadder:
     */
   val worstGapBound: Double = 1e-8
 
+  /** The machine that produced a report, printed at the top of one.
+    *
+    * NOTES now carries a `host` column on every table of iteration counts,
+    * because those counts differ between platforms — the same reason
+    * `Locale.ROOT` is forced before anything is formatted. A convention like
+    * that needs support from the tool it applies to: without this line, someone
+    * pasting a CI report into a two-row table has to remember which matrix leg
+    * produced it, and the ladder dump already in NOTES says "Apple aarch64"
+    * only because a human typed it.
+    */
+  def host: String =
+    // OS, architecture and JVM, and not the Scala version: at run time
+    // `util.Properties.versionNumberString` reports the 2.13 standard library
+    // underneath Scala 3, which would put "2.13.16" at the top of a report
+    // built with 3.7.4. What decides the numbers below it is the platform's
+    // floating-point behaviour anyway.
+    val p = (k: String) => sys.props.getOrElse(k, "unknown")
+    s"host: ${p("os.name")} ${p("os.arch")}, JVM ${p("java.vm.name")} ${p("java.vm.version")}"
+
   /** Dense random instances of one shape over a spread of seeds.
     *
     * The ladder carries a single dense instance per size, which is enough to

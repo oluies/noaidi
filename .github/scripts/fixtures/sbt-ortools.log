@@ -1,0 +1,4 @@
+Test run org.noaidi.prima.ortools.SolverAgreementSuite finished: 0 failed, 0 ignored, 2 total 16.219s
+Test run org.noaidi.prima.ortools.OrToolsSolverSuite finished: 0 failed, 0 ignored, 8 total 16.221s
+Test run org.noaidi.prima.ortools.PdlpComparisonSuite finished: 0 failed, 0 ignored, 4 total 17.035s
+[info] Passed: Total 14, Failed 0, Errors 0, Passed 14

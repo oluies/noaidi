@@ -35,6 +35,15 @@ line it has to read. Editing the pattern fails the presence check, which is the
 point: the sample has to be updated alongside it, by someone who has looked at
 what the log actually contains.
 
+The test-count pipeline is *not* here, and deliberately. Pinning its four stages
+individually needed a hand-written sample for each -- which this file forbids in
+the next paragraph, and which two of them violated -- and still left the
+composition unpinned, so reordering the stages to point the `^`-anchored grep at
+sbt's coloured line would have kept every case green. It lives in
+`count_tests.sh` now, and `test_count_tests.py` runs the whole thing against
+four real logs. Executing the pipeline covers the patterns, their order and
+their arithmetic at once, which is what this file can only approximate.
+
     python3 .github/scripts/test_workflow_log_patterns.py
 """
 
@@ -166,52 +175,6 @@ CASES = [
         [MILP_HEADER],
         [],
         "the MILP table",
-    ),
-    Case(
-        "ci.yml",
-        r"grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total'",
-        [MUNIT_SUMMARY_CI, MUNIT_SUMMARY_PLAIN],
-        [],
-        "the test-count guard, at both call sites: this is how the aggregate step and the "
-        "OR-Tools step establish that tests ran at all, and if sbt's summary format moves "
-        "they both silently count zero and both floors fail with a message about the suite "
-        "shrinking",
-    ),
-    Case(
-        "ci.yml",
-        r"grep -oE '[0-9]+ total'",
-        [MUNIT_SUMMARY_CI, MUNIT_SUMMARY_PLAIN],
-        [],
-        "the second stage of the same pipeline; it reads the first stage's output, which is "
-        "why the summary line serves as the sample for both",
-    ),
-    Case(
-        "ci.yml",
-        r"grep -oE 'Passed: Total [0-9]+'",
-        [SBT_SUMMARY_CI, SBT_SUMMARY_PLAIN],
-        [],
-        "the second counter. sbt's own total survives an action-cache replay, which the "
-        "per-suite lines do not -- `primaOrtools/testFull` replayed on JDK 25 and printed "
-        "this line with no framework output at all, and the guard read that as zero tests. "
-        "It is the fallback, so it has to keep matching for the fallback to exist",
-    ),
-    Case(
-        "ci.yml",
-        r"grep -oE '[0-9]+$'",
-        ["Passed: Total 10"],
-        [],
-        "the second counter's second stage; `$`-anchored against the previous stage's output, "
-        "which is a single `Passed: Total N`",
-    ),
-    Case(
-        "ci.yml",
-        r"grep -oE '^[0-9]+'",
-        ["9 total"],
-        [],
-        "the third stage, and the one worth pinning: it is `^`-anchored, which is the exact "
-        "shape that produced the pypsa-drift outage this file exists for. It is safe only "
-        "because it reads the previous stage's output rather than sbt's, and that is a "
-        "property of the pipeline someone could break by reordering it",
     ),
 ]
 

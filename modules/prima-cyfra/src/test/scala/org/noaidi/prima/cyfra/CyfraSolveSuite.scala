@@ -74,31 +74,41 @@ class CyfraSolveSuite extends munit.FunSuite:
     finally k.close()
   }
 
-  test("a backend holds up over many solves, and does not slow down") {
+  test("nothing accumulates per solve") {
     // Rebuilding the programs at every `uploadMatrix` raises the obvious
-    // objection: does a long run of solves accumulate compiled programs on the
-    // device? It does not, and the reason is that `VkCyfraRuntime` caches
-    // shaders on `SpirvProgram.shaderHash` -- a digest of the SPIR-V, the entry
-    // point, the workgroup size and the binding tags -- so an identically
-    // rebuilt program resolves to the same `ComputePipeline`.
+    // objection: does a long run of solves pile something up? Twelve
+    // consecutive solves, every answer checked, and the last four timed against
+    // the first four.
     //
-    // That is a claim about a pinned release's internals, so it is measured
-    // rather than cited: twelve consecutive solves, every answer checked, and
-    // the last four timed against the first four. A per-solve pipeline build
-    // would show up here as drift.
+    // '''What this does and does not establish.''' A cost that grows per solve
+    // -- buffers, descriptor sets, pending executions -- shows up here as
+    // drift, and that is what the assertion pins. A *constant* extra cost does
+    // not: if `shaderHash` ever stopped resolving to the cached
+    // `ComputePipeline`, all twelve solves would pay the build equally, early
+    // and late would rise together, and the ratio would not move. So this is
+    // not evidence for the shader cache, and an earlier version of this comment
+    // claimed it was. The evidence for that is `SpmvSpike`'s own control, which
+    // times building a second identical program after the path is warm and
+    // finds it free.
     //
-    // What does accumulate is buffers, because `Kernels` has no deallocation.
-    // That is in the scaladoc and is not what this pins.
-    val problem = LpFixtures.conclusive.find(_.name == "economic-dispatch").get.problem
+    // Buffers do accumulate, because `Kernels` has no deallocation -- across
+    // the whole backend rather than per solve, which is why a flat trend here
+    // is consistent with it. That bound is in `CyfraKernels`'s scaladoc.
+    val instance = LpFixtures.conclusive.find(_.name == "economic-dispatch").get
     val p = params.copy(epsAbs = 1e-5, epsRel = 1e-5, maxIterations = 20_000, infeasibilityTolerance = 1e-5)
 
     val k = CyfraKernels()
     try
       val timings = (1 to 12).map { _ =>
         val started  = System.nanoTime()
-        val solution = Pdhg.solveWith(problem, p, k)
+        val solution = Pdhg.solveWith(instance.problem, p, k)
         assertEquals(solution.status, SolveStatus.Optimal)
-        assertEqualsDouble(solution.objectiveValue, 3700.0, 1e-2)
+        // Against the fixture's own optimum, at a tolerance the params
+        // actually permit. `Kkt.convergence` allows a gap of
+        // `epsAbs + epsRel * (|primal| + |dual|)`, which at 1e-5 on a 3,700
+        // objective is around 0.07 -- so a tighter literal here would be a
+        // legitimate float32 solve failing on a different GPU or driver.
+        instance.expectedObjective.foreach(assertEqualsDouble(solution.objectiveValue, _, 0.1))
         (System.nanoTime() - started) / 1000000.0
       }
       // The first solve pays JVM and driver warm-up, so the comparison starts

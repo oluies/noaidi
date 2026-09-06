@@ -21,10 +21,13 @@ import org.noaidi.prima.kernels.{Kernels, ScalaKernels}
   * reason.''' On structured, sparse instances — the LOPF workload this is meant
   * for — the refinement removes most of the double-precision work: 75% on the
   * dispatch fixture at a 1e-9 tolerance and all of it at 1e-6. On dense random
-  * LPs it saves a median 26% at 1e-6 over ten draws and is break-even at 1e-9,
-  * and on one draw in ten it costs several times a cold solve — a restart
-  * landing badly, not the float32 arithmetic. See `NOTES.md` for the
-  * measurements before enabling this on a new class of problem.
+  * LPs it saves a median 24–26% at 1e-6 over ten draws, depending on the host,
+  * and is break-even at 1e-9; on one draw in ten it costs several times a cold
+  * solve — a restart landing badly, not the float32 arithmetic. The range is
+  * not imprecision: iteration counts on the largest dense instances differ
+  * between platforms, for this method and for the reference implementation
+  * alike. See `NOTES.md` — '''Iteration counts are platform-specific''' — for
+  * both hosts' numbers before enabling this on a new class of problem.
   *
   * What does hold unconditionally is the answer: the reported result always
   * comes from the double-precision pass, so accuracy never depends on which

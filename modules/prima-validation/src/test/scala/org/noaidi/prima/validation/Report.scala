@@ -31,6 +31,7 @@ object Report:
     // Numbers here get pasted into notes and compared across machines, so the
     // decimal separator must not depend on where the machine happens to be.
     java.util.Locale.setDefault(java.util.Locale.ROOT)
+    println(ValidationLadder.host)
 
     val prima  = Pdhg.Solver(PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 500_000))
     val oracle = OjAlgoSolver()

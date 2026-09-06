@@ -35,24 +35,37 @@ class PdlpComparisonSuite extends munit.FunSuite:
     * would agree, and `random-600x400` needs tens of thousands of iterations,
     * where a difference in the restart schedule has room to show.
     */
-  private val ladder: Seq[(String, LpProblem)] =
-    LpFixtures.conclusive.map(i => i.name -> i.problem) ++ Seq(
-      "random-60x30"   -> LpFixtures.randomFeasible(1, 60, 10, 20, 0.25),
-      "random-200x120" -> LpFixtures.randomFeasible(2, 200, 40, 80, 0.10),
-      "random-600x400" -> LpFixtures.randomFeasible(3, 600, 120, 280, 0.04),
+  private val ladder: Seq[LpFixtures.Instance] =
+    LpFixtures.conclusive ++ Seq(
+      LpFixtures.Instance("random-60x30", LpFixtures.randomFeasible(1, 60, 10, 20, 0.25), None),
+      LpFixtures.Instance("random-200x120", LpFixtures.randomFeasible(2, 200, 40, 80, 0.10), None),
+      LpFixtures.Instance("random-600x400", LpFixtures.randomFeasible(3, 600, 120, 280, 0.04), None),
     )
 
   /** `unbounded` is compared separately: PDLP does not classify it. */
-  private val comparable = ladder.filterNot(_._1 == "unbounded")
+  private val comparable = ladder.filterNot(_.name == "unbounded")
 
   test("two implementations of the same algorithm take the same order of iterations") {
     println(f"%n${"instance"}%-20s ${"prima"}%9s ${"pdlp"}%9s ${"ratio"}%7s  status")
-    val ratios = comparable.map { (name, problem) =>
-      val mine   = prima.solve(problem)
-      val theirs = pdlp.solve(problem)
+    val ratios = comparable.map { instance =>
+      val name   = instance.name
+      val mine   = prima.solve(instance.problem)
+      val theirs = pdlp.solve(instance.problem)
 
       assertEquals(theirs.status, mine.status, s"$name: the two disagreed on the status")
       assert(theirs.iterations > 0, s"$name: PDLP reported no iterations, so there is nothing to compare")
+
+      // The answers first, then the counts. A ratio of iteration counts means
+      // nothing unless the two are solving the same problem to the same place,
+      // and a PDLP that reached a different optimum -- or the same one at a
+      // materially different accuracy -- would land somewhere inside a band
+      // deliberately widened to threefold and pass every instance.
+      if mine.status == SolveStatus.Optimal then
+        val scale = math.max(1.0, math.abs(mine.objectiveValue))
+        assertEqualsDouble(theirs.objectiveValue, mine.objectiveValue, 1e-6 * scale, s"$name: objective")
+        instance.expectedObjective.foreach { expected =>
+          assertEqualsDouble(theirs.objectiveValue, expected, 1e-6 * scale, s"$name: against the known optimum")
+        }
 
       val ratio = mine.iterations.toDouble / theirs.iterations
       println(f"$name%-20s ${mine.iterations}%9d ${theirs.iterations}%9d $ratio%7.2f  ${mine.status}")
@@ -89,7 +102,17 @@ class PdlpComparisonSuite extends munit.FunSuite:
     val unbounded = LpFixtures.conclusive.find(_.name == "unbounded").get
     assertEquals(prima.solve(unbounded.problem).status, SolveStatus.DualInfeasible)
     assertEquals(OrToolsSolver().solve(unbounded.problem).status, SolveStatus.DualInfeasible)
-    assertEquals(pdlp.solve(unbounded.problem).status, SolveStatus.NumericalError)
+
+    // Asserted as "never wrong", not as the exact status. `NumericalError` is
+    // what it gives today, and an OR-Tools bump that got PDLP to classify this
+    // -- an improvement, needing no change here -- would fail a build for a
+    // reason unrelated to Prima. That is the standard the ratio band above
+    // sets, and it applies to a status just as much as to a count.
+    val theirs = pdlp.solve(unbounded.problem).status
+    assert(
+      theirs == SolveStatus.NumericalError || theirs == SolveStatus.DualInfeasible,
+      s"PDLP reported $theirs for an unbounded problem, which is neither no-conclusion nor the right one",
+    )
 
     // The other direction it does get: a primal-infeasible problem is detected.
     val infeasible = LpFixtures.conclusive.find(_.name == "infeasible").get
@@ -124,5 +147,13 @@ class PdlpComparisonSuite extends munit.FunSuite:
     val bad = OrToolsSolver(
       OrToolsSolver.Options(backend = "PDLP", parameters = Some("no_such_field { x: 1 }"))
     )
-    intercept[IllegalArgumentException](bad.solve(problem))
+    // The message is checked, not just the type: `solve` throws the same
+    // exception from `require(solver != null, ...)`, so on a build where PDLP
+    // is missing from the linked natives this would pass for precisely the
+    // wrong reason -- the parameter check never having run.
+    val thrown = intercept[IllegalArgumentException](bad.solve(problem))
+    assert(
+      thrown.getMessage.contains("rejected the parameters"),
+      s"threw for the wrong reason: ${thrown.getMessage}",
+    )
   }

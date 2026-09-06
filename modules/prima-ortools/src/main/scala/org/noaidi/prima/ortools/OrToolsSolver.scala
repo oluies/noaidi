@@ -120,7 +120,15 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
 
     options.timeLimitMillis.foreach(limit => solver.setTimeLimit(limit))
 
+    // Two clocks. `started` is taken before the model is built and is what the
+    // caller is told the solve cost; `solveStarted` is what `setTimeLimit`
+    // actually bounds. Testing the limit against the first would report a
+    // `NOT_SOLVED` as a time limit because *model construction* was slow on a
+    // large problem, which is the conclusive-sounding-status-on-no-evidence
+    // this predicate exists to prevent, in a quieter form.
+    val solveStarted = System.nanoTime()
     val resultStatus = solver.solve()
+    val solveMillis  = (System.nanoTime() - solveStarted) / 1000000L
     val elapsed      = (System.nanoTime() - started) / 1000000L
     val status =
       OrToolsSolver.mapStatus(
@@ -133,7 +141,7 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
         // immediate abort -- would otherwise be reported as a time limit
         // whenever one merely happened to be set, which is the same
         // conclusive-sounding status on no evidence this method exists to stop.
-        options.timeLimitMillis.exists(elapsed >= _),
+        options.timeLimitMillis.exists(solveMillis >= _),
       )
 
     val primal = Array.tabulate(problem.numVariables)(j => variables(j).solutionValue())
@@ -238,14 +246,24 @@ object OrToolsSolver:
     * `simple_optimality_criteria` is the current form, gives an identical
     * answer, and is silent.
     */
-  def pdlp(tolerance: Double): OrToolsSolver =
+  def pdlp(tolerance: Double, iterationLimit: Int = 500_000): OrToolsSolver =
     require(tolerance > 0.0, s"tolerance must be positive, got $tolerance")
+    require(iterationLimit > 0, s"iterationLimit must be positive, got $iterationLimit")
     OrToolsSolver(
       Options(
         backend = "PDLP",
+        // Bounded, and not as a formality. PDLP's `TerminationCriteria` leaves
+        // `iteration_limit` unset by default, so a reference solver held to
+        // 1e-9 -- aggressive for a first-order method -- would run without any
+        // cap at all. The asymmetry is what makes it matter: Prima's side of
+        // the comparison carries `maxIterations`, so a divergent Prima fails a
+        // status assertion, while a divergent PDLP would hang the job until the
+        // CI timeout with nothing to read. With a limit it returns a feasible
+        // point it has not proved optimal, which is `TimeLimit` here, and the
+        // comparison fails on the status with the counts in hand.
         parameters = Some(
-          "termination_criteria { simple_optimality_criteria { " +
-            s"eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"
+          s"termination_criteria { iteration_limit: $iterationLimit " +
+            s"simple_optimality_criteria { eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"
         ),
       )
     )

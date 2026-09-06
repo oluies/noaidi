@@ -4,21 +4,34 @@ package ortools
 import org.noaidi.model.{ConstraintRef, Linear, Model, Variable}
 import org.noaidi.prima.ojalgo.OjAlgoSolver
 
-/** One model, three solvers that share no code.
+/** One model, four solvers that share no code.
   *
-  * This is the claim the modeling layer exists to make and the only place all
-  * three backends are in the same JVM: a model is written once and never names
-  * the solver that will run it. A first-order method, a pure-JVM simplex and
+  * This is the claim the modeling layer exists to make and the only place every
+  * backend is in the same JVM: a model is written once and never names the
+  * solver that will run it. Two first-order methods, a pure-JVM simplex and
   * Google's revised simplex agreeing on a model none of them was written
   * against is what makes the compilation trustworthy — one solver agreeing with
   * itself would only say the layer is self-consistent.
+  *
+  * The two first-order methods are not redundant. Prima and PDLP implement the
+  * same algorithm from the same paper, so they could agree with each other and
+  * both be wrong in a way a simplex would catch; the simplexes are the oracle,
+  * and PDLP is here because it is the only other implementation of what Prima
+  * does. `PdlpComparisonSuite` measures that second relationship rather than
+  * merely benefiting from it.
   */
-class ThreeSolverAgreementSuite extends munit.FunSuite:
+class SolverAgreementSuite extends munit.FunSuite:
+
+  private val tolerance = 1e-9
 
   private val solvers: Seq[LpSolver] = Seq(
-    Pdhg.Solver(PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000)),
+    Pdhg.Solver(PdhgParams(epsAbs = tolerance, epsRel = tolerance, maxIterations = 200_000)),
     OjAlgoSolver(),
     OrToolsSolver(),
+    // Told the tolerance explicitly. PDLP's default stops around 1e-5, looser
+    // than this suite's assertions, so a default-configured PDLP would fail
+    // them for a reason that has nothing to do with the modeling layer.
+    OrToolsSolver.pdlp(tolerance),
   )
 
   /** A small transport problem: two plants, three markets, a shipping cost per
@@ -52,7 +65,7 @@ class ThreeSolverAgreementSuite extends munit.FunSuite:
     m.minimise(Linear.sum(supply.indices.flatMap(p => demand.indices.map(k => ship(p)(k) * cost(p)(k)))))
     (m, ship, (supplyRows ++ demandRows).toSeq)
 
-  test("three solvers, one model, one answer") {
+  test("four solvers, one model, one answer") {
     val (m, ship, _) = transport()
     val compiled     = m.compile()
 
@@ -76,20 +89,25 @@ class ThreeSolverAgreementSuite extends munit.FunSuite:
     }
   }
 
-  test("the two solvers that report prices report the same ones") {
+  test("every solver that reports prices reports the same ones") {
     // ojAlgo is left out on purpose: it returns NaN rather than multipliers it
     // cannot vouch for, and that is the behaviour rather than a gap to work
-    // around. Prima and OR-Tools both report, and a price is the reason most of
-    // these models get written, so the two have to agree on more than the cost.
+    // around. The other three report, and a price is the reason most of these
+    // models get written, so they have to agree on more than the cost.
     val (m, _, rows) = transport()
     val compiled     = m.compile()
 
-    val byPrima   = compiled.interpret(Pdhg.Solver(PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000)))
-    val byOrTools = compiled.interpret(OrToolsSolver())
+    val byPrima = compiled.interpret(
+      Pdhg.Solver(PdhgParams(epsAbs = tolerance, epsRel = tolerance, maxIterations = 200_000))
+    )
+    val pricing = Seq("ortools-glop" -> OrToolsSolver(), "ortools-pdlp" -> OrToolsSolver.pdlp(tolerance))
 
     assertEquals(byPrima.status, SolveStatus.Optimal)
-    assertEquals(byOrTools.status, SolveStatus.Optimal)
-    rows.foreach { row =>
-      assertEqualsDouble(byOrTools.dual(row), byPrima.dual(row), 1e-5, row.name)
+    pricing.foreach { (name, solver) =>
+      val theirs = compiled.interpret(solver)
+      assertEquals(theirs.status, SolveStatus.Optimal, name)
+      rows.foreach { row =>
+        assertEqualsDouble(theirs.dual(row), byPrima.dual(row), 1e-5, s"$name: ${row.name}")
+      }
     }
   }

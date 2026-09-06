@@ -38,7 +38,7 @@ graph TD
     primaValidation["prima-validation<br/><i>cross-solver agreement</i>"]
     primaMps["prima-mps<br/><i>MPS reader</i>"]
     primaModel["prima-model<br/><i>names, expressions, duals</i>"]
-    primaOrtools["prima-ortools<br/><i>GLOP backend</i>"]
+    primaOrtools["prima-ortools<br/><i>GLOP + PDLP backends</i>"]
 
     networkModel["network-model<br/><i>PyPSA data model, topology</i>"]
     networkLopf["network-lopf<br/><i>dispatch LP</i>"]
@@ -107,6 +107,13 @@ effect system along. The effect system lives in `prima-zio`, one module out.
 `prima-validation` exists as a separate module rather than as tests inside
 `prima-ojalgo` because its job is to compare two backends, so it belongs to
 neither.
+
+`prima-ortools` carries two backends because they answer different questions.
+GLOP is a third simplex oracle, which is what an *answer* should be checked
+against. PDLP is the same restarted primal-dual hybrid gradient `prima-core`
+implements, and it is the only thing in the build that has an opinion on the
+restart schedule and the step-size rule — a simplex cannot tell you whether an
+iteration count is reasonable, because it does not have one to compare.
 
 `prima-model` depends on `prima-core` and on nothing else, which is the whole of
 what makes it a modeling layer rather than a front end. It compiles a model into

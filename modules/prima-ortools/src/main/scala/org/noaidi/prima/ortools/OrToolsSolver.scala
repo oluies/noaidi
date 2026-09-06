@@ -111,6 +111,13 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
       i += 1
     objective.setMinimization()
 
+    options.parameters.foreach { text =>
+      require(
+        solver.setSolverSpecificParametersAsString(text),
+        s"OR-Tools rejected the parameters for ${options.backend}: $text",
+      )
+    }
+
     options.timeLimitMillis.foreach(limit => solver.setTimeLimit(limit))
 
     val resultStatus = solver.solve()
@@ -192,9 +199,56 @@ object OrToolsSolver:
         * the two from recursing.
         */
       disambiguate: Boolean = true,
+      /** Backend-specific parameters, in OR-Tools' own text-proto format.
+        *
+        * Generic on purpose: each backend takes a different message, and a
+        * typed `tolerance` field here would be PDLP's proto leaking into an
+        * interface that also has to serve GLOP and SCIP. [[pdlp]] builds the
+        * one string this port actually needs.
+        *
+        * A string OR-Tools rejects is '''refused rather than ignored''' —
+        * `setSolverSpecificParametersAsString` returns `false` and leaves the
+        * solver on its defaults, so a typo would otherwise mean solving at a
+        * tolerance nobody asked for and reporting it as the one they did.
+        */
+      parameters: Option[String] = None,
   ):
     require(backend.nonEmpty, "backend must be named")
     require(timeLimitMillis.forall(_ > 0), "a time limit must be positive")
+
+  /** PDLP, held to a stated tolerance.
+    *
+    * PDLP is Google's own restarted primal-dual hybrid gradient — the same
+    * algorithm [[org.noaidi.prima.Pdhg]] implements, from the same paper. That
+    * makes it the least useful oracle here and by far the most interesting
+    * comparison: two independent implementations agreeing on an *objective*
+    * says only that both can solve an LP, but agreeing on how many iterations
+    * it takes to reach a tolerance is evidence about the restart schedule, the
+    * step-size rule and the termination test, which is the part of this solver
+    * that is a judgement rather than a theorem.
+    *
+    * The tolerance has to be set or the comparison is meaningless: PDLP's
+    * default stops around 1e-5, where Prima's stops at 1e-8, and an iteration
+    * count at one tolerance says nothing about a count at another.
+    *
+    * '''The spelling matters.''' `termination_criteria` carries
+    * `eps_optimal_absolute` and `eps_optimal_relative` directly, and both are
+    * deprecated — OR-Tools accepts them, applies them, and prints a warning to
+    * stderr that is easy to miss under sbt. The nested
+    * `simple_optimality_criteria` is the current form, gives an identical
+    * answer, and is silent.
+    */
+  def pdlp(tolerance: Double): OrToolsSolver =
+    require(tolerance > 0.0, s"tolerance must be positive, got $tolerance")
+    OrToolsSolver(
+      Options(
+        backend = "PDLP",
+        parameters = Some(
+          "termination_criteria { simple_optimality_criteria { " +
+            s"eps_optimal_absolute: $tolerance eps_optimal_relative: $tolerance } }"
+        ),
+      )
+    )
 
   /** OR-Tools' natives load once per JVM, and loading twice is not an error but
     * is not free either.

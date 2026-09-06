@@ -2520,9 +2520,56 @@ staging copy per operation. That is the same conclusion `HPC.md` reaches from
 the other direction, and it is why the module is a spike rather than a
 dependency.
 
-Two things a GPU backend still cannot be validated against here: cuPDLP-C,
-which needs CUDA hardware this port has not had access to, and fp64, which no
-accelerator in prospect offers at all.
+What a GPU backend still cannot be validated against here is fp64, which no
+accelerator in prospect offers at all, and a device timing on NVIDIA silicon.
+
+'''The algorithmic half of the cuPDLP-C comparison needed no GPU.''' What made
+cuPDLP-C worth reaching for was never that it runs on a device — it was that it
+is an independent implementation of restarted PDHG, and every other backend
+here is a simplex. A simplex is the right oracle for an answer and has no
+opinion at all on the restart schedule, the adaptive step-size rule, or where
+the termination test is applied, which are the parts of this solver that are
+judgements rather than theorems and which decide whether it takes two hundred
+iterations or twenty thousand.
+
+OR-Tools ships PDLP, which is that implementation, and `prima-ortools` already
+carried OR-Tools. Held to 1e-9 on both sides:
+
+| instance | Prima | PDLP | ratio |
+| --- | --- | --- | --- |
+| the six hand-written fixtures | 2–128 | 2–128 | **1.00** |
+| economic-dispatch | 256 | 192 | 1.33 |
+| infeasible | 1,088 | 768 | 1.42 |
+| random-60x30 | 1,280 | 1,024 | 1.25 |
+| random-200x120 | 6,464 | 4,288 | 1.51 |
+| random-600x400 | 35,392 | 32,832 | **1.08** |
+
+Identical on every instance that converges inside a few restart periods, and
+within a tenth on the one that needs thirty-five thousand iterations. `PdlpComparisonSuite`
+holds the ratio inside threefold either way — loose on purpose, since the two
+have different presolves and different scalings and an OR-Tools bump should not
+fail a build, while an order of magnitude would mean Prima's restart schedule
+had moved.
+
+Three details that had to be got right for the comparison to mean anything:
+
+- **The tolerance must be set.** PDLP's default stops around 1e-5 where Prima's
+  stops at 1e-8, and an iteration count at one tolerance says nothing about a
+  count at another. `OrToolsSolver.pdlp(tolerance)` exists for that reason.
+- **`termination_criteria`'s own `eps_optimal_absolute`/`eps_optimal_relative`
+  are deprecated.** OR-Tools accepts them, applies them, and prints a warning to
+  stderr that sbt makes easy to miss. The nested `simple_optimality_criteria`
+  is the current spelling, gives an identical answer, and is silent.
+- **A rejected parameter string is silently ignored.**
+  `setSolverSpecificParametersAsString` returns `false` and leaves the solver on
+  its defaults, so a typo would mean solving at a tolerance nobody asked for and
+  reporting it as the one they did. `OrToolsSolver` checks the return.
+
+One real difference, pinned rather than worked around: PDLP does not classify an
+unbounded problem. GLOP reports `INFEASIBLE` for `min -x, x >= 0` and the
+feasibility probe turns that into `DualInfeasible`; PDLP reports `NOT_SOLVED`,
+and a PDLP probe cannot establish feasibility either, so the honest answer is
+`NumericalError`. It does detect primal infeasibility.
 
 The licensing question stands: Cyfra is LGPL-2.1 where the rest of this build is
 Apache-2.0, which is why the backend lives in its own module — and the module is

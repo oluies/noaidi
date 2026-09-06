@@ -243,7 +243,7 @@ jobs:
           # exposed, since it is the only one reaching across three backends --
           # stop reporting while the step still went green. Raise it when the
           # suite grows.
-          MINIMUM_ORTOOLS_TESTS=10
+          MINIMUM_ORTOOLS_TESTS=14
           if [ "$total" -lt "$MINIMUM_ORTOOLS_TESTS" ]; then
             echo "::error::Only $total OR-Tools tests ran, below the floor of $MINIMUM_ORTOOLS_TESTS -- either the suite shrank or something stopped running."
             exit 1

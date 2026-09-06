@@ -51,10 +51,10 @@ class PdlpComparisonSuite extends munit.FunSuite:
 
   test("two implementations of the same algorithm take the same order of iterations") {
     println(f"%n${"instance"}%-20s ${"prima"}%9s ${"pdlp"}%9s ${"ratio"}%7s  status")
-    val ratios = comparable.map { instance =>
-      val name   = instance.name
-      val mine   = prima.solve(instance.problem)
-      val theirs = pdlp.solve(instance.problem)
+    val ratios = comparable.map { entry =>
+      val name   = entry.name
+      val mine   = prima.solve(entry.problem)
+      val theirs = pdlp.solve(entry.problem)
 
       assertEquals(theirs.status, mine.status, s"$name: the two disagreed on the status")
       assert(theirs.iterations > 0, s"$name: PDLP reported no iterations, so there is nothing to compare")
@@ -67,7 +67,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
       if mine.status == SolveStatus.Optimal then
         val scale = math.max(1.0, math.abs(mine.objectiveValue))
         assertEqualsDouble(theirs.objectiveValue, mine.objectiveValue, 1e-6 * scale, s"$name: objective")
-        instance.expectedObjective.foreach { expected =>
+        entry.expectedObjective.foreach { expected =>
           assertEqualsDouble(theirs.objectiveValue, expected, 1e-6 * scale, s"$name: against the known optimum")
         }
 
@@ -103,24 +103,23 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // Pinned rather than worked around. It is a real difference between the two
     // backends, and a caller choosing PDLP for its iteration behaviour should
     // know it gives up infeasibility classification in one direction.
-    val unbounded = LpFixtures.conclusive.find(_.name == "unbounded").get
-    assertEquals(prima.solve(unbounded.problem).status, SolveStatus.DualInfeasible)
-    assertEquals(OrToolsSolver().solve(unbounded.problem).status, SolveStatus.DualInfeasible)
+    val unbounded = instance("unbounded")
+    assertEquals(prima.solve(unbounded).status, SolveStatus.DualInfeasible)
+    assertEquals(OrToolsSolver().solve(unbounded).status, SolveStatus.DualInfeasible)
 
     // Asserted as "never wrong", not as the exact status. `NumericalError` is
     // what it gives today, and an OR-Tools bump that got PDLP to classify this
     // -- an improvement, needing no change here -- would fail a build for a
     // reason unrelated to Prima. That is the standard the ratio band above
     // sets, and it applies to a status just as much as to a count.
-    val theirs = pdlp.solve(unbounded.problem).status
+    val theirs = pdlp.solve(unbounded).status
     assert(
       theirs == SolveStatus.NumericalError || theirs == SolveStatus.DualInfeasible,
       s"PDLP reported $theirs for an unbounded problem, which is neither no-conclusion nor the right one",
     )
 
     // The other direction it does get: a primal-infeasible problem is detected.
-    val infeasible = LpFixtures.conclusive.find(_.name == "infeasible").get
-    assertEquals(pdlp.solve(infeasible.problem).status, SolveStatus.PrimalInfeasible)
+    assertEquals(pdlp.solve(instance("infeasible")).status, SolveStatus.PrimalInfeasible)
   }
 
   test("the tolerance has to be set, or the comparison measures two different questions") {
@@ -128,7 +127,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // default-configured PDLP reaches a different place and its iteration count
     // is not comparable to anything. This is why `OrToolsSolver.pdlp` exists
     // rather than `OrToolsSolver(Options(backend = "PDLP"))`.
-    val problem  = LpFixtures.conclusive.find(_.name == "economic-dispatch").get.problem
+    val problem  = instance("economic-dispatch")
     val default  = OrToolsSolver(OrToolsSolver.Options(backend = "PDLP")).solve(problem)
     val tightened = pdlp.solve(problem)
 
@@ -147,7 +146,7 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // on its defaults. Ignoring that return would mean solving at a tolerance
     // nobody asked for and reporting it as the one they did -- which is exactly
     // how the deprecated spelling of these fields would have gone unnoticed.
-    val problem = LpFixtures.conclusive.find(_.name == "economic-dispatch").get.problem
+    val problem = instance("economic-dispatch")
     val bad = OrToolsSolver(
       OrToolsSolver.Options(backend = "PDLP", parameters = Some("no_such_field { x: 1 }"))
     )
@@ -245,7 +244,14 @@ class PdlpComparisonSuite extends munit.FunSuite:
       OrToolsSolver.Options(
         backend = "PDLP",
         timeLimitMillis = Some(1),
-        parameters = Some(OrToolsSolver.pdlpParameters(tolerance, iterationLimit = 4)),
+        // 128 rather than the 4 the sibling test uses, to buy margin on both
+        // sides of a narrow window. The probe must stay short of converging --
+        // the stripped problem reaches optimality in 256 iterations, so 128
+        // leaves twice the headroom -- while both solves must run long enough
+        // to exceed the 1 ms limit. At 4 the outer solve took exactly 1 ms,
+        // which is `timeLimitReached`'s own boundary; at 128 it takes 2 and the
+        // probe's takes 4.
+        parameters = Some(OrToolsSolver.pdlpParameters(tolerance, iterationLimit = 128)),
       )
     )
 
@@ -255,8 +261,16 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // reaches the limit, since `timeLimitReached` is `solveMillis >= limit`.
     // Leaving that unasserted would let a faster host or an OR-Tools bump carry
     // this test on passing while it silently stopped pinning anything, which is
-    // the failure this test exists to remove, one level up. Measured: 7 ms on
-    // this instance, and 0 ms on `random-60x30`, which is why it is not used.
+    // the failure this test exists to remove, one level up.
+    //
+    // '''This measures the outer solve standing in for the probe's.''' The
+    // quantity the mutation actually turns on is the *probe's* solve -- the
+    // stripped, zero-objective problem built inside `feasibilityOf` -- which no
+    // caller can observe while the probe is internal. The two run the same
+    // iterations against the same matrix and measure 2 ms and 4 ms here, so the
+    // proxy holds today; a change to how `feasibilityOf` strips the objective,
+    // or a PDLP presolve that shortcuts a zero one, would decorrelate them.
+    // They have to stay comparable for this assertion to mean what it says.
     assertEquals(
       timed.solve(problem).status,
       SolveStatus.TimeLimit,
@@ -273,6 +287,11 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // converge must establish feasibility. Without it any other cause of a
     // non-converged probe -- an `ABNORMAL`, or a future options shape that
     // silently dropped the parameter string -- would also read as `Unknown`.
+    // On the small instance, not the one above: the control's job is to show
+    // this options shape still reaches `Feasible`, which does not need the
+    // suite's most expensive solve -- and on the large one a probe that ran out
+    // of *time* would also report `Feasible`, by the `TimeLimit` arm rather
+    // than by converging, which is a weaker thing to have shown.
     val roomy = OrToolsSolver(
       OrToolsSolver.Options(
         backend = "PDLP",
@@ -280,5 +299,5 @@ class PdlpComparisonSuite extends munit.FunSuite:
         parameters = Some(OrToolsSolver.pdlpParameters(tolerance, iterationLimit = 500_000)),
       )
     )
-    assertEquals(roomy.feasibilityOf(problem), OrToolsSolver.Feasibility.Feasible)
+    assertEquals(roomy.feasibilityOf(instance("random-60x30")), OrToolsSolver.Feasibility.Feasible)
   }

@@ -39,8 +39,16 @@ final class OrToolsSolver(options: OrToolsSolver.Options = OrToolsSolver.Options
     * would publish a conclusive status on no evidence -- exactly what this
     * method exists to stop the caller doing. `Unknown` becomes a
     * `NumericalError`, which is what a solver that could not decide should say.
+    *
+    * `private[ortools]` rather than `private`, for the reason [[mapStatus]]
+    * gives for the same widening: this is only reachable through a solve that
+    * returns `INFEASIBLE`, and the probe -- solving a strict sub-problem under
+    * the same inherited `iteration_limit` -- always converges before the outer
+    * solve does. So no end-to-end fixture can starve the probe without
+    * starving the outer solve first and never reaching here. Calling it is the
+    * only way to hold it to anything.
     */
-  private def feasibilityOf(problem: LpProblem): OrToolsSolver.Feasibility =
+  private[ortools] def feasibilityOf(problem: LpProblem): OrToolsSolver.Feasibility =
     val stripped = LpProblem(
       objective = IArray.fill(problem.numVariables)(0.0),
       constraintMatrix = problem.constraintMatrix,
@@ -272,7 +280,7 @@ object OrToolsSolver:
         // it has not proved optimal -- measured, and pinned by
         // `PdlpComparisonSuite`, because an earlier version of this comment
         // asserted the opposite and the difference decides whether the
-        // feasibility probe below can be fooled. With no time limit set that
+        // feasibility probe above can be fooled. With no time limit set that
         // maps to `NumericalError`, so the comparison fails on the status with
         // both counts in hand.
         parameters = Some(

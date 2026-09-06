@@ -41,8 +41,8 @@ the next paragraph, and which two of them violated -- and still left the
 composition unpinned, so reordering the stages to point the `^`-anchored grep at
 sbt's coloured line would have kept every case green. It lives in
 `count_tests.sh` now, and `test_count_tests.py` runs the whole thing against
-four real logs. Executing the pipeline covers the patterns, their order and
-their arithmetic at once, which is what this file can only approximate.
+real logs. Executing the pipeline covers the patterns, their order and their
+arithmetic at once, which is what this file can only approximate.
 
     python3 .github/scripts/test_workflow_log_patterns.py
 """

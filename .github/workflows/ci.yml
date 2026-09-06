@@ -109,8 +109,16 @@ jobs:
       # floor failure reading "either the suite shrank or something stopped
       # running" -- a diagnosis about the suite for what is actually a broken
       # counter, which is the precise misdirection this apparatus exists to
-      # prevent. It replaced five cases that used to run in the checker above,
-      # so without this line the change lowered coverage rather than raising it.
+      # prevent.
+      #
+      # It is here because the commit that added `test_count_tests.py` did not
+      # wire it into any job, so it had never run: every other checker in
+      # `.github/scripts/` is paired with a `- run:` line above, and that one
+      # was not. An earlier version of this comment claimed the file replaced
+      # five cases removed from the checker above; it did not. That checker's
+      # case count has only ever gone up, and the five in question were added
+      # and removed inside an unmerged branch, so a reader following the old
+      # claim would have gone looking for coverage that never existed.
       - run: python3 .github/scripts/test_count_tests.py
 
   test:
@@ -154,8 +162,8 @@ jobs:
           # One script, tested beside itself, rather than two hand-verified
           # copies of a four-stage pipeline. `count_tests.sh` explains why it
           # reads two counters and takes the larger; `test_count_tests.py` pins
-          # that against the four real log states, including the replay that
-          # failed this job on JDK 25.
+          # that against each real log state, including the replay that failed
+          # this job on JDK 25.
           # Captured on its own line before being eval'd. `eval "$(cmd)"` of an
           # empty string returns 0, so a script that aborted would leave the
           # variables unset and the step would die on `set -u` two lines later
@@ -220,7 +228,7 @@ jobs:
           # all four backends at once -- or `PdlpComparisonSuite`, which is the
           # only check on Prima's iteration counts, stop reporting while the
           # step still went green. Raise it when the suite grows.
-          MINIMUM_ORTOOLS_TESTS=15
+          MINIMUM_ORTOOLS_TESTS=16
           if [ "$total" -lt "$MINIMUM_ORTOOLS_TESTS" ]; then
             echo "::error::Only $total OR-Tools tests ran, below the floor of $MINIMUM_ORTOOLS_TESTS -- either the suite shrank or something stopped running."
             exit 1

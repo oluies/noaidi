@@ -158,21 +158,17 @@ class PdlpComparisonSuite extends munit.FunSuite:
     )
   }
 
-  test("a limit-terminated PDLP says it solved nothing, and cannot fool the probe") {
-    // Two comments in `OrToolsSolver` turn on which status PDLP gives when it
-    // runs out of iterations, and one of them said the wrong one. It is
-    // `NOT_SOLVED`, not `FEASIBLE`, so:
+  test("a limit-terminated PDLP reports that it solved nothing") {
+    // Which status PDLP gives when it runs out of iterations is the premise two
+    // comments in `OrToolsSolver` rest on, and one of them asserted the wrong
+    // one. It is `NOT_SOLVED`, which with no time limit set maps to
+    // `NumericalError` -- so a divergent reference fails this suite's status
+    // assertion rather than being mistaken for a feasible point.
     //
-    //   - a divergent reference fails this suite's status assertion as
-    //     `NumericalError` rather than as `TimeLimit`;
-    //   - the feasibility probe, which inherits `iteration_limit` through
-    //     `options.copy`, cannot report an exhausted run as proof of
-    //     feasibility -- `NOT_SOLVED` reaches `TimeLimit` only when a time
-    //     limit was set and reached, and the probe sets none.
-    //
-    // The second is the one that matters: the other way round, a probe that
-    // merely ran out of iterations would hand the caller a conclusive
-    // `DualInfeasible` derived from a non-converged iterate.
+    // That is the premise only. The conclusion it supports -- that an exhausted
+    // probe cannot report `Feasible` -- is pinned by the next test, which has to
+    // call `feasibilityOf` directly; see there for why no end-to-end fixture
+    // reaches it.
     val problem = LpFixtures.randomFeasible(3, 600, 120, 280, 0.04)
     val starved = OrToolsSolver.pdlp(tolerance, iterationLimit = 4).solve(problem)
 
@@ -182,4 +178,36 @@ class PdlpComparisonSuite extends munit.FunSuite:
     // And the same solver, given room, still reaches the answer -- so the
     // status above is the limit talking and not the instance.
     assertEquals(pdlp.solve(problem).status, SolveStatus.Optimal)
+  }
+
+  test("an exhausted feasibility probe establishes nothing, rather than feasibility") {
+    // Called directly, because no solve can reach it in this state. `feasibilityOf`
+    // runs only when the outer solve returns `INFEASIBLE`, and the probe solves a
+    // strict sub-problem -- the same rows with the objective thrown away -- under
+    // the same inherited `iteration_limit`. So the probe always converges first:
+    // measured on the `infeasible` fixture, 704 iterations against the outer
+    // solve's 768. Any limit generous enough for the outer solve to reach
+    // `INFEASIBLE` has already let the probe finish, and any tighter one starves
+    // the outer solve to `NOT_SOLVED` so the probe is never built. There is no
+    // window, which is why this is asserted against the method rather than
+    // through `solve` -- the same reason `mapStatus` is `private[ortools]`.
+    //
+    // What it pins is the step the comment in `feasibilityOf` turns on: an
+    // exhausted probe must land on `Unknown`, so the caller is told nothing was
+    // established. Were it to answer `Feasible`, `mapStatus` would publish a
+    // conclusive `DualInfeasible` derived from a non-converged iterate.
+    val problem = LpFixtures.randomFeasible(1, 60, 10, 20, 0.25)
+
+    assertEquals(
+      OrToolsSolver.pdlp(tolerance, iterationLimit = 4).feasibilityOf(problem),
+      OrToolsSolver.Feasibility.Unknown,
+      "a probe that ran out of iterations claimed to have established something",
+    )
+
+    // The control: the same probe, given room, does establish feasibility -- so
+    // the `Unknown` above is the limit talking and not the problem.
+    assertEquals(
+      OrToolsSolver.pdlp(tolerance).feasibilityOf(problem),
+      OrToolsSolver.Feasibility.Feasible,
+    )
   }

@@ -474,6 +474,18 @@ object Pdhg:
       * If the primal moved much further than the dual, the primal steps were
       * too large relative to the dual ones; the weight update corrects that,
       * geometrically smoothed so one anomalous period cannot swing it.
+      *
+      * '''Two candidates, not three, and that is deliberate.''' The point this
+      * period began from is still held in `xRestart`, and its weighted error is
+      * already in hand as `errorAtRestart`, so making it a third candidate is
+      * both free and the obvious fix for a restart that moves backwards — which
+      * it demonstrably can, and does on one dense instance at a cost of 19,000
+      * iterations. It is not made: on an infeasible problem the iterates
+      * diverge along a ray and that divergence is the certificate, so a rule
+      * that refuses to re-centre on a worse point fights the only mechanism
+      * that detects infeasibility. The `infeasible` fixture goes from 1,088
+      * iterations to 391,616. NOTES records the measurements under "Where seed
+      * 3's refinement goes".
       */
     private def restartAt(useAverage: Boolean): Unit =
       if useAverage then

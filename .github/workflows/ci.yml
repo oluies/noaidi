@@ -142,22 +142,13 @@ jobs:
         run: |
           set -euo pipefail
           sbt --batch "Test/compile; testFull" 2>&1 | tee sbt-test.log
-          # `|| true` matters: when grep matches nothing -- which is precisely
-          # the case being guarded against -- it exits 1, and under `pipefail`
-          # plus `set -e` that would abort the step here, before the explicit
-          # check below could report why.
-          # Summed from munit's per-suite lines, not from sbt's per-project
-          # `Passed: Total`. The aggregate undercounts when sbt's action cache is
-          # warm -- observed locally at 628 against a true 733, with `prima-core`
-          # reporting 76 where its suites total 181 -- and this job exists to
-          # notice tests *not* running, so a counter that silently loses a third
-          # of them is the wrong instrument. The per-suite lines come from the
-          # test framework and are one per suite that actually reported.
-          total=$(grep -oE 'finished: [0-9]+ failed, [0-9]+ ignored, [0-9]+ total' sbt-test.log \
-            | grep -oE '[0-9]+ total' \
-            | grep -oE '^[0-9]+' \
-            | awk '{ sum += $1 } END { print sum + 0 }' || true)
-          total=${total:-0}
+          # One script, tested beside itself, rather than two hand-verified
+          # copies of a four-stage pipeline. `count_tests.sh` explains why it
+          # reads two counters and takes the larger; `test_count_tests.py` pins
+          # that against the four real log states, including the replay that
+          # failed this job on JDK 25.
+          eval "$(.github/scripts/count_tests.sh sbt-test.log)"
+          echo "test count: $suites from per-suite lines, $summary from sbt's summary"
           echo "Total tests run across all modules: $total"
           # A floor, not a bare "more than zero". `-lt 1` catches sbt reporting
           # success having run nothing, and nothing else: a change that silently
@@ -173,7 +164,7 @@ jobs:
           # gets muted. A floor only fails when coverage goes backwards, which is
           # when someone should look. Raise it when the suite grows enough to be
           # worth re-anchoring; it does not need to track the total.
-          MINIMUM_TESTS=690
+          MINIMUM_TESTS=730
           if [ "$total" -lt "$MINIMUM_TESTS" ]; then
             echo "::error::Only $total tests ran, below the floor of $MINIMUM_TESTS -- either the suite shrank or something stopped running."
             exit 1
@@ -183,10 +174,43 @@ jobs:
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only
       # the Maven artifacts, and it reaches into prima-core's package-private
-      # internals — so without this step a refactor there would break the spike
-      # silently, and only surface the next time someone with a GPU opened it.
-      - name: Compile the GPU spike
+      # internals — so without this step a refactor there would break the
+      # backend silently, and only surface the next time someone with a GPU
+      # opened it.
+      - name: Compile the GPU backend
         run: sbt --batch "primaCyfra/Test/compile"
+
+      # prima-ortools is out of the root aggregate for a different reason --
+      # `ortools-java` declares every platform's natives as runtime
+      # dependencies -- and unlike Vulkan, the one this runner needs is on Maven
+      # Central and loads here. So it is *run*, not merely compiled: a third
+      # backend nothing exercises is code that looks right and has never been
+      # asked the question it exists to answer, which is the failure this
+      # repository has already been caught by once.
+      - name: Test the OR-Tools backend
+        run: |
+          set -euo pipefail
+          sbt --batch "primaOrtools/testFull" 2>&1 | tee sbt-ortools.log
+          eval "$(.github/scripts/count_tests.sh sbt-ortools.log)"
+          echo "OR-Tools test count: $suites from per-suite lines, $summary from sbt's summary"
+          # A floor here too, and for the same reason: `testFull` exiting 0
+          # having run nothing looks exactly like a passing suite.
+          #
+          # Set at the module's whole count, not at a fraction of it. The
+          # aggregate floor above can afford 3% of slack because it covers
+          # hundreds of cases across nine modules; here there are three suites,
+          # and a floor with room for one of them to vanish would let
+          # `SolverAgreementSuite` -- which is the only thing reaching across
+          # all four backends at once -- or `PdlpComparisonSuite`, which is the
+          # only check on Prima's iteration counts, stop reporting while the
+          # step still went green. Raise it when the suite grows.
+          MINIMUM_ORTOOLS_TESTS=14
+          if [ "$total" -lt "$MINIMUM_ORTOOLS_TESTS" ]; then
+            echo "::error::Only $total OR-Tools tests ran, below the floor of $MINIMUM_ORTOOLS_TESTS -- either the suite shrank or something stopped running."
+            exit 1
+          fi
+          echo "$total OR-Tools tests passed (floor $MINIMUM_ORTOOLS_TESTS)"
+          echo "$total OR-Tools tests passed (floor $MINIMUM_ORTOOLS_TESTS)" >> "$GITHUB_STEP_SUMMARY"
 
   # The lane-count question, which no machine here can answer.
   #

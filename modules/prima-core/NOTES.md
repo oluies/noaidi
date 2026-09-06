@@ -207,7 +207,9 @@ and refines on the CPU in double precision from that warm start. The reported
 result always comes from the double-precision pass, so accuracy does not depend
 on which device did the bulk of the work.
 
-Iterations of double-precision work removed, against a cold fp64 solve:
+Iterations of double-precision work removed, against a cold fp64 solve.
+Measured on macOS/aarch64 — see '''Iteration counts are platform-specific''';
+the two largest instances here move between hosts and the rest do not:
 
 | instance | at 1e-9 | at 1e-6 |
 | --- | --- | --- |
@@ -229,22 +231,104 @@ is why `WarmStart` carries `stepSize` and `primalWeight`.
 
 **The expensive part is the tail, and float32 cannot reach it.** On
 random-600x400 the float32 pass reaches 1e-5 in 1,792 iterations while the cold
-solve needs 35,392 for 1e-9. The first few digits are nearly free and the last
+solve needs 35,392 for 1e-9 — 26,048 on Linux, where the ratio still says the
+same thing and the pair does not. The first few digits are nearly free and the last
 few cost everything. A float32 device therefore removes only the cheap prefix,
 unless the caller's tolerance is loose enough that float32 can deliver the whole
 answer — which at 1e-6 it does for most of the ladder.
 
-**On dense random LPs at tight tolerance the float32 point is worse than
-starting from zero.** At 1e-6, random-600x400 costs 2,752 iterations cold and
-19,840 refining. Not merely unhelpful — actively harmful, and not yet explained.
-Dense random LPs are close to the worst case for a first-order method and are
-not representative of power-system LPs, but this is unresolved and is the reason
-`MixedPrecision` is opt-in rather than the default path.
+**The row that says the float32 point is worse than starting from zero is one
+draw, not a property.** At 1e-6, random-600x400 costs 2,752 iterations cold and
+19,840 refining, and that −621% was carried here as a finding about reduced
+precision on dense LPs. It is a finding about *that instance*. `random-600x400`
+is seed 3 of a family the report now sweeps ten draws of, and it is the only one
+of the ten where the hand-over costs more than a cold solve:
 
-The table above is a hand-filtered view: the validation report prints the two
-tolerance regimes as separate tables covering all twelve ladder instances, and
-the six rows here are the ones worth carrying. Run it to regenerate the
-underlying numbers, then merge.
+| tolerance | median saved | worst | best | host |
+| --- | --- | --- | --- | --- |
+| 1e-6 | **26%** | −621% (seed 3) | 45% | macOS/aarch64 |
+| 1e-6 | **24%** | −443% (seed 3) | 56% | Linux/x86_64 |
+| 1e-9 | −6% | −24% | 23% | macOS/aarch64 |
+| 1e-9 | +1% | −81% | 18% | Linux/x86_64 |
+
+Both platforms are given because they differ, and the report prints whichever
+one ran it — see '''Iteration counts are platform-specific''' below. The finding
+is the same on both: at 1e-6 seed 3 is the outlier and the median saving is
+around a quarter of the double-precision work; at 1e-9 the hand-over is roughly
+break-even across the family, which is the "float32 removes only the cheap
+prefix" result above, arrived at from ten instances instead of one.
+
+So what needed explaining was never a general regression. See '''Where seed 3's
+refinement goes''' below for what happens on the one instance, and why the
+obvious fix for it is worse than the problem.
+
+The tables above are a hand-filtered view: the validation report prints the two
+tolerance regimes as separate tables covering all twelve ladder instances, then
+the ten-draw sweep. Run it to regenerate the underlying numbers, then merge.
+
+### Iteration counts are platform-specific
+
+`ValidationLadder.worstGapBound` already records that the worst oracle gap is
+4.9e-10 on macOS/aarch64 and 5.9e-10 on Linux/x86_64. Iteration counts vary the
+same way and by far more, and every number in this file is from the platform its
+paragraph names.
+
+Prima and PDLP, both at 1e-9. Everything up to and including `random-60x30`
+gives an identical count on both hosts, for both implementations. The two
+largest instances do not:
+
+| instance | Prima mac | Prima Linux | PDLP mac | PDLP Linux |
+| --- | --- | --- | --- | --- |
+| random-200x120 | 6,464 | 6,784 | 4,288 | 3,968 |
+| random-600x400 | 35,392 | **26,048** | 32,832 | 32,832 |
+
+It is not a Prima quirk: PDLP moves too, in the other direction on
+random-200x120, and it is a separate C++ implementation. The arithmetic is
+IEEE-754 double on both hosts and the algorithm is deterministic, so what moves
+is the order operations are contracted and rounded in, which perturbs the
+trajectory enough to change which checkpoint a restart fires at. On instances
+that converge inside a few restart periods there is no room for it and both
+agree exactly.
+
+The practical consequence is that a *ratio* between two solvers on one host is
+evidence and an absolute count is a measurement of that host. That is why
+`PdlpComparisonSuite` bounds the ratio rather than pinning counts.
+
+### Where seed 3's refinement goes
+
+Traced on macOS/aarch64; the shape holds on Linux, where the same seed costs
+−443% rather than −621%. Tracing every evaluation point of both solves puts the
+loss in a 200-iteration window. The refinement starts from a point whose fp64 KKT error is genuinely
+good — primal residual 4.0e-3, against 8.6e+2 at the origin — and by iteration
+192 it has reached a weighted error of 3.5e-3, better than the cold solve
+reaches before iteration 2,300. A restart fires there on the sufficient-decay
+test and re-centres on the current iterate. By iteration 384 the error is 3.3, a
+thousandfold worse, and the next 19,000 iterations are spent getting back.
+
+The restart is not incidental to that. `restartAt` chooses between two
+candidates, the current iterate and the running average, and takes the better of
+them — but neither is compared against the point the period began from, whose
+weighted error is already in hand as `errorAtRestart`. So a restart can
+re-centre on a point worse than the one it started from, and when it does, the
+period's ground is lost along with its progress: `errorAtRestart` is reset
+upward and nothing records that a better point was ever held.
+
+**A third candidate is the obvious fix and it is a bad one.** Holding the
+period's starting point when both candidates are worse takes seed 3 from −621%
+to −7% at 1e-6, and the ten-draw median at 1e-9 from −6% to +12%. It also takes
+the `infeasible` fixture from 1,088 iterations to 391,616, and its refinement
+past the 500,000 limit. The reason is not subtle once seen: on an infeasible
+problem the iterates diverge along a ray, and that divergence *is* the
+certificate. The KKT error has to grow. A rule that refuses to restart onto a
+worse point is a rule that fights the only mechanism by which infeasibility is
+ever detected. Allowing one rewind per restart point keeps the infeasible
+fixture near its old cost — 1,856 iterations — and gives back most of the
+benefit with it: seed 3 returns to −407%.
+
+That is why the restart rule has two candidates rather than three, and the
+change is not made. What the trace does establish is that the anomaly is a
+restart landing badly on one draw, not the float32 arithmetic: the point handed
+over is a good one, and the refinement is at 3.5e-3 before anything goes wrong.
 
 ## L2: what LOPF reproduces, and what it does not
 
@@ -488,8 +572,8 @@ reaches an incumbent early — which is what makes pruning possible at all — a
 because a child differs from its parent in exactly one bound, so the parent's
 iterate warm-starts it well. That warm-start property is the reason a first-order
 method is attractive inside branch-and-bound in the first place, and it is
-asserted to leave the answer unchanged rather than assumed to, given the
-unexplained dense-instance warm-start regression recorded above.
+asserted to leave the answer unchanged rather than assumed to, given how far a
+warm start can move the iteration count on the dense instances recorded above.
 
 **Checked against ojAlgo's mixed-integer solver**, whose bound *is* exact, over
 random mixed instances with deliberately fractional relaxations. That cross-check
@@ -2202,16 +2286,88 @@ carry `varying = true` so the fallback kept them right — but the fallback is t
 weaker signal, and a piecewise attribute that did not vary by snapshot would have
 been read as `Static` with its overrides silently dropped.
 
+## The modeling layer, and the third backend
+
+`prima-model` is names, expressions and duals; `LpSolver` was already the solver
+abstraction and this does not replace it. A model compiles to an `LpProblem` and
+is handed to a backend it does not name.
+
+Four things it decides, none of them obvious:
+
+**`Variable` and `LinearExpression` share a `Linear` trait rather than a
+conversion.** The alternative, `given Conversion[Variable, LinearExpression]`,
+needs `scala.language.implicitConversions` at every call site that writes a
+model — a lot of import for the privilege of writing `x + y`.
+
+**Terms are appended, not summed, until the model is compiled.** Summing on the
+way in makes every `+` walk the expression built so far, so a bus balance over a
+thousand generators becomes quadratic. `compile` collapses duplicates through an
+insertion-ordered map, which also makes two compilations of one model
+byte-identical — a hash-ordered one would make a golden-file comparison of a
+built problem depend on iteration order.
+
+**A coefficient that cancels to zero is dropped rather than stored.** A
+structural zero would be equilibrated and multiplied like any other entry and
+would change nothing but the cost.
+
+**A maximisation is negated on the way in and everything that carries the
+objective's sign is negated on the way out** — the value, the duals and the
+reduced costs. Negating the value alone would report a price whose sign says the
+opposite of what the model asked for.
+
+### OR-Tools reports an unbounded problem as infeasible
+
+`min -x` subject to `x >= 0` comes back `MPSOLVER_INFEASIBLE` from GLOP. Those
+are opposite answers, and `SolveStatus` already sets the standard here: for
+Prima, diverging without a certificate is an iteration limit and not an
+infeasibility.
+
+So `OrToolsSolver` does not pass the status through. On `INFEASIBLE` it re-solves
+with the objective thrown away: a feasible region that exists means the original
+was unbounded, one that does not means it really was infeasible. The cost is a
+second solve on a path that has already failed, and the probe runs with the
+disambiguation off, which is what stops the two from recursing.
+
+### Writing a test whose duals are worth asserting on
+
+The three-solver agreement fixture is a transport problem, and getting its
+numbers to have a unique dual took two tries. With total supply equal to total
+demand every supply row binds. With one plant's supply equal to one market's
+demand a basic variable sits at zero. Either way the optimal dual is a face
+rather than a point, the three solvers land on three different points of it, and
+the objective still agrees — which is the same thing `network-lopf`'s nodal
+prices do on the reference fixture, recorded above, and it is a property of the
+problem rather than a disagreement. The fixture now has slack in the cheaper
+plant and one binding row, and all three prices match to 1e-5.
+
+### What was not done
+
+`network-lopf` still keeps its own `(component, entity, snapshot) -> column`
+map. It is the obvious first consumer of this layer and it is deliberately not
+converted: the L2 model is gated on golden-file comparison against a pinned
+PyPSA, so rewriting how it is built is a change whose only honest test is that
+gate, and it should be made on its own rather than underneath something else.
+What `Lopf.solve` and `Sclopf.solve` did take is an `LpSolver`, which is the
+part that actually made them solver-dependent — and `SolverAgnosticSuite`
+reaches PyPSA's objective through ojAlgo on the same model Prima solves.
+
 ## Known gaps
 
-**Why the float32 warm start hurts on dense instances is unexplained.** The
-prime suspects are the restart schedule — `errorAtRestart` is seeded from an
-already-small error, so the sufficient-decay test needs a fivefold reduction
-from a low base and rarely fires — and a step size the adaptive rule settled on
-while measuring float32 noise. Neither has been confirmed. Until it is, do not
-enable mixed precision by default.
+**Mixed precision stays opt-in, but no longer because of an unexplained
+regression.** The −621% on one dense instance was the reason given, and the
+ten-draw sweep shows it is that draw rather than the method: the median saving
+at 1e-6 is 26% on macOS/aarch64 and 24% on Linux/x86_64. What is left is real and much smaller — at 1e-9 the hand-over is
+break-even across the family, and on a dense instance a restart can land badly
+enough to cost several times a cold solve. Both are properties of the instance
+class rather than a defect waiting to be found. See '''The expensive part is the
+tail''' and '''Where seed 3's refinement goes'''.
 
-**No GPU backend yet, but the gating question is answered.** `Kernels` is the
+The step size the float32 pass settles on was the other named suspect, and it is
+not the culprit: dropping it, halving it, tenthing it, and substituting the cold
+solve's own final value all leave seed 3 between −363% and −972%.
+
+**There is a GPU backend, it is correct, and it is far too slow to use.**
+`Kernels` is the
 seam, and `KernelContractSuite` is written against the trait so a new backend
 inherits the whole contract by supplying one method. What was unknown was
 whether Cyfra's DSL could express the one kernel PDHG cannot do without.
@@ -2258,8 +2414,9 @@ Three constraints the spike surfaced, none fatal:
 
   Buffer **residency** across dispatches — the matrix staying on the device
   while only `x` is rewritten, which is what `Kernels.allocate`/`upload`/
-  `download` would depend on — is still not exercised. That is the next thing to
-  demonstrate before a backend is written against this.
+  `download` depend on — was the next thing to demonstrate, and `CyfraKernels`
+  demonstrates it: one allocation holds every vector and both matrices for the
+  life of a solve.
 - **`limit` needs a static cap**, satisfied by the maximum row non-zero count,
   which is a plain Scala `Int` at construction time. A pathological matrix with
   one very long row makes every invocation's loop bound that long, though
@@ -2270,10 +2427,199 @@ Three constraints the spike surfaced, none fatal:
   into the root build — `sbt testFull` does not run it — since no CI runner is
   guaranteed a working Vulkan stack.
 
-Still open: a full `CyfraKernels` implementing all eight operations, and any
-performance measurement at all. The spike establishes feasibility, not value.
-And the licensing question stands: Cyfra is LGPL-2.1 where the rest of this
-build is Apache-2.0, which is why the backend lives in its own module.
+### The backend, and what it costs
+
+`CyfraKernels` implements all eight operations and passes
+`KernelContractSuite` unchanged — the first backend to test the claim that seam
+was built on rather than repeat it. `CyfraSolveSuite` then runs whole solves
+through it: `MixedPrecision` with the GPU as the reduced pass reaches the same
+objective as the reference on `economic-dispatch`, `random-60x30` and
+`random-200x120`, to the 1e-6 the caller asked for, because the refinement that
+produces the answer is still fp64 on the host.
+
+Two pieces of plumbing the spike did not need:
+
+- **An allocation that outlives one dispatch.** Cyfra hands out an `Allocation`
+  only for the duration of a callback, which is the right shape for a one-shot
+  dispatch and the wrong one for a solver that allocates once and calls in a few
+  hundred thousand times. `DeviceLoop` parks that callback on a thread of its
+  own and feeds it through a queue. The thread is required rather than
+  convenient: the command pool and descriptor-set manager come from a
+  `VulkanThreadContext`, so one allocation is one thread's.
+- **`writeArray` is not usable on this release.** It copies its byte buffer to
+  the device and *then* fills it from the array, so it uploads whatever the
+  fresh allocation happened to contain. `GBuffer(array)` does the same two steps
+  in the right order, and the backend builds the byte buffer and calls `write`
+  itself for the same reason.
+
+**And it is three orders of magnitude slower than the CPU.** Microseconds per
+iteration, fp32 in both cases, with the cost of starting the solve separated
+out:
+
+| instance | CPU fp64 | CPU fp32 | GPU fp32 | GPU setup |
+| --- | --- | --- | --- | --- |
+| economic-dispatch (21v) | 0.2 | 0.3 | **4,082** | ~0 |
+| random-60x30 | 0.6 | 0.8 | **3,787** | 22 ms |
+| random-200x120 | 2.2 | 4.3 | **3,679** | 41 ms |
+
+Each figure is a slope, not a division. A single timed solve cannot separate
+what an iteration costs from what starting one costs, and on the GPU the second
+is a Vulkan instance, a logical device, the SPIR-V compilation of every program
+and the first touch of every buffer. So each backend runs the same solve under
+two iteration caps and the slope between the two points is what an iteration
+costs — the intercept, reported alongside, is what it cost to get to the first.
+The first version of this measurement divided the whole solve by its iteration
+count, which reports a fixed cost as a per-iteration one; it happened to give
+much the same answer, but only because the setup is small next to a two-second
+solve, which is not something it demonstrated.
+
+Two details of the method. Raising the caps until the CPU's difference clears
+the clock does not work — both would then sit past the iteration where the solve
+converges, and the two points would coincide — so the cheap backends run each
+point two hundred times instead, which costs nothing on a backend that is
+already microseconds. And the intercept is an extrapolation back from two
+points, so where it comes out below zero the setup is simply smaller than the
+run-to-run spread; `~0` says that rather than printing a negative fixed cost.
+
+The GPU column moves by about ten per cent between runs, so read it as "about
+four milliseconds" rather than as four significant figures.
+
+The number to look at is not the ratio, it is that the GPU column barely moves
+across a tenfold change in problem size. A cost that does not scale with the
+work is not the work, and measuring the three kinds of operation over a
+thousandfold range of vector length says where it goes:
+
+| operation | 64 | 1,024 | 4,096 | 65,536 |
+| --- | --- | --- | --- | --- |
+| `copy` — a bare dispatch | 45 | 46 | 53 | 42 |
+| `axpby` — dispatch plus a scalar | 251 | 251 | 220 | 225 |
+| `squaredNorm` — dispatch plus a read back | 462 | 473 | 459 | 432 |
+
+Flat, all of it, in microseconds. The arithmetic is free and the launch is
+everything. A PDHG iteration is about seventeen of these, which is the 4 ms.
+
+Three findings behind those numbers, in the order they matter:
+
+- **A scalar costs five times a dispatch.** Every `GBuffer` Cyfra allocates is
+  `Buffer.DeviceBuffer`, and there is no host-visible one to ask for, so writing
+  `alpha` and `beta` means a staging buffer, a copy command buffer and a pending
+  execution — 180 microseconds for eight bytes. Eight of the seventeen
+  operations in an iteration carry a scalar, so this alone is a third of the
+  cost. The DSL body cannot read a dispatch parameter, and the one escape from
+  that, a uniform built from `Params`, handles `Int32` and nothing else on this
+  release.
+- **A cached program cannot be re-dispatched across a solve boundary, and why
+  is not settled.** `economic-dispatch` solved twice on one `CyfraKernels` gave
+  the right answer and then `NumericalError` at iteration two, with the primal
+  still at the origin — silently, not as a failure. A second solve of a
+  *different* shape was always fine, which is what pointed at the program cache:
+  that path builds new programs. `uploadMatrix` rebuilds them now.
+
+  What that establishes is the trigger and not the mechanism. The first guess —
+  "a program dispatched against buffers allocated after its earlier dispatches
+  were cleaned up" — is contradicted from inside a single solve, where
+  `partialsFor` allocates its buffer on the first reduction, after every
+  elementwise program has been built and dispatched, and that path is correct.
+  So the guard covers the boundary the failure was reproduced at, and the
+  narrower condition is open.
+
+  Rebuilding costs less than it sounds: `VkCyfraRuntime` caches shaders on
+  `SpirvProgram.shaderHash`, a digest of the SPIR-V, the entry point, the
+  workgroup size and the binding tags, so an identically rebuilt program
+  resolves to the same `ComputePipeline`. The spike's own control measures that
+  directly — building a second identical program after the path is warm is free.
+  What the twelve-solve test adds is narrower than it first claimed: it holds
+  the per-solve cost flat, which rules out anything *accumulating*, and would
+  not notice a constant per-solve pipeline build, because all twelve would pay
+  it alike.
+
+  None of this is a benchmark artifact: `BranchAndBound.solveWith` deliberately
+  holds one set of kernels for a whole search and solves a relaxation per node,
+  so every node after the first would have been wrong. What a long run *does*
+  accumulate is buffers, because `Kernels` has no deallocation — a property of
+  the interface, recorded in `CyfraKernels`'s own scaladoc, and the reason to
+  cycle a backend rather than hold one indefinitely.
+- **Batching the submissions changes nothing.** The interface invites the
+  opposite conclusion — `Kernels` describes reductions as "the only
+  synchronisation points on an asynchronous device", which reads as an
+  instruction to record everything else and submit once. Recording 1, 4, 16 and
+  64 operations before submitting gives 4,191, 4,178, 4,194 and 4,180
+  microseconds per iteration. The cost is per dispatch, not per submission.
+- **Batching the *dispatches* does help, by about half.** Sixteen dispatches
+  chained into one `GExecution` cost 192 microseconds against 328 issued
+  separately. That is a finding about the seam rather than about the device:
+  `Kernels` is a call-at-a-time interface, so a backend behind it cannot use
+  this. A batched seam is where a Cyfra backend would have to go — and halving
+  4 ms still leaves it a thousand times the CPU.
+
+So the honest reading is that this settles the *feasibility* question completely
+and answers the value question in the negative for this release of Cyfra. What
+would change it is not a bigger problem — the flat columns above say size is not
+what the GPU is losing on — but a path that does not pay a command buffer and a
+staging copy per operation. That is the same conclusion `HPC.md` reaches from
+the other direction, and it is why the module is a spike rather than a
+dependency.
+
+What a GPU backend still cannot be validated against here is fp64, which no
+accelerator in prospect offers at all, and a device timing on NVIDIA silicon.
+
+'''The algorithmic half of the cuPDLP-C comparison needed no GPU.''' What made
+cuPDLP-C worth reaching for was never that it runs on a device — it was that it
+is an independent implementation of restarted PDHG, and every other backend
+here is a simplex. A simplex is the right oracle for an answer and has no
+opinion at all on the restart schedule, the adaptive step-size rule, or where
+the termination test is applied, which are the parts of this solver that are
+judgements rather than theorems and which decide whether it takes two hundred
+iterations or twenty thousand.
+
+OR-Tools ships PDLP, which is that implementation, and `prima-ortools` already
+carried OR-Tools. Held to 1e-9 on both sides:
+
+| instance | Prima | PDLP | ratio | host |
+| --- | --- | --- | --- | --- |
+| the six hand-written fixtures | 2–128 | 2–128 | **1.00** | both |
+| economic-dispatch | 256 | 192 | 1.33 | both |
+| infeasible | 1,088 | 768 | 1.42 | both |
+| random-60x30 | 1,280 | 1,024 | 1.25 | both |
+| random-200x120 | 6,464 | 4,288 | 1.51 | macOS |
+| random-200x120 | 6,784 | 3,968 | 1.71 | Linux |
+| random-600x400 | 35,392 | 32,832 | **1.08** | macOS |
+| random-600x400 | 26,048 | 32,832 | **0.79** | Linux |
+
+Identical on every instance that converges inside a few restart periods, and
+inside a factor of two on the two that do not — on the largest, Prima is 8%
+worse than the reference on one host and 21% *better* on the other, which is
+the platform effect above rather than anything about either implementation.
+`PdlpComparisonSuite` holds the ratio inside threefold either way — loose on
+purpose, since the observed band is already 0.79 to 1.71 across two hosts, the
+two have different presolves and different scalings, and an OR-Tools bump should
+not fail a build. An order of magnitude would mean Prima's restart schedule had
+moved.
+
+Three details that had to be got right for the comparison to mean anything:
+
+- **The tolerance must be set.** PDLP's default stops around 1e-5 where Prima's
+  stops at 1e-8, and an iteration count at one tolerance says nothing about a
+  count at another. `OrToolsSolver.pdlp(tolerance)` exists for that reason.
+- **`termination_criteria`'s own `eps_optimal_absolute`/`eps_optimal_relative`
+  are deprecated.** OR-Tools accepts them, applies them, and prints a warning to
+  stderr that sbt makes easy to miss. The nested `simple_optimality_criteria`
+  is the current spelling, gives an identical answer, and is silent.
+- **A rejected parameter string is silently ignored.**
+  `setSolverSpecificParametersAsString` returns `false` and leaves the solver on
+  its defaults, so a typo would mean solving at a tolerance nobody asked for and
+  reporting it as the one they did. `OrToolsSolver` checks the return.
+
+One real difference, pinned rather than worked around: PDLP does not classify an
+unbounded problem. GLOP reports `INFEASIBLE` for `min -x, x >= 0` and the
+feasibility probe turns that into `DualInfeasible`; PDLP reports `NOT_SOLVED`,
+and a PDLP probe cannot establish feasibility either, so the honest answer is
+`NumericalError`. It does detect primal infeasibility.
+
+The licensing question stands: Cyfra is LGPL-2.1 where the rest of this build is
+Apache-2.0, which is why the backend lives in its own module — and the module is
+still not aggregated into the root build, since no CI runner is guaranteed a
+working Vulkan stack. `sbt primaCyfra/testOnly *` is how it is run.
 
 **Presolve does only the exact reductions.** Fixed variables, empty rows and
 columns, and singleton rows are removed; forcing rows, dominated rows and

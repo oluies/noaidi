@@ -32,15 +32,19 @@ optimisation.
 | `prima-zio` | Effect boundary: solves on the blocking pool, cooperative interruption, ZStream fan-out over scenario sweeps. |
 | `prima-ojalgo` | ojAlgo behind the common solver interface — CPU fallback and correctness oracle. |
 | `prima-validation` | Prima against ojAlgo over a ladder of LP instances. |
+| `prima-model` | The modeling layer: named variables, linear expressions, duals in the caller's own row numbering. Solved by whichever backend it is handed. |
+| `prima-ortools` | OR-Tools behind the same solver interface: GLOP as a third oracle, and PDLP — the same algorithm Prima implements — as the reference its iteration counts are held to. Not in the root build — see below. |
 | `prima-mps` | MPS reader, for reaching the standard LP corpora. |
-| `prima-cyfra` | GPU spike. Not in the root build — see below. |
+| `prima-cyfra` | GPU backend: all eight `Kernels` operations on Vulkan through Cyfra, correct and far too slow. Not in the root build — see below. |
 | `prima-netlib` | Netlib LP corpus. Not in the root build; fetches on first run. |
 | `network-model` | L0: the PyPSA network data model and topology — schema-driven, round-tripping PyPSA's CSV directory format, single-period and multi-period alike. Ships PyPSA's standard line and transformer type library, which no network export contains. |
 | `network-lopf` | L2: linear optimal power flow with storage, stores, capacity expansion, delayed links and multi-investment periods, N-1 security-constrained LOPF, and unit commitment via Prima's branch-and-bound. |
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 
-709 tests pass in the aggregated build, plus 48 in the opt-in Netlib module.
+755 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
+runs as a separate step, plus 48 in the opt-in Netlib module and 20 in
+`prima-cyfra`, which need hardware and a corpus no runner has.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
 instances solve to optimality, agreeing with the published optima to 2.2e-08 or
 better, and **none of the 29 infeasible instances is reported optimal**.
@@ -87,16 +91,24 @@ experiment would confound all three.
 
 **The measurements are mixed, and that is the honest headline.** Double-precision
 work removed against a cold solve: 75% on the PyPSA-shaped dispatch fixture at a
-1e-9 tolerance and 100% at 1e-6, 35–70% on mid-size random instances, but −14%
-at 1e-9 and −621% at 1e-6 on the largest dense random LP, where the float32
-point is measurably a *worse* starting point than zero. That is unexplained and
-is why `MixedPrecision` is opt-in. The underlying pattern: float32 reaches 1e-5
-on the 600-variable instance in 1,792 iterations where a cold solve needs 35,392
-for 1e-9 — the first digits are nearly free and the last cost everything, so a
-float32 device removes only the cheap prefix unless the caller's tolerance is
-loose enough for it to deliver the whole answer.
+1e-9 tolerance and 100% at 1e-6, 35–70% on mid-size random instances, and on
+dense random LPs a median 24–26% at 1e-6 over ten draws of the same shape,
+break-even at 1e-9. One of those ten draws costs −621% at 1e-6 (−443% on the other
+host, since iteration counts on the largest dense instances are
+platform-specific; NOTES gives both). It is the one the ladder happens to carry,
+which is how that number came to be reported as a property of reduced precision
+rather than of the instance. Tracing it puts
+the loss in a 200-iteration window where a restart re-centres on a point a
+thousandfold worse than the one it started from; NOTES records why the obvious
+fix for that costs the infeasible fixture 360× its iterations. The underlying
+pattern is unchanged: float32 reaches 1e-5 on the 600-variable instance in 1,792
+iterations where a cold solve needs 35,392 for 1e-9 (26,048 on the other host —
+the ratio is the point, not the pair) — the first digits are nearly free and the
+last cost everything, so a float32 device removes only the
+cheap prefix unless the caller's tolerance is loose enough for it to deliver the
+whole answer.
 
-**CSR SpMV does run on the GPU.** This was the gating question for a Cyfra
+**CSR SpMV does run on the GPU.** This was the gating question for the Cyfra
 backend, and it was genuinely open: SpMV is the one kernel PDHG cannot do
 without, and it is the one Cyfra was not designed around — its demonstrated use
 is dense arrays and ray tracing, where every invocation does identical work. A
@@ -122,10 +134,40 @@ is consistent with SPIR-V compilation being hoisted out of `execute` and paid
 once — the property that makes per-matrix specialisation a per-solve cost rather
 than a per-iteration one.
 
-What this does *not* establish is value. There is no `CyfraKernels` implementing
-the other seven operations, and nothing has been timed against the CPU
-reference. Given the mixed-precision result above, that comparison is worth
-having before building the full backend.
+**The full backend now exists, it is correct, and it is a thousand times slower
+than the CPU.** `CyfraKernels` implements all eight operations, passes
+`KernelContractSuite` unchanged — the same file the reference backend is held
+to — and solves whole LPs to the reference objective with `MixedPrecision`
+finishing on the host. Microseconds per iteration:
+
+| instance | CPU fp64 | CPU fp32 | GPU fp32 | GPU setup |
+| --- | --- | --- | --- | --- |
+| economic-dispatch (21 variables) | 0.2 | 0.3 | **4,082** | ~0 |
+| random-60x30 | 0.6 | 0.8 | **3,787** | 22 ms |
+| random-200x120 | 2.2 | 4.3 | **3,679** | 41 ms |
+
+Each figure is a slope rather than a division: every backend runs the same solve
+under two iteration caps, so what an iteration costs is separated from what
+starting one costs instead of being averaged together with it. The GPU column
+moves by about ten per cent between runs — read it as "about four milliseconds".
+
+The ratio is not the point; the flatness is. Across a tenfold change in problem
+size the GPU column does not move, and neither does the cost of a single
+operation across a thousandfold change in vector length — a bare dispatch is
+~45 µs at 64 elements and at 65,536. The arithmetic is free and the launch is
+everything. A PDHG iteration is about seventeen launches, which is the 4 ms.
+
+Two of those launches are avoidable in principle and not through this interface.
+A scalar argument costs five times a bare dispatch, because every buffer Cyfra
+allocates is device-local and there is no host-visible one to ask for, so
+`alpha` and `beta` travel through a staging buffer and a copy command buffer.
+And sixteen dispatches chained into one execution cost 192 µs against 328 issued
+separately — which `Kernels`, a call-at-a-time interface, cannot use. NOTES has
+the measurements and what would have to change.
+
+So the value question is answered for this release of Cyfra, in the negative,
+and the feasibility question is answered completely. Neither could have been
+settled by argument.
 
 ## Building
 
@@ -145,7 +187,20 @@ The report prints the cross-solver ladder and then the mixed-precision
 comparison at two tolerance regimes, which give opposite answers — see the GPU
 findings above.
 
-### Running the GPU spike
+### Running the OR-Tools backend
+
+`prima-ortools` is not aggregated into the root build either. `ortools-java`
+declares all five platforms' native libraries as runtime dependencies — around a
+hundred megabytes — because a Maven POM cannot say "whichever one this machine
+is". The module names the host's and excludes the rest, which is the same thing
+the LWJGL classifier does for `prima-cyfra`, but it is still a large native
+artifact to put in front of every build for one backend.
+
+```bash
+sbt primaOrtools/testFull
+```
+
+### Running the GPU backend
 
 `prima-cyfra` is deliberately **not** aggregated into the root build, so
 `sbt testFull` never touches it. It needs a Vulkan loader and an ICD at runtime,
@@ -214,9 +269,9 @@ everything from the foundation layer up is ahead:
 1. ~~**Prima**: restarted PDHG LP solver, fp64 reference, validated against ojAlgo.~~ ✅
 2. ~~**Reduced precision**: `Float32Kernels`, warm start, `MixedPrecision` with fp64 refinement.~~ ✅
 3. ~~**Cyfra feasibility**: CSR SpMV on the GPU, matching the CPU reference.~~ ✅
-4. **Prima GPU**: the remaining seven kernel operations behind `Kernels`, then a timing against the CPU reference, then validation against cuPDLP-C. Worth resolving the dense-instance warm-start regression first — it is a concrete, reproducible anomaly with two named suspects in NOTES.md, and it decides how much a GPU can actually buy.
+4. ~~**Prima GPU**: the remaining seven kernel operations behind `Kernels`, then a timing against the CPU reference, then validation against an independent implementation of the same algorithm.~~ ✅ `CyfraKernels` passes the whole kernel contract and solves LPs to the reference answer; the timing says it is ~4 ms per iteration against 1–3 µs on the CPU, flat in problem size, because the cost is per launch. The algorithmic half of the cuPDLP-C item is answered without a GPU: OR-Tools ships **PDLP**, Google's own restarted PDHG. Held to the same tolerance on the same instances, the two agree exactly wherever the solve finishes inside a few restart periods, and stay inside a factor of two where it does not — on the largest dense instance Prima is 8% worse than the reference on one host and 21% better on the other, which is a platform effect rather than either implementation. That is a claim no simplex can make, since the restart schedule and step-size rule are what an iteration count measures. What still needs CUDA hardware is a device timing and an fp64-on-silicon check, neither of which is a question about whether the algorithm is right. The dense-instance warm-start regression that gated the whole item is resolved: it was one draw of ten, the validation report now sweeps the family rather than the single instance, and what a float32 device buys is a median quarter of the double-precision work at 1e-6 and nothing at 1e-9 — the cheap prefix, as the mixed-precision measurements already argued.
 5. ~~**L0 foundation**: typed columnar store, CSV round-trip, sub-network topology.~~ ✅ (dense linear algebra deferred to L2, where Newton-Raphson needs it)
-6. **L1 I/O and solver plumbing**: CSV round-trips PyPSA byte-for-byte and netCDF reads into the same model; PyPSA's own `.h5` is pandas' PyTables layout with pickled column metadata and is not read — see NOTES. A solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima remains.
+6. ~~**L1 I/O and solver plumbing**: CSV round-trips PyPSA byte-for-byte and netCDF reads into the same model; a solver-agnostic modeling layer over ojAlgo, OR-Tools and Prima.~~ ✅ `prima-model` is the layer — named variables, linear expressions, and duals mapped back to the rows as the caller wrote them — and `prima-ortools` is the third backend, so one model is solved by a first-order method, a pure-JVM simplex and GLOP, and they agree on flows and prices. `Lopf.solve` and `Sclopf.solve` now take an `LpSolver` too. PyPSA's own `.h5` is pandas' PyTables layout with pickled column metadata and is still not read — see NOTES.
 7. **L2 physics**: LPF matches PyPSA's voltage angles to 1e-9 and its line flows and slack dispatch to 1e-6 on every reference network, `scigrid-de` included — 585 buses, 852 lines and 96 transformers, where every impedance comes from a standard type name rather than from a file. LOPF matches PyPSA's objective, dispatch and line flows on the dispatch fixture, and its objective under a binding CO2 cap; nodal prices agree wherever the dual is unique and are a different point of the same optimal dual face elsewhere — settled, see NOTES. Newton-Raphson AC power flow matches PyPSA's voltage magnitudes and angles to 1e-9 on both fixtures that have one. Its DC counterpart is not implemented because the pinned PyPSA does not implement it either — see NOTES. A phase-shifting transformer is modelled in both the linear flow — where it moves 297 MW on the reference fixture, and was silently dropped before because no code read the attribute — and the AC path, along with off-nominal tap ratios and the transformer T model. Those three were refused until the assumption behind the refusal was tested: an asymmetric `Y` needed no solver change at all, and the admittance matches PyPSA's angles to 3e-16. Unit commitment reproduces PyPSA's schedule, dispatch and objective on a purpose-built fixture, solved by Prima's own branch-and-bound, and SCLOPF reproduces PyPSA's N-1 secure dispatch via outage distribution factors. Storage carries state across snapshots — the one constraint here that is not separable by snapshot — which makes `scigrid-de` the first realistic network the port optimises: 60,552 variables, solved to 1e-4 in 13 s and to 1e-6 in 145 s. Capacity expansion makes `p_nom` a decision, reproducing PyPSA's objective and chosen capacities on `ac-dc-meshed` and `storage-hvdc` — the last two stock examples the port could not touch. `Store` is modelled too: one signed power variable, no efficiencies and no power rating at all. Ramp limits and the `e_sum_max`/`e_sum_min` energy budgets are built as well — both were silently dropped before, for the same reason the phase shift was, and dropping the budgets under-priced the reference answer by 23,280. A committable generator is now refused by LOPF rather than solved with the flag ignored, which cost 18,500 against PyPSA's 17,000 — dearer, not cheaper, because dropping the status turns `p_min_pu` into a floor the unit can never leave. A link may deliver late: `delay` shifts its output into a later snapshot, measured in elapsed time against the `generators` weighting rather than in snapshots, and `cyclic_delay` wraps what is still in flight at the end of the horizon. It was refused before, having been silently delivered instantly for 500 against PyPSA's 9,000; implementing it took one new file, because shifting the receiving term changes which column a balance row references and nothing else. Multi-investment periods are modelled too, which was the other silent mis-solve: nothing read `investment_periods.csv` at all, so a network whose cheap generator is built in the second period cost 2,000 against PyPSA's 17,000. Snapshots are now `(period, timestep)` pairs through the model layer, the CSV round-trip and the netCDF reader; an asset is active only between its `build_year` and the end of its `lifetime`; and every cost carries its period's discount factor while a global constraint sums against its `years` — two columns of one small file that do different jobs. Capacity expansion *across* periods is still refused, along with per-period storage cycling, growth limits and commitment on a multi-period network: each is a different formulation rather than the same one with an extra factor. PyPSA 1.3.0 then moved the phase shift *into* the LOPF's Kirchhoff row, where through 1.2.4 there had been no shift term at all — so upstream's own two L2 models had disagreed about the same network, and this port had reproduced the disagreement deliberately. The row here gained the same term, and the two fixtures carrying a shift had to drop below 10 degrees, past which the circulating flow exceeds a transformer rating and the network has no solution to compare. That release's other three features are refused rather than mispriced, each because its default is inert and ignoring it errs cheap: maintenance scheduling, which places outages by an integer decision; piecewise cost curves, whose breakpoints are a file beside the component rather than a column, so a model reading only the column prices the curve at a number the network does not use; and an optimisable phase shift, where the angle is a per-snapshot variable rather than the constant this model emits.
 8. **L3 features**: clustering, statistics, sector coupling, plotting.
 9. **L4 acceleration**: remaining kernels onto Cyfra/MLX/CUDA, plus Spatial/Chisel for FPGA.

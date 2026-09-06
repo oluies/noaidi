@@ -35,6 +35,15 @@ line it has to read. Editing the pattern fails the presence check, which is the
 point: the sample has to be updated alongside it, by someone who has looked at
 what the log actually contains.
 
+The test-count pipeline is *not* here, and deliberately. Pinning its four stages
+individually needed a hand-written sample for each -- which this file forbids in
+the next paragraph, and which two of them violated -- and still left the
+composition unpinned, so reordering the stages to point the `^`-anchored grep at
+sbt's coloured line would have kept every case green. It lives in
+`count_tests.sh` now, and `test_count_tests.py` runs the whole thing against
+four real logs. Executing the pipeline covers the patterns, their order and
+their arithmetic at once, which is what this file can only approximate.
+
     python3 .github/scripts/test_workflow_log_patterns.py
 """
 
@@ -95,6 +104,16 @@ MUNIT_FAILURE_PLAIN = (
     "==> X org.noaidi.network.SchemaSweepSuite.every input attribute is accounted for 0.1s munit.FailException"
 )
 MUNIT_FAILURE_VARIANTS = _with_escapes(MUNIT_FAILURE_PLAIN)
+
+# sbt's own per-project total, as opposed to the framework's per-suite lines
+# above. Coloured the same way, and load-bearing for a different reason: it is
+# the only counter that survives sbt 2's action cache replaying a whole test
+# task, where the framework never runs and emits nothing.
+SBT_SUMMARY_PLAIN = "[info] Passed: Total 10, Failed 0, Errors 0, Passed 10"
+SBT_SUMMARY_CI = (
+    "\x1b[0J\x1b[0m[\x1b[0m\x1b[0minfo\x1b[0m] \x1b[0m\x1b[0mPassed: Total 10, "
+    "Failed 0, Errors 0, Passed 10\x1b[0m\x1b[0J"
+)
 
 # Printed by the report program itself via `println`. sbt passes a program's
 # stdout through untouched, which is why `^` is safe on these and not on the

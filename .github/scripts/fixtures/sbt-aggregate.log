@@ -1,0 +1,47 @@
+Test run org.noaidi.prima.mps.MpsReaderSuite finished: 0 failed, 0 ignored, 20 total 0.085s
+[info] Passed: Total 20, Failed 0, Errors 0, Passed 20
+Test run org.noaidi.prima.ScalaKernelsSuite finished: 0 failed, 0 ignored, 11 total 0.063s
+Test run org.noaidi.prima.ScalingSuite finished: 0 failed, 0 ignored, 7 total 0.063s
+Test run org.noaidi.prima.LpBuilderSuite finished: 0 failed, 0 ignored, 10 total 0.063s
+Test run org.noaidi.prima.Float32KernelsSuite finished: 0 failed, 0 ignored, 13 total 0.064s
+Test run org.noaidi.prima.VectorKernelsWidenedSuite finished: 0 failed, 0 ignored, 10 total 0.076s
+Test run org.noaidi.prima.CertificatesSuite finished: 0 failed, 0 ignored, 27 total 0.073s
+Test run org.noaidi.prima.SparseMatrixSuite finished: 0 failed, 0 ignored, 12 total 0.089s
+Test run org.noaidi.prima.ojalgo.OjAlgoSolverSuite finished: 0 failed, 0 ignored, 7 total 0.218s
+Test run org.noaidi.prima.VectorKernelsSuite finished: 0 failed, 0 ignored, 14 total 0.109s
+Test run org.noaidi.prima.PdhgSuite finished: 0 failed, 0 ignored, 19 total 0.14s
+Test run org.noaidi.prima.PresolveSuite finished: 0 failed, 0 ignored, 21 total 0.146s
+Test run org.noaidi.prima.MixedPrecisionSuite finished: 0 failed, 0 ignored, 20 total 0.154s
+Test run org.noaidi.prima.BranchAndBoundSuite finished: 0 failed, 0 ignored, 19 total 0.191s
+[info] Passed: Total 7, Failed 0, Errors 0, Passed 7
+Test run org.noaidi.prima.validation.MilpAgreementSuite finished: 0 failed, 0 ignored, 5 total 0.301s
+Test run org.noaidi.prima.zio.PrimaZioSuite finished: 0 failed, 0 ignored, 6 total 0.607s
+[info] Passed: Total 6, Failed 0, Errors 0, Passed 6
+Test run org.noaidi.model.ModelSuite finished: 0 failed, 0 ignored, 12 total 0.152s
+[info] Passed: Total 41, Failed 0, Errors 0, Passed 41
+Test run org.noaidi.prima.validation.OracleAgreementSuite finished: 0 failed, 0 ignored, 24 total 0.809s
+[info] Passed: Total 29, Failed 0, Errors 0, Passed 29
+Test run org.noaidi.network.SchemaSweepSuite finished: 0 failed, 0 ignored, 5 total 0.097s
+Test run org.noaidi.network.StandardTypesSuite finished: 0 failed, 0 ignored, 11 total 0.777s
+Test run org.noaidi.network.TopologySuite finished: 0 failed, 0 ignored, 26 total 0.846s
+Test run org.noaidi.network.GoldenNetworkSuite finished: 0 failed, 0 ignored, 55 total 0.922s
+Test run org.noaidi.network.RoundTripSuite finished: 0 failed, 0 ignored, 47 total 5.634s
+Test run org.noaidi.io.NetCdfReaderSuite finished: 0 failed, 0 ignored, 116 total 0.733s
+Test run org.noaidi.pf.CholeskySuite finished: 0 failed, 0 ignored, 8 total 0.042s
+Test run org.noaidi.pf.LuSuite finished: 0 failed, 0 ignored, 7 total 0.042s
+Test run org.noaidi.pf.LodfSuite finished: 0 failed, 0 ignored, 2 total 0.109s
+Test run org.noaidi.pf.SlackSuite finished: 0 failed, 0 ignored, 4 total 0.143s
+Test run org.noaidi.pf.NewtonRaphsonSuite finished: 0 failed, 0 ignored, 21 total 0.276s
+Test run org.noaidi.pf.LinearPowerFlowSuite finished: 0 failed, 0 ignored, 50 total 2.466s
+[info] Passed: Total 12, Failed 0, Errors 0, Passed 12
+Test run org.noaidi.lopf.CyclesSuite finished: 0 failed, 0 ignored, 6 total 0.23s
+Test run org.noaidi.lopf.SolverAgnosticSuite finished: 0 failed, 0 ignored, 2 total 0.312s
+Test run org.noaidi.lopf.DelaysSuite finished: 0 failed, 0 ignored, 3 total 0.357s
+Test run org.noaidi.lopf.SclopfSuite finished: 0 failed, 0 ignored, 23 total 1.493s
+Test run org.noaidi.lopf.UnitCommitmentSuite finished: 0 failed, 0 ignored, 15 total 1.504s
+Test run org.noaidi.lopf.GapRefusalSuite finished: 0 failed, 0 ignored, 25 total 1.612s
+Test run org.noaidi.lopf.LopfSuite finished: 0 failed, 0 ignored, 72 total 15.442s
+[info] Passed: Total 116, Failed 0, Errors 0, Passed 116
+[info] Passed: Total 92, Failed 0, Errors 0, Passed 92
+[info] Passed: Total 144, Failed 0, Errors 0, Passed 144
+[info] Passed: Total 146, Failed 0, Errors 0, Passed 146

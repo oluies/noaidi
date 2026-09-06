@@ -217,7 +217,11 @@ lazy val networkLopf = project
   // power-flow sensitivity, not an optimisation concept, so they belong there --
   // and having the security-constrained model import them is what keeps one
   // definition of susceptance and slack across both layers.
-  .dependsOn(networkModel % "compile->compile;test->test", networkPf, primaCore)
+  // ojAlgo in test scope only, and only to prove the point of the `LpSolver`
+  // parameter `solve` now takes: an L2 model that can only be solved by the
+  // solver it was written against is not solver-agnostic, whatever its type
+  // signature says.
+  .dependsOn(networkModel % "compile->compile;test->test", networkPf, primaCore, primaOjalgo % Test)
   .settings(commonSettings)
   .settings(
     name := "network-lopf",
@@ -266,6 +270,54 @@ lazy val primaValidation = project
     publish / skip := true,
   )
 
+// The modeling layer: names, expressions and duals in the caller's own row
+// numbering, over whichever backend `LpSolver` reaches. Depends on the core and
+// on nothing else -- a model that could only be solved by the solver it was
+// written against would not be a modeling layer.
+lazy val primaModel = project
+  .in(file("modules/prima-model"))
+  .dependsOn(primaCore % "compile->compile;test->test", primaOjalgo % Test)
+  .settings(commonSettings)
+  .settings(
+    name := "prima-model",
+    Test / fork := true,
+  )
+
+val ortoolsVersion = "9.15.6755"
+
+// `ortools-java` declares every platform's natives as runtime dependencies --
+// five of them, about a hundred megabytes -- because a Maven POM has no way to
+// say "whichever one this machine is". Naming the host's and excluding the rest
+// is the same thing the LWJGL classifier does above, in the other direction.
+val ortoolsPlatform: Option[String] =
+  val os   = sys.props.getOrElse("os.name", "").toLowerCase
+  val arch = sys.props.getOrElse("os.arch", "")
+  if os.startsWith("mac") then Some(if arch == "aarch64" then "darwin-aarch64" else "darwin-x86-64")
+  else if os.startsWith("linux") then Some(if arch == "aarch64" then "linux-aarch64" else "linux-x86-64")
+  else if os.startsWith("windows") then Some("win32-x86-64")
+  else None
+
+lazy val primaOrtools = project
+  .in(file("modules/prima-ortools"))
+  .dependsOn(primaCore % "compile->compile;test->test", primaModel % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name := "prima-ortools",
+    publish / skip := true,
+    libraryDependencies += ("com.google.ortools" % "ortools-java" % ortoolsVersion)
+      .exclude("com.google.ortools", "ortools-linux-x86-64")
+      .exclude("com.google.ortools", "ortools-darwin-x86-64")
+      .exclude("com.google.ortools", "ortools-win32-x86-64")
+      .exclude("com.google.ortools", "ortools-linux-aarch64")
+      .exclude("com.google.ortools", "ortools-darwin-aarch64"),
+    // Nothing at all on an unrecognised host, so the module still compiles and
+    // fails at load time with OR-Tools' own message rather than at resolution
+    // with a coordinate nobody published.
+    libraryDependencies ++=
+      ortoolsPlatform.map(p => "com.google.ortools" % s"ortools-$p" % ortoolsVersion).toSeq,
+    Test / fork := true,
+  )
+
 lazy val root = project
   .in(file("."))
   .aggregate(
@@ -274,6 +326,7 @@ lazy val root = project
     primaOjalgo,
     primaMps,
     primaValidation,
+    primaModel,
     networkModel,
     networkLopf,
     networkPf,

@@ -14,7 +14,7 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // sbt 2 already defaults to -deprecation -feature -unchecked -Wunused:all
 // -Wvalue-discard, so scalacOptions stays empty rather than setting them twice.
 
-val munitVersion  = "1.3.5"
+val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.26"
 val ojalgoVersion = "57.1.1"
 
@@ -91,7 +91,7 @@ lazy val primaMps = project
 // LGPL-2.1 where the rest of this build is Apache-2.0. Keeping it a separate,
 // opt-in module contains both.
 val cyfraVersion = "0.1.0-RC1"
-val lwjglVersion = "3.4.0"
+val lwjglVersion = "3.4.3"
 
 // The module is configured for macOS on Apple Silicon, which is where the spike
 // was run. Everything host-specific is gated on these so that another platform

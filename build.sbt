@@ -4,15 +4,24 @@
 // ZIO facade at the edge, and solver backends kept behind one interface so the
 // modeling layer never names a solver.
 
-ThisBuild / scalaVersion := "3.7.4"
+ThisBuild / scalaVersion := "3.9.0"
 ThisBuild / organization := "org.noaidi"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
 
-// Cyfra is published for Scala 3.6.4; 3.7.4 reads that TASTy fine and keeps the
-// rest of the ecosystem (ZIO, MUnit) on well-supported ground.
+// Cyfra is published for Scala 3.6.4; 3.9.0 reads that TASTy fine -- a later
+// compiler reading older TASTy is the supported direction -- and keeps the rest
+// of the ecosystem (ZIO, MUnit) on well-supported ground. The `primaCyfra` CI
+// step is what pins this: it is the only thing that compiles against those
+// artifacts, so a TASTy version this compiler refused would fail there and
+// nowhere else.
 //
-// sbt 2 already defaults to -deprecation -feature -unchecked -Wunused:all
-// -Wvalue-discard, so scalacOptions stays empty rather than setting them twice.
+// scalacOptions is empty, and `show Compile/scalacOptions` confirms nothing else
+// fills it: the compiler runs on its own defaults. Those report deprecations and
+// feature uses only as a count -- "there were 3 deprecation warnings; re-run with
+// -deprecation for details" -- which is how five calls to a method the standard
+// library documents as able to crash your program sat here as an unnamed number
+// until the 3.9.0 bump. Adding -deprecation -feature would name them at the cost
+// of surfacing prima-cyfra's 7 existing feature warnings on every build.
 
 val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.26"

@@ -27,10 +27,17 @@ object Lu:
     require(rhs.length == n, s"rhs is ${rhs.length} entries, expected $n")
     if n == 0 then return IArray.empty
 
+    // `copyToArray` rather than `arraycopy` out of `a.toArray`: that reads an
+    // n x n clone into existence only to copy it again and drop it, and
+    // `IArray.toArray` is deprecated for casting its clone to `Array[T]`
+    // unchecked. Copying straight into an array declared `Double` here needs no
+    // cast and no intermediate. The `require`s above pin the lengths, so each
+    // call copies every element rather than silently stopping at the shorter of
+    // the two.
     val m = new Array[Double](n * n)
-    System.arraycopy(a.toArray, 0, m, 0, n * n)
+    a.copyToArray(m)
     val x = new Array[Double](n)
-    System.arraycopy(rhs.toArray, 0, x, 0, n)
+    rhs.copyToArray(x)
 
     // Row permutation, applied to the right-hand side as it is discovered rather
     // than accumulated and applied at the end.

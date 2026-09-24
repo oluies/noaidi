@@ -16,7 +16,7 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 
 val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.26"
-val ojalgoVersion = "57.1.1"
+val ojalgoVersion = "57.3.1"
 
 // Note for CI and for anyone reading test output: under sbt 2 the `test` task is
 // incremental and will happily report success having run nothing. Use `testFull`
@@ -123,7 +123,8 @@ lazy val primaCyfra = project
     // misconfiguration. Cyfra pulls the Linux natives transitively already.
     libraryDependencies ++= (
       if isMacArm then
-        Seq("lwjgl", "lwjgl-vma").map(lib => "org.lwjgl" % lib % lwjglVersion classifier "natives-macos-arm64")
+        Seq("lwjgl", "lwjgl-vma")
+          .map(lib => ("org.lwjgl" % lib % lwjglVersion).classifier("natives-macos-arm64"))
       else Seq.empty
     ),
     Test / fork := true,

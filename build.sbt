@@ -15,13 +15,13 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // artifacts, so a TASTy version this compiler refused would fail there and
 // nowhere else.
 //
-// scalacOptions is empty, and `show Compile/scalacOptions` confirms nothing else
-// fills it: the compiler runs on its own defaults. Those report deprecations and
-// feature uses only as a count -- "there were 3 deprecation warnings; re-run with
-// -deprecation for details" -- which is how five calls to a method the standard
+// -deprecation and -feature are set rather than left to the compiler's defaults,
+// which report both only as a count: "there were 3 deprecation warnings; re-run
+// with -deprecation for details". That is how five calls to a method the standard
 // library documents as able to crash your program sat here as an unnamed number
-// until the 3.9.0 bump. Adding -deprecation -feature would name them at the cost
-// of surfacing prima-cyfra's 7 existing feature warnings on every build.
+// until a compiler bump happened to raise the count. A warning nobody can act on
+// without re-running the build is a warning nobody reads.
+ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
 val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.26"

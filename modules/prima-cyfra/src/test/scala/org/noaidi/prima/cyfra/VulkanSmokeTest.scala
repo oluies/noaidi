@@ -6,6 +6,7 @@ import io.computenode.cyfra.core.GProgram.StaticDispatch
 import io.computenode.cyfra.core.layout.Layout
 import io.computenode.cyfra.dsl.{*, given}
 import io.computenode.cyfra.runtime.VkCyfraRuntime
+import scala.language.implicitConversions // Cyfra lifts literals into Int32/Float32
 
 /** Does Cyfra run on this machine at all?
   *

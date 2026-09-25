@@ -9,6 +9,7 @@ import io.computenode.cyfra.dsl.binding.GBuffer
 import io.computenode.cyfra.dsl.collections.GSeq
 import io.computenode.cyfra.runtime.VkCyfraRuntime
 import org.noaidi.prima.kernels.{KernelCapabilities, Kernels}
+import scala.language.implicitConversions // Cyfra lifts literals into Int32/Float32
 
 import scala.collection.mutable
 

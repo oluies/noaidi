@@ -182,6 +182,133 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
     )
   }
 
+  /** A fixture directory copied, with files added or rewritten, from any root. */
+  private def copiedWith(from: Path, name: String, files: (String, String)*): Network =
+    val dir = tempDir(tempPrefix)
+    scala.util.Using.resource(Files.list(from)) { entries =>
+      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
+    }
+    files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
+    CsvReader.read(dir, schema, name)
+
+  private def rows(n: Network, config: HydroOps.Config): Int =
+    Lopf.build(n, config).problem.numConstraints
+
+  test("an inflow-free reservoir gets no hinge, rather than a tighter ceiling") {
+    assume(fixtures, "reference/nordpsa is not present")
+    // `Lopf` declares a spill column for every unit at every snapshot and bounds it
+    // by that snapshot's inflow, so testing the variable map for spill was vacuous:
+    // always true. The hinge it wrongly emitted had every spill term pinned to zero,
+    // degenerating to a weekly ceiling `thresholdBelowMax` tighter than configured --
+    // where NordPSA warns and emits nothing.
+    val zeroInflow = Files.readString(
+      root.resolve("networks").resolve("inflow450-cheap600").resolve("storage_units-inflow.csv"),
+    ).linesIterator.zipWithIndex.map { (line, i) =>
+      if i == 0 then line else line.split(",", 2)(0) + ",0.0"
+    }.mkString("\n") + "\n"
+
+    val dry = copiedWith(
+      root.resolve("networks").resolve("inflow450-cheap600"),
+      "inflow450-cheap600",
+      "storage_units-inflow.csv" -> zeroInflow,
+    )
+
+    val ceilingOnly = HydroOps.Config(maxWeeklyFraction = 0.60)
+    val withHinge = ceilingOnly.copy(bypassSpill =
+      HydroOps.BypassSpill(active = true, thresholdBelowMax = 0.10, coefficient = 0.15),
+    )
+    assertEquals(
+      rows(dry, withHinge),
+      rows(dry, ceilingOnly),
+      "an inflow-free reservoir still got hinge rows",
+    )
+    // And the guard is not simply off: the same request against the real inflow does
+    // add rows, so the test above is about the inflow rather than about the flag.
+    val wet = variant("inflow450-cheap600")
+    assert(
+      rows(wet, withHinge) > rows(wet, ceilingOnly),
+      "the hinge emitted nothing even with inflow -- the guard is inverted",
+    )
+  }
+
+  test("a reservoir outside its investment period gets no floor row") {
+    assume(available, "reference/goldens is not present")
+    // `investment-periods` runs 2030, 2030, 2040, 2040. A unit built in 2040 has its
+    // dispatch column pinned to [0, 0] for the first two, and an hourly floor of
+    // `f * p_nom > 0` against a pinned column is an infeasible LP reported as the
+    // network's problem rather than as this model's -- which is the failure `Lopf`
+    // already avoids for `state_of_charge_set`.
+    val n = copiedWith(
+      goldens.resolve("networks").resolve("investment-periods"),
+      "investment-periods",
+      "storage_units.csv" ->
+        ("name,bus,carrier,p_nom,max_hours,marginal_cost,build_year,lifetime\n" +
+          "Z hydro,b,hydro,100.0,10.0,1.0,2040,30.0\n"),
+    )
+    val floor = HydroOps.Config(minHourlyFraction = 0.2)
+    assertEquals(
+      rows(n, floor) - rows(n, HydroOps.off),
+      2,
+      "the hourly floor did not emit exactly one row per active snapshot (2 of 4)",
+    )
+  }
+
+  test("one calendar week in two investment periods is two windows, not one") {
+    assume(available, "reference/goldens is not present")
+    // A multi-period index carries only the timestep half of (period, timestep), and
+    // that half repeats across periods. All four snapshots below fall inside the ISO
+    // week of Monday 2023-01-02, two in each period -- so keyed on the date alone
+    // they are one window and the ceiling becomes a single row spanning both
+    // periods, summing energy PyPSA would never sum together.
+    val n = copiedWith(
+      goldens.resolve("networks").resolve("investment-periods"),
+      "investment-periods",
+      "snapshots.csv" ->
+        (",period,timestep,objective,stores,generators\n" +
+          "0,2030,2023-01-02 00:00:00,1.0,1.0,1.0\n" +
+          "1,2030,2023-01-03 00:00:00,1.0,1.0,1.0\n" +
+          "2,2040,2023-01-04 00:00:00,1.0,1.0,1.0\n" +
+          "3,2040,2023-01-05 00:00:00,1.0,1.0,1.0\n"),
+      "storage_units.csv" ->
+        ("name,bus,carrier,p_nom,max_hours,marginal_cost,build_year,lifetime\n" +
+          "Z hydro,b,hydro,100.0,10.0,1.0,0,inf\n"),
+    )
+    assertEquals(
+      rows(n, HydroOps.Config(maxWeeklyFraction = 0.5)) - rows(n, HydroOps.off),
+      2,
+      "the week was not split per investment period",
+    )
+  }
+  test("the refusal names the limit that actually needed a calendar") {
+    assume(available, "reference/goldens is not present")
+    // Both windows were computed eagerly once either limit was set, so a
+    // weekly-only config reported that it had been "asked for a daily window" and
+    // sent the reader to the wrong line.
+    val refused = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(integerSnapshots, HydroOps.Config(maxWeeklyFraction = 0.5))
+    }
+    assert(
+      refused.getMessage.contains("weekly window"),
+      s"a weekly-only config blamed the wrong limit: ${refused.getMessage}",
+    )
+  }
+
+  test("a zone limit matching no reservoir is refused, not quietly dropped") {
+    assume(fixtures, "reference/nordpsa is not present")
+    // A deliberate divergence from NordPSA, which keeps the global ceiling when a
+    // zone key matches nothing. The zone name is the one thing a typo lands in, and
+    // silence means the run reports a number as though the limit had applied.
+    val refused = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(
+        variant("inflow450-cheap600"),
+        HydroOps.Config(maxWeeklyFraction = 0.6, maxWeeklyFractionByZone = Map("SE2" -> 0.3)),
+      )
+    }
+    assert(
+      refused.getMessage.contains("SE2") && refused.getMessage.contains("SE2 hydro"),
+      s"the refusal does not name the zone or what it looked for: ${refused.getMessage}",
+    )
+  }
   /** `storage-cycle`, whose snapshots are `0, 1, 2`, with its reservoir declared.
     *
     * The fixture carries a StorageUnit *named* `hydro` and no `carrier` column at

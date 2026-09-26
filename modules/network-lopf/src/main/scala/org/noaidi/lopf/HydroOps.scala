@@ -160,48 +160,66 @@ object HydroOps:
 
     val weight = (t: Int) => network.weighting("stores", t)
 
+    // Only snapshots the unit exists at. On a flat index `activeAt` is always
+    // true, so this costs nothing there -- but on a multi-period network a unit
+    // outside its `build_year`/`lifetime` window has every column pinned to
+    // [0, 0], and an hourly floor of `f · p_nom > 0` against a pinned column is
+    // an infeasible LP reported as the *network's* problem rather than as this
+    // model's. `Lopf` masks `state_of_charge_set` by activity for exactly that
+    // reason. The window rows need it too, and more subtly: an unmasked `H` sums
+    // the weightings of snapshots the unit does not exist at, so the floor
+    // demands a full window's energy from the active hours alone.
+    val live = (id: String, t: Int) => Periods.activeAt(network, table, id, t)
+
+    /** The dispatch terms for one unit over one window, active snapshots only. */
+    val energy = (id: String, members: Seq[Int]) =>
+      members.filter(live(id, _)).flatMap(t =>
+        columns.get((Storage.Dispatch, id, t)).map(col => (col, weight(t))),
+      )
+
+    /** The window's hours, counting only what the unit exists for. */
+    val hoursOf = (id: String, members: Seq[Int]) =>
+      members.filter(live(id, _)).map(weight).sum
+
     // --- per-snapshot floor ------------------------------------------------
     // No calendar needed, so this is the one limit an integer-labelled index can
     // carry.
     if config.minHourlyFraction > 0.0 then
       units.foreach { id =>
         val floor = config.minHourlyFraction * table.float("p_nom", id)
-        snapshots.foreach { t =>
+        snapshots.filter(live(id, _)).foreach { t =>
           columns.get((Storage.Dispatch, id, t)).foreach { col =>
             builder.greaterThan(Seq((col, 1.0)), floor)
           }
         }
       }
 
-    val needsCalendar =
-      config.minDailyFraction > 0.0 || config.maxWeeklyFraction > 0.0 ||
-        config.maxWeeklyFractionByZone.nonEmpty
-
-    if !needsCalendar then return
-
-    val days  = windows(network, snapshots, Daily)
-    val weeks = windows(network, snapshots, Weekly)
-
     // --- daily floor -------------------------------------------------------
+    // Each window computed only where a limit actually asks for one, so the
+    // refusal in `windows` names the limit that needed a calendar. Computing both
+    // up front made a weekly-only config on an integer index report that it had
+    // been "asked for a daily window", which is a message that sends the reader
+    // to the wrong line.
     if config.minDailyFraction > 0.0 then
       units.foreach { id =>
         val pNom = table.float("p_nom", id)
-        days.foreach { (_, members) =>
-          val hours = members.map(weight).sum
-          val terms = members.flatMap(t =>
-            columns.get((Storage.Dispatch, id, t)).map(col => (col, weight(t))),
-          )
+        windows(network, snapshots, Daily).foreach { (_, members) =>
+          val terms = energy(id, members)
           if terms.nonEmpty then
-            builder.greaterThan(terms, config.minDailyFraction * pNom * hours)
+            builder.greaterThan(terms, config.minDailyFraction * pNom * hoursOf(id, members))
         }
       }
 
     // --- weekly ceiling, and the hinge that hangs off it -------------------
-    // Resolved per unit: the global fraction, overridden by zone. A unit with
-    // neither gets no ceiling, and so also no hinge -- the hinge's threshold is
-    // measured down from the ceiling, so without one there is nothing to measure
-    // from. NordPSA returns early on the same condition.
-    val ceilings: Map[String, Double] =
+    // Resolved per unit, in `units` order rather than through a `Map`: hash order
+    // would emit the rows in an order unrelated to the table's, which is the same
+    // diffability the hand-folded `windows` below exists to protect.
+    //
+    // The global fraction, overridden by zone. A unit with neither gets no
+    // ceiling, and so also no hinge -- the hinge's threshold is measured down
+    // from the ceiling, so without one there is nothing to measure from. NordPSA
+    // returns early on the same condition.
+    val ceilings: Seq[(String, Double)] =
       units.flatMap { id =>
         val zoned = config.maxWeeklyFractionByZone.collectFirst {
           case (zone, value) if unitFor(zone) == id => value
@@ -209,43 +227,72 @@ object HydroOps:
         zoned.orElse(Option.when(config.maxWeeklyFraction > 0.0)(config.maxWeeklyFraction))
           .filter(_ > 0.0)
           .map(id -> _)
-      }.toMap
+      }
+
+    // A zone key that matches no unit is refused rather than ignored.
+    //
+    // A deliberate divergence from NordPSA, which does `if su_name in fw.index`
+    // and silently keeps the global ceiling. Silence is the wrong answer here for
+    // the reason this file already argues twice: a typo, a different naming
+    // convention, or a unit filtered out by the `carrier`/`p_nom` test all leave
+    // a configured zone limit doing nothing, and the run reports a number as
+    // though the limit had been applied. The cost of refusing is that a config
+    // naming a zone whose reservoir was dropped now stops instead of proceeding
+    // -- which is the outcome worth having.
+    val unmatched = (config.maxWeeklyFractionByZone.keySet ++
+      config.bypassSpill.coefficientByZone.keySet).filterNot(z => units.contains(unitFor(z)))
+    if unmatched.nonEmpty then
+      throw new Lopf.UnsupportedNetwork(
+        s"network '${network.name}' has no reservoir for zone(s) " +
+          unmatched.toSeq.sorted.map(z => s"'$z' (looked for '${unitFor(z)}')").mkString(", ") +
+          s"; its hydro StorageUnits are ${units.mkString(", ")}. A zone limit that " +
+          "matches nothing would leave the global ceiling in force and report a " +
+          "number as though it had been applied.",
+      )
 
     if ceilings.isEmpty then return
 
-    val weeklyHours  = weeks.map((key, members) => key -> members.map(weight).sum).toMap
-    val weeklyEnergy = (id: String, members: Seq[Int]) =>
-      members.flatMap(t => columns.get((Storage.Dispatch, id, t)).map(col => (col, weight(t))))
+    val weeks = windows(network, snapshots, Weekly)
 
     ceilings.foreach { (id, fraction) =>
       val pNom = table.float("p_nom", id)
-      weeks.foreach { (key, members) =>
-        val terms = weeklyEnergy(id, members)
+      weeks.foreach { (_, members) =>
+        val terms = energy(id, members)
         if terms.nonEmpty then
-          builder.lessThan(terms, fraction * pNom * weeklyHours(key))
+          builder.lessThan(terms, fraction * pNom * hoursOf(id, members))
       }
     }
 
     if !config.bypassSpill.active then return
 
-    // PyPSA only creates `spill` for a unit with inflow. Absent for all of them
-    // means the request cannot be honoured at all, which NordPSA prints a warning
-    // for rather than failing -- the network is legitimately spill-free.
-    val spilling = ceilings.keys.filter { id =>
-      snapshots.exists(t => columns.contains((Storage.Spill, id, t)))
-    }.toSeq
+    // Spill availability is read from the inflow, not from the variable map.
+    //
+    // `Lopf` declares a `Storage.Spill` column for every unit at every snapshot
+    // and bounds it by that snapshot's inflow, so a column-presence test is
+    // vacuous here -- it is always true, unlike PyPSA, which creates no spill
+    // variable at all for a unit without inflow. Testing presence therefore did
+    // not skip the hinge for an inflow-free unit, it emitted one whose every
+    // spill term is pinned to zero, degenerating the row to
+    // `prod_week <= (fraction − below) · p_nom · H_week`: a weekly ceiling
+    // `thresholdBelowMax` tighter than the one configured, where NordPSA warns
+    // and emits nothing at all.
+    val spilling = ceilings.map(_._1).filter { id =>
+      snapshots.exists(t => live(id, t) && table.valueAt("inflow", id, t) > 0.0)
+    }
     if spilling.isEmpty then return
 
     val below = config.bypassSpill.thresholdBelowMax
+    val ceilingOf = ceilings.toMap
     spilling.foreach { id =>
       val pNom     = table.float("p_nom", id)
-      val fraction = ceilings(id)
+      val fraction = ceilingOf(id)
       val kappa = config.bypassSpill.coefficientByZone
         .collectFirst { case (zone, value) if unitFor(zone) == id => value }
         .getOrElse(config.bypassSpill.coefficient)
 
-      weeks.foreach { (key, members) =>
-        val spillTerms = members.flatMap(t =>
+      weeks.foreach { (_, members) =>
+        val active     = members.filter(live(id, _))
+        val spillTerms = active.flatMap(t =>
           columns.get((Storage.Spill, id, t)).map(col => (col, weight(t))),
         )
         if spillTerms.nonEmpty then
@@ -253,8 +300,8 @@ object HydroOps:
           // from this unit's own ceiling. Written as one row with the production
           // terms moved across rather than as a bound on a difference, because
           // `spill` and `p_dispatch` are separate columns.
-          val production = weeklyEnergy(id, members).map((col, w) => (col, -kappa * w))
-          val threshold  = (fraction - below) * pNom * weeklyHours(key)
+          val production = energy(id, members).map((col, w) => (col, -kappa * w))
+          val threshold  = (fraction - below) * pNom * hoursOf(id, members)
           builder.greaterThan(spillTerms ++ production, -kappa * threshold)
       }
     }
@@ -262,6 +309,18 @@ object HydroOps:
   private sealed trait Window
   private case object Daily  extends Window
   private case object Weekly extends Window
+
+  /** One window: the investment period it sits in, and its calendar start.
+    *
+    * The period is part of the key, not decoration. On a multi-period network
+    * `snapshots` holds only the timestep half of a `(period, timestep)` index, and
+    * that half repeats across periods -- `investment-periods` runs `0, 1, 0, 1`.
+    * Keyed on the date alone, two periods' identically-labelled snapshots are the
+    * same window, and a week that happened to end one period and open the next
+    * would have its rows fused into a single constraint spanning both. Keyed on the
+    * pair they cannot be.
+    */
+  private final case class WindowKey(period: Option[String], start: LocalDate)
 
   /** Group snapshot indices by calendar window, preserving order.
     *
@@ -274,7 +333,7 @@ object HydroOps:
       network: Network,
       snapshots: Range,
       window: Window,
-  ): Seq[(LocalDate, Seq[Int])] =
+  ): Seq[(WindowKey, Seq[Int])] =
     val keyed = snapshots.map { t =>
       val label = network.snapshots(t)
       val stamp =
@@ -289,14 +348,16 @@ object HydroOps:
                 "integer snapshot index.",
             )
       val date = stamp.toLocalDate
-      val key = window match
+      val start = window match
         case Daily  => date
         case Weekly => date.`with`(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-      key -> t
+      WindowKey(network.periodOf(t), start) -> t
     }
     // `groupBy` would lose the order the windows appear in, which makes the rows
-    // arrive in a different sequence per run and the LP harder to diff.
-    keyed.foldLeft(Vector.empty[(LocalDate, Vector[Int])]) { case (acc, (key, t)) =>
+    // arrive in a different sequence per run and the LP harder to diff. Merging
+    // only *consecutive* equal keys is also what keeps a repeated label from
+    // fusing windows that are far apart in the index.
+    keyed.foldLeft(Vector.empty[(WindowKey, Vector[Int])]) { case (acc, (key, t)) =>
       acc.lastOption match
         case Some((last, members)) if last == key => acc.init :+ (key -> (members :+ t))
         case _                                   => acc :+ (key -> Vector(t))

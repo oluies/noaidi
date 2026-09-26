@@ -808,11 +808,7 @@ object Lopf:
     * constructing one to adjust a tolerance.
     */
   def solve(input: Network, solver: LpSolver): LopfResult =
-    val expanded = StandardTypes.expand(input)
-    val network  = Active.only(expanded)
-    val model    = build(network)
-    val solution = solver.solve(model.problem)
-    LopfResult(network, model, solution, Active.inactive(expanded))
+    solve(input, HydroOps.off, solver)
 
   /** Reject component classes the builder does not model.
     *

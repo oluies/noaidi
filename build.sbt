@@ -21,6 +21,23 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // library documents as able to crash your program sat here as an unnamed number
 // until a compiler bump happened to raise the count. A warning nobody can act on
 // without re-running the build is a warning nobody reads.
+// -deprecation and -feature rather than the compiler's defaults, which report
+// both only as a count: "there were 3 deprecation warnings; re-run with
+// -deprecation for details". That is how five calls to a method the standard
+// library documents as able to crash your program sat here as an unnamed number
+// until a compiler bump raised the count. A warning nobody can act on without
+// re-running the build is a warning nobody reads.
+//
+// -Werror is not set here. It is passed by CI, per invocation, in ci.yml. The
+// obvious version of that gate -- appending it from `sys.env.get("CI")` -- was
+// tried and could not be shown to toggle: with CI unset in the same invocation
+// that printed `sys.env.get("CI") == None`, -Werror was still in
+// `scalacOptions`, and it survived removing project/target and restarting the
+// server. Whatever pins it, a gate that cannot be demonstrated switching off is
+// not a gate, so the flag goes where its effect is visible in the command.
+//
+// One statement, not two: a second `ThisBuild / scalacOptions ++=` does not
+// accumulate onto the first here, it is silently dropped.
 ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
 val munitVersion  = "1.3.6"

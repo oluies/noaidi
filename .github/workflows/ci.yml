@@ -158,7 +158,16 @@ jobs:
       - name: Compile and test
         run: |
           set -euo pipefail
-          sbt --batch "Test/compile; testFull" 2>&1 | tee sbt-test.log
+          # `-Werror` here rather than in build.sbt, so the gate is visible in the
+          # command that enforces it. build.sbt sets -deprecation and -feature,
+          # which give warnings a location; this is what stops one scrolling past
+          # a green check. Set per invocation via `set`, because the env-var form
+          # could not be shown to switch off -- see the note in build.sbt.
+          #
+          # This covers the twelve projects in the root aggregate. The two outside
+          # it, prima-cyfra and prima-ortools, carry the same flag in their own
+          # steps below; between the three, every module compiles under -Werror.
+          sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; Test/compile; testFull' 2>&1 | tee sbt-test.log
           # One script, tested beside itself, rather than two hand-verified
           # copies of a four-stage pipeline. `count_tests.sh` explains why it
           # reads two counters and takes the larger; `test_count_tests.py` pins
@@ -201,7 +210,9 @@ jobs:
       # backend silently, and only surface the next time someone with a GPU
       # opened it.
       - name: Compile the GPU backend
-        run: sbt --batch "primaCyfra/Test/compile"
+        # -Werror: this is the module the feature warnings were in, so it is the
+        # one the gate most needs to cover.
+        run: sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; primaCyfra/Test/compile'
 
       # prima-ortools is out of the root aggregate for a different reason --
       # `ortools-java` declares every platform's natives as runtime
@@ -213,7 +224,7 @@ jobs:
       - name: Test the OR-Tools backend
         run: |
           set -euo pipefail
-          sbt --batch "primaOrtools/testFull" 2>&1 | tee sbt-ortools.log
+          sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; primaOrtools/testFull' 2>&1 | tee sbt-ortools.log
           counts=$(.github/scripts/count_tests.sh sbt-ortools.log)
           eval "$counts"
           echo "OR-Tools test count: $suites from per-suite lines, $summary from sbt's summary"

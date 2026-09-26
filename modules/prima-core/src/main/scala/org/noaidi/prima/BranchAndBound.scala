@@ -447,6 +447,18 @@ object BranchAndBound:
     }
     if best < 0 then None else Some(best)
 
+  /** A mutable copy of `a`.
+    *
+    * `IArray.toArray` is the one-call form and is deprecated: it clones and then
+    * casts the clone to `Array[T]` unchecked, which is sound only when the
+    * element type is exactly the runtime one. Copying into an array allocated
+    * here as `Double` needs no cast to be sound in the first place.
+    */
+  private def mutableCopy(a: IArray[Double]): Array[Double] =
+    val out = new Array[Double](a.length)
+    a.copyToArray(out)
+    out
+
   /** The solution with integer coordinates snapped to whole numbers.
     *
     * Each moves by at most `integralityTolerance`, so any constraint residual
@@ -455,16 +467,16 @@ object BranchAndBound:
     * caller, and they would not all do it the same way.
     */
   private def snap(x: IArray[Double], integers: IndexedSeq[Int]): IArray[Double] =
-    val out = x.toArray
+    val out = mutableCopy(x)
     integers.foreach(j => out(j) = math.round(out(j)).toDouble)
     IArray.unsafeFromArray(out)
 
   private def raise(bounds: IArray[Double], j: Int, value: Double): IArray[Double] =
-    val out = bounds.toArray
+    val out = mutableCopy(bounds)
     out(j) = math.max(out(j), value)
     IArray.unsafeFromArray(out)
 
   private def lowerTo(bounds: IArray[Double], j: Int, value: Double): IArray[Double] =
-    val out = bounds.toArray
+    val out = mutableCopy(bounds)
     out(j) = math.min(out(j), value)
     IArray.unsafeFromArray(out)

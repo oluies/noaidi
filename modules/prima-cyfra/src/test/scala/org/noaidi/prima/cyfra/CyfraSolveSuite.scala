@@ -300,6 +300,7 @@ class CyfraSolveSuite extends munit.FunSuite:
         import io.computenode.cyfra.dsl.{*, given}
         import io.computenode.cyfra.dsl.binding.GBuffer
         import CyfraLayouts.{Binary, One}
+        import scala.language.implicitConversions // Cyfra lifts literals into Int32/Float32
 
         val program = GProgram[Unit, Binary](
           layout = _ =>

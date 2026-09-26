@@ -4,19 +4,45 @@
 // ZIO facade at the edge, and solver backends kept behind one interface so the
 // modeling layer never names a solver.
 
-ThisBuild / scalaVersion := "3.7.4"
+ThisBuild / scalaVersion := "3.9.0"
 ThisBuild / organization := "org.noaidi"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
 
-// Cyfra is published for Scala 3.6.4; 3.7.4 reads that TASTy fine and keeps the
-// rest of the ecosystem (ZIO, MUnit) on well-supported ground.
+// Cyfra is published for Scala 3.6.4; 3.9.0 reads that TASTy fine -- a later
+// compiler reading older TASTy is the supported direction -- and keeps the rest
+// of the ecosystem (ZIO, MUnit) on well-supported ground. The `primaCyfra` CI
+// step is what pins this: it is the only thing that compiles against those
+// artifacts, so a TASTy version this compiler refused would fail there and
+// nowhere else.
 //
-// sbt 2 already defaults to -deprecation -feature -unchecked -Wunused:all
-// -Wvalue-discard, so scalacOptions stays empty rather than setting them twice.
+// -deprecation and -feature are set rather than left to the compiler's defaults,
+// which report both only as a count: "there were 3 deprecation warnings; re-run
+// with -deprecation for details". That is how five calls to a method the standard
+// library documents as able to crash your program sat here as an unnamed number
+// until a compiler bump happened to raise the count. A warning nobody can act on
+// without re-running the build is a warning nobody reads.
+// -deprecation and -feature rather than the compiler's defaults, which report
+// both only as a count: "there were 3 deprecation warnings; re-run with
+// -deprecation for details". That is how five calls to a method the standard
+// library documents as able to crash your program sat here as an unnamed number
+// until a compiler bump raised the count. A warning nobody can act on without
+// re-running the build is a warning nobody reads.
+//
+// -Werror is not set here. It is passed by CI, per invocation, in ci.yml. The
+// obvious version of that gate -- appending it from `sys.env.get("CI")` -- was
+// tried and could not be shown to toggle: with CI unset in the same invocation
+// that printed `sys.env.get("CI") == None`, -Werror was still in
+// `scalacOptions`, and it survived removing project/target and restarting the
+// server. Whatever pins it, a gate that cannot be demonstrated switching off is
+// not a gate, so the flag goes where its effect is visible in the command.
+//
+// One statement, not two: a second `ThisBuild / scalacOptions ++=` does not
+// accumulate onto the first here, it is silently dropped.
+ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
-val munitVersion  = "1.3.5"
+val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.26"
-val ojalgoVersion = "57.1.1"
+val ojalgoVersion = "57.3.1"
 
 // Note for CI and for anyone reading test output: under sbt 2 the `test` task is
 // incremental and will happily report success having run nothing. Use `testFull`
@@ -91,7 +117,7 @@ lazy val primaMps = project
 // LGPL-2.1 where the rest of this build is Apache-2.0. Keeping it a separate,
 // opt-in module contains both.
 val cyfraVersion = "0.1.0-RC1"
-val lwjglVersion = "3.4.0"
+val lwjglVersion = "3.4.3"
 
 // The module is configured for macOS on Apple Silicon, which is where the spike
 // was run. Everything host-specific is gated on these so that another platform
@@ -123,9 +149,22 @@ lazy val primaCyfra = project
     // misconfiguration. Cyfra pulls the Linux natives transitively already.
     libraryDependencies ++= (
       if isMacArm then
-        Seq("lwjgl", "lwjgl-vma").map(lib => "org.lwjgl" % lib % lwjglVersion classifier "natives-macos-arm64")
+        Seq("lwjgl", "lwjgl-vma")
+          .map(lib => ("org.lwjgl" % lib % lwjglVersion).classifier("natives-macos-arm64"))
       else Seq.empty
     ),
+    // The whole org.lwjgl set has to move together. Cyfra declares lwjgl,
+    // lwjgl-vma *and* lwjgl-vulkan at its own 3.4.0; only the first two are
+    // named above, so raising lwjglVersion on its own reconciled those and left
+    // lwjgl-vulkan behind -- a split LWJGL set, which its own docs rule out and
+    // which surfaces as a NoSuchMethodError from the bindings into a
+    // differently-versioned core. `primaCyfra/Test/compile` cannot see it, since
+    // pure-Java bindings compile against any core; only running on a host with a
+    // Vulkan stack can. Listing lwjgl-vulkan here is what keeps it tracking
+    // lwjglVersion -- a further org.lwjgl module appearing in Cyfra's POM would
+    // need adding to this list too.
+    dependencyOverrides ++= Seq("lwjgl", "lwjgl-vma", "lwjgl-vulkan")
+      .map(lib => "org.lwjgl" % lib % lwjglVersion),
     Test / fork := true,
     // Only point the loader at a specific ICD when that ICD actually exists.
     // Setting VK_ICD_FILENAMES to a missing path makes the Vulkan loader skip

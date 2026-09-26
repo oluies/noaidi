@@ -81,7 +81,7 @@ object ValidationLadder:
     // OS, architecture and JVM, and not the Scala version: at run time
     // `util.Properties.versionNumberString` reports the 2.13 standard library
     // underneath Scala 3, which would put "2.13.16" at the top of a report
-    // built with 3.7.4. What decides the numbers below it is the platform's
+    // built with 3.9.0. What decides the numbers below it is the platform's
     // floating-point behaviour anyway.
     val p = (k: String) => sys.props.getOrElse(k, "unknown")
     s"host: ${p("os.name")} ${p("os.arch")}, JVM ${p("java.vm.name")} ${p("java.vm.version")}"

@@ -7,6 +7,7 @@ import io.computenode.cyfra.core.layout.Layout
 import io.computenode.cyfra.dsl.{*, given}
 import io.computenode.cyfra.dsl.collections.GSeq
 import io.computenode.cyfra.runtime.VkCyfraRuntime
+import scala.language.implicitConversions // Cyfra lifts literals into Int32/Float32
 
 /** Can a CSR sparse matrix-vector product be written in Cyfra's DSL?
   *

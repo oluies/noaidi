@@ -1,0 +1,148 @@
+{
+  "source": "NordPSA tests/unit/test_hydro_ops.py",
+  "versions": {
+    "pypsa": "1.3.0",
+    "pandas": "3.0.6",
+    "numpy": "2.4.6",
+    "python": "3.11.15"
+  },
+  "shape": {
+    "snapshots": 168,
+    "resolution_hours": 3,
+    "days": 21,
+    "p_nom": 1000.0,
+    "first_snapshot": "2023-01-02 00:00:00",
+    "stores_weighting": 3.0
+  },
+  "networks": {
+    "inflow450-cheap600": "inflow450-cheap600",
+    "inflow900-cheap0": "inflow900-cheap0",
+    "inflow900-cheap600": "inflow900-cheap600",
+    "inflow600-cheap0": "inflow600-cheap0",
+    "inflow300-cheap600": "inflow300-cheap600"
+  },
+  "cases": {
+    "floors-ref": {
+      "status": "ok",
+      "objective": 297359.9999999999,
+      "hydro_min_mw": -0.0,
+      "daily_min_frac": 0.29999999999999805,
+      "weekly_max_frac": 0.30000000000000016,
+      "spill_mwh": 75600.00000000015,
+      "network": "inflow450-cheap600",
+      "config": null
+    },
+    "floors": {
+      "status": "ok",
+      "objective": 302399.9999999998,
+      "hydro_min_mw": 100.0,
+      "daily_min_frac": 0.324999999999998,
+      "weekly_max_frac": 0.3250000000000001,
+      "spill_mwh": 63000.00000000014,
+      "network": "inflow450-cheap600",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.2,
+        "max_weekly_frac": 0.77
+      }
+    },
+    "daily-45": {
+      "status": "ok",
+      "objective": 327599.99999999994,
+      "hydro_min_mw": 100.0,
+      "daily_min_frac": 0.45,
+      "weekly_max_frac": 0.45,
+      "spill_mwh": 0.0,
+      "network": "inflow450-cheap600",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.45,
+        "max_weekly_frac": 0.77
+      }
+    },
+    "weekly-cap-ref": {
+      "status": "ok",
+      "objective": 1908900.0,
+      "hydro_min_mw": 400.0,
+      "daily_min_frac": 0.774999999999998,
+      "weekly_max_frac": 0.7750000000000001,
+      "spill_mwh": 63000.000000000146,
+      "network": "inflow900-cheap0",
+      "config": null
+    },
+    "weekly-cap-40": {
+      "status": "ok",
+      "objective": 9298799.999999998,
+      "hydro_min_mw": 100.0,
+      "daily_min_frac": 0.23124999999999943,
+      "weekly_max_frac": 0.4000000000000001,
+      "spill_mwh": 252000.0,
+      "network": "inflow900-cheap0",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.2,
+        "max_weekly_frac": 0.4
+      }
+    },
+    "zone-override-ref": {
+      "status": "ok",
+      "objective": 325079.9999999998,
+      "hydro_min_mw": 100.0,
+      "daily_min_frac": 0.324999999999998,
+      "weekly_max_frac": 0.3250000000000001,
+      "spill_mwh": 289800.0000000001,
+      "network": "inflow900-cheap600",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.2,
+        "max_weekly_frac": 0.77
+      }
+    },
+    "zone-override-25": {
+      "status": "ok",
+      "objective": 1803059.9999999942,
+      "hydro_min_mw": 100.0,
+      "daily_min_frac": 0.2,
+      "weekly_max_frac": 0.25,
+      "spill_mwh": 327600.0,
+      "network": "inflow900-cheap600",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.2,
+        "max_weekly_frac": 0.77,
+        "max_weekly_frac_by_zone": {
+          "Z": 0.25
+        }
+      }
+    },
+    "bypass-hinge": {
+      "status": "ok",
+      "objective": 5599439.999999996,
+      "hydro_min_mw": 100.0,
+      "daily_min_frac": 0.4638586956521758,
+      "weekly_max_frac": 0.5978260869565216,
+      "spill_mwh": 6573.9130434782555,
+      "network": "inflow600-cheap0",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.2,
+        "max_weekly_frac": 0.6,
+        "bypass_spill": {
+          "active": true,
+          "threshold_below_max": 0.1,
+          "coefficient": 0.15
+        }
+      }
+    },
+    "infeasible-floor": {
+      "status": "warning",
+      "condition": "infeasible",
+      "network": "inflow300-cheap600",
+      "config": {
+        "min_hourly_frac": 0.1,
+        "min_daily_frac": 0.45,
+        "max_weekly_frac": 0.77
+      }
+    }
+  }
+}

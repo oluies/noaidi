@@ -72,8 +72,14 @@ object Lopf:
 
   final class UnsupportedNetwork(message: String) extends RuntimeException(message)
 
-  /** Turn a network into a dispatch LP. */
-  def build(input: Network): Model =
+  /** Turn a network into a dispatch LP.
+    *
+    * `hydro` is off by default, and that default is what a plain PyPSA network
+    * means: its operational limits, if it has any, live in an
+    * `extra_functionality` callback that the file never carried. Passing a
+    * [[HydroOps.Config]] is how a caller says it has those limits in hand.
+    */
+  def build(input: Network, hydro: HydroOps.Config = HydroOps.off): Model =
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
@@ -763,6 +769,12 @@ object Lopf:
       }
     }
 
+    // Last, and deliberately: these are operational limits laid over a finished
+    // dispatch problem, which is where PyPSA puts them too -- an
+    // `extra_functionality` callback runs against the model the rest of the
+    // formulation already built. Nothing above it needs to know they exist.
+    HydroOps.constrain(network, snapshots, columns.toMap, builder, hydro)
+
     val (problem, translation) = builder.build()
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))
 
@@ -774,6 +786,14 @@ object Lopf:
     */
   def solve(input: Network, params: PdhgParams = PdhgParams.default): LopfResult =
     solve(input, Pdhg.Solver(params))
+
+  /** The same solve, with reservoir operational limits applied. */
+  def solve(input: Network, hydro: HydroOps.Config, solver: LpSolver): LopfResult =
+    val expanded = StandardTypes.expand(input)
+    val network  = Active.only(expanded)
+    val model    = build(network, hydro)
+    val solution = solver.solve(model.problem)
+    LopfResult(network, model, solution, Active.inactive(expanded))
 
   /** The same solve, with the backend chosen by the caller.
     *

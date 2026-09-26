@@ -233,6 +233,13 @@ val jhdfVersion    = "0.13.0"
 def referenceEnv(base: File): Map[String, String] = Map(
   "NOAIDI_GOLDENS" -> (base / "reference" / "goldens").getAbsolutePath,
   "NOAIDI_SOURCES" -> (base / "modules").getAbsolutePath,
+  // Absolute for the same reason as the two above, and the reason is worth
+  // repeating rather than inferring: `Test / fork` does not run from the
+  // repository root, so a relative default in the suite resolves to nothing and
+  // every test that needs the fixtures reports as *skipped* rather than failed.
+  // Seven of them did exactly that before this line existed, which is the quiet
+  // half of the failure -- a green run over an empty assumption.
+  "NOAIDI_NORDPSA" -> (base / "reference" / "nordpsa").getAbsolutePath,
 )
 
 lazy val networkModel = project

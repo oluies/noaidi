@@ -75,14 +75,40 @@ trait CsvFixtures extends munit.Suite, munit.Assertions:
     * built that way can pass while the real path stays broken.
     */
   protected def copyOf(name: String): Path =
-    val dir    = tempDir(tempPrefix)
-    val source = goldens.resolve("networks").resolve(name)
+    copyFrom(goldens.resolve("networks").resolve(name))
+
+  /** The same copy, from any fixture root.
+    *
+    * Parameterised rather than reimplemented per suite: `HydroOpsSuite` reads from
+    * `reference/nordpsa` and had its own shallow copy, which is the duplication the
+    * comment above says this trait exists to end -- reappearing, as it did before,
+    * in a suite added after that comment was written.
+    */
+  protected def copyFrom(source: Path): Path =
+    val dir = tempDir(tempPrefix)
     // Closed explicitly: `Files.list` is backed by an open directory handle, and
     // this runs once per mutation test.
     scala.util.Using.resource(Files.list(source)) { entries =>
       entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
     }
     dir
+
+  /** A fixture copied from `source` with files added or rewritten.
+    *
+    * Keeps [[mutate]]'s guard for a file that already exists: rewriting one to
+    * content it already had is a test asserting something about an unmodified
+    * network, and the assertion that catches it has to live here rather than in
+    * each caller.
+    */
+  protected def copiedWith(source: Path, name: String, files: (String, String)*): Network =
+    val dir = copyFrom(source)
+    files.foreach { (file, content) =>
+      val target = dir.resolve(file)
+      if Files.exists(target) then
+        assertNotEquals(content, Files.readString(target), s"the rewrite of $file changed nothing")
+      Files.writeString(target, content)
+    }
+    CsvReader.read(dir, schema, name)
 
   /** A golden network with one file edited, read back through the reader. */
   protected def mutate(name: String, file: String, edit: String => String): Network =

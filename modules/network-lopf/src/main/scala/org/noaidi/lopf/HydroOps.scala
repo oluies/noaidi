@@ -121,6 +121,59 @@ object HydroOps:
   /** No operational limits, which is what a plain PyPSA network means. */
   val off: Config = Config()
 
+  /** Refuse zone configuration that cannot take effect.
+    *
+    * Three ways a zone entry is inert, all silent before this existed and all the
+    * same failure: the run reports a number as though the limit had been applied.
+    *
+    *   - the name matches no reservoir -- a typo, another naming convention, or a
+    *     unit dropped by the `carrier`/`p_nom` test
+    *   - the ceiling is non-positive, so it is filtered out and leaves that unit
+    *     *less* constrained than the global ceiling would have
+    *   - a kappa override names a unit that gets no ceiling, and the hinge is
+    *     measured down from a ceiling, so there is nothing for it to modify
+    *
+    * A deliberate divergence from NordPSA, which keeps the global value in all
+    * three. Worth being explicit about the cost: a config naming a zone whose
+    * reservoir was legitimately dropped now stops instead of proceeding. That is
+    * the outcome worth having, and it is the reason `maxWeeklyFraction = 0.0`
+    * globally still means "off" -- a global zero is the documented switch, while a
+    * per-zone entry is an override somebody wrote on purpose.
+    *
+    * `coefficientByZone` is only checked when the hinge is active, because an
+    * inactive hinge never reads it -- failing a build over a value nothing can
+    * consult would be the mirror-image mistake.
+    */
+  private def inertZones(network: Network, config: Config, units: Seq[String]): Unit =
+    val ceilingZones = config.maxWeeklyFractionByZone
+    val kappaZones =
+      if config.bypassSpill.active then config.bypassSpill.coefficientByZone else Map.empty
+
+    val unmatched = (ceilingZones.keySet ++ kappaZones.keySet)
+      .filterNot(z => units.contains(unitFor(z)))
+      .toSeq.sorted
+      .map(z => s"'$z' matches no reservoir (looked for '${unitFor(z)}')")
+
+    val nonPositive = ceilingZones.filter(_._2 <= 0.0).keys.toSeq.sorted
+      .map(z => s"'$z' sets a ceiling of ${ceilingZones(z)}, which cannot constrain anything")
+
+    // A kappa override is only meaningful where a ceiling exists to measure from.
+    val ceilinged = units.filter { id =>
+      ceilingZones.collectFirst { case (z, v) if unitFor(z) == id => v > 0.0 }
+        .getOrElse(config.maxWeeklyFraction > 0.0)
+    }.toSet
+    val ceilingless = kappaZones.keys.toSeq.sorted
+      .filter(z => units.contains(unitFor(z)) && !ceilinged.contains(unitFor(z)))
+      .map(z => s"'$z' overrides the hinge coefficient for a reservoir that has no weekly ceiling")
+
+    val problems = unmatched ++ nonPositive ++ ceilingless
+    if problems.nonEmpty then
+      throw new Lopf.UnsupportedNetwork(
+        s"network '${network.name}' was given zone limits that cannot take effect: " +
+          problems.mkString("; ") +
+          s". Its hydro StorageUnits are " +
+          (if units.isEmpty then "none" else units.mkString(", ")) + ".",
+      )
   /** The unit name NordPSA gives a zone's reservoir. */
   private def unitFor(zone: String): String = s"$zone $Carrier"
 
@@ -142,21 +195,37 @@ object HydroOps:
   ): Unit =
     if config.isOff && !config.bypassSpill.active then return
 
-    // Matched rather than `getOrElse(..., return)`: a non-local return out of a
-    // by-name argument is no longer supported in Scala 3, and -Werror says so.
-    val table = network.tables.get("StorageUnit") match
-      case Some(found) => found
-      case None        => return
-
     // Reservoir hydro only, and only what actually has capacity. A zero-`p_nom`
     // unit would take every fraction of it to zero, which is a row that cannot
     // bind dressed up as one that can.
-    val units = table.ids.filter { id =>
-      table.spec.attribute("carrier").isDefined &&
-        table.string("carrier", id) == Carrier &&
-        table.float("p_nom", id) > 0.0
+    //
+    // An absent table gives no units rather than an early return, because the
+    // zone check below has to see that case: a network with no StorageUnit table
+    // at all matches every zone key nothing, which is precisely what it exists to
+    // report.
+    val table = network.tables.get("StorageUnit")
+    val units = table.toIndexedSeq.flatMap { t =>
+      t.ids.filter { id =>
+        t.spec.attribute("carrier").isDefined &&
+          t.string("carrier", id) == Carrier &&
+          t.float("p_nom", id) > 0.0
+      }
     }
+
+    // Inert zone configuration is refused, and this runs *before* the empty-units
+    // return rather than after it.
+    //
+    // Placed after, it could not fire in the one case its own reasoning names: a
+    // reservoir filtered out by the `carrier`/`p_nom` test leaves `units` empty,
+    // the method returned, and a config naming that zone reported a number as
+    // though its limit had applied. Which is the whole failure being guarded
+    // against, reachable only from the guard's own blind spot.
+    inertZones(network, config, units)
+
     if units.isEmpty then return
+
+    // Non-empty `units` came from the table, so it is present.
+    val storage = table.get
 
     val weight = (t: Int) => network.weighting("stores", t)
 
@@ -169,24 +238,42 @@ object HydroOps:
     // reason. The window rows need it too, and more subtly: an unmasked `H` sums
     // the weightings of snapshots the unit does not exist at, so the floor
     // demands a full window's energy from the active hours alone.
-    val live = (id: String, t: Int) => Periods.activeAt(network, table, id, t)
+    val live = (id: String, t: Int) => Periods.activeAt(network, storage, id, t)
 
-    /** The dispatch terms for one unit over one window, active snapshots only. */
-    val energy = (id: String, members: Seq[Int]) =>
-      members.filter(live(id, _)).flatMap(t =>
-        columns.get((Storage.Dispatch, id, t)).map(col => (col, weight(t))),
-      )
+    /** The snapshots of a window this unit exists at. Filtered once, then reused:
+      * `live` re-reads the period label and the unit's `build_year`/`lifetime`, so
+      * calling it again per accessor multiplied that work by the number of rows.
+      */
+    val activeIn = (id: String, members: Seq[Int]) => members.filter(live(id, _))
 
-    /** The window's hours, counting only what the unit exists for. */
-    val hoursOf = (id: String, members: Seq[Int]) =>
-      members.filter(live(id, _)).map(weight).sum
+    /** The dispatch terms for one unit over the active snapshots handed in. */
+    val energy = (id: String, active: Seq[Int]) =>
+      active.flatMap(t => columns.get((Storage.Dispatch, id, t)).map(col => (col, weight(t))))
+
+    /** The window's hours, counting only the active snapshots handed in.
+      *
+      * For the window rows this is currently unobservable, and the reason is worth
+      * writing down rather than rediscovering. `activeAt` reduces to
+      * `activeIn(table, id, period)` -- activity depends on the snapshot's period
+      * and nothing else -- and [[WindowKey]] carries the period, so every window
+      * lies inside exactly one period and its members share a single activity
+      * verdict. A window is therefore wholly active or wholly absent: masked and
+      * unmasked `H` agree, and an unmasked one is indistinguishable by any test.
+      *
+      * Kept rather than dropped because the invariant is the window key's, not this
+      * function's. Widen the key -- group across periods, or admit an activity rule
+      * that varies inside one -- and the two stop agreeing, with a silently tighter
+      * floor as the symptom. The hourly floor is a different matter: each snapshot
+      * is its own row there, so masking it is load-bearing and pinned.
+      */
+    val hoursOf = (active: Seq[Int]) => active.map(weight).sum
 
     // --- per-snapshot floor ------------------------------------------------
     // No calendar needed, so this is the one limit an integer-labelled index can
     // carry.
     if config.minHourlyFraction > 0.0 then
       units.foreach { id =>
-        val floor = config.minHourlyFraction * table.float("p_nom", id)
+        val floor = config.minHourlyFraction * storage.float("p_nom", id)
         snapshots.filter(live(id, _)).foreach { t =>
           columns.get((Storage.Dispatch, id, t)).foreach { col =>
             builder.greaterThan(Seq((col, 1.0)), floor)
@@ -200,13 +287,21 @@ object HydroOps:
     // up front made a weekly-only config on an integer index report that it had
     // been "asked for a daily window", which is a message that sends the reader
     // to the wrong line.
+    // `lazy`, so each grouping is computed once rather than once per unit -- a year
+    // at hourly resolution over ten zones re-parsed ~88k labels -- while still not
+    // being computed at all unless its own limit asks, which is what keeps the
+    // refusal naming the limit that needed a calendar.
+    lazy val days  = windows(network, snapshots, Daily)
+    lazy val weeks = windows(network, snapshots, Weekly)
+
     if config.minDailyFraction > 0.0 then
       units.foreach { id =>
-        val pNom = table.float("p_nom", id)
-        windows(network, snapshots, Daily).foreach { (_, members) =>
-          val terms = energy(id, members)
+        val pNom = storage.float("p_nom", id)
+        days.foreach { (_, members) =>
+          val active = activeIn(id, members)
+          val terms  = energy(id, active)
           if terms.nonEmpty then
-            builder.greaterThan(terms, config.minDailyFraction * pNom * hoursOf(id, members))
+            builder.greaterThan(terms, config.minDailyFraction * pNom * hoursOf(active))
         }
       }
 
@@ -229,37 +324,15 @@ object HydroOps:
           .map(id -> _)
       }
 
-    // A zone key that matches no unit is refused rather than ignored.
-    //
-    // A deliberate divergence from NordPSA, which does `if su_name in fw.index`
-    // and silently keeps the global ceiling. Silence is the wrong answer here for
-    // the reason this file already argues twice: a typo, a different naming
-    // convention, or a unit filtered out by the `carrier`/`p_nom` test all leave
-    // a configured zone limit doing nothing, and the run reports a number as
-    // though the limit had been applied. The cost of refusing is that a config
-    // naming a zone whose reservoir was dropped now stops instead of proceeding
-    // -- which is the outcome worth having.
-    val unmatched = (config.maxWeeklyFractionByZone.keySet ++
-      config.bypassSpill.coefficientByZone.keySet).filterNot(z => units.contains(unitFor(z)))
-    if unmatched.nonEmpty then
-      throw new Lopf.UnsupportedNetwork(
-        s"network '${network.name}' has no reservoir for zone(s) " +
-          unmatched.toSeq.sorted.map(z => s"'$z' (looked for '${unitFor(z)}')").mkString(", ") +
-          s"; its hydro StorageUnits are ${units.mkString(", ")}. A zone limit that " +
-          "matches nothing would leave the global ceiling in force and report a " +
-          "number as though it had been applied.",
-      )
-
     if ceilings.isEmpty then return
 
-    val weeks = windows(network, snapshots, Weekly)
-
     ceilings.foreach { (id, fraction) =>
-      val pNom = table.float("p_nom", id)
+      val pNom = storage.float("p_nom", id)
       weeks.foreach { (_, members) =>
-        val terms = energy(id, members)
+        val active = activeIn(id, members)
+        val terms  = energy(id, active)
         if terms.nonEmpty then
-          builder.lessThan(terms, fraction * pNom * hoursOf(id, members))
+          builder.lessThan(terms, fraction * pNom * hoursOf(active))
       }
     }
 
@@ -277,21 +350,21 @@ object HydroOps:
     // `thresholdBelowMax` tighter than the one configured, where NordPSA warns
     // and emits nothing at all.
     val spilling = ceilings.map(_._1).filter { id =>
-      snapshots.exists(t => live(id, t) && table.valueAt("inflow", id, t) > 0.0)
+      snapshots.exists(t => live(id, t) && storage.valueAt("inflow", id, t) > 0.0)
     }
     if spilling.isEmpty then return
 
     val below = config.bypassSpill.thresholdBelowMax
     val ceilingOf = ceilings.toMap
     spilling.foreach { id =>
-      val pNom     = table.float("p_nom", id)
+      val pNom     = storage.float("p_nom", id)
       val fraction = ceilingOf(id)
       val kappa = config.bypassSpill.coefficientByZone
         .collectFirst { case (zone, value) if unitFor(zone) == id => value }
         .getOrElse(config.bypassSpill.coefficient)
 
       weeks.foreach { (_, members) =>
-        val active     = members.filter(live(id, _))
+        val active     = activeIn(id, members)
         val spillTerms = active.flatMap(t =>
           columns.get((Storage.Spill, id, t)).map(col => (col, weight(t))),
         )
@@ -300,8 +373,8 @@ object HydroOps:
           // from this unit's own ceiling. Written as one row with the production
           // terms moved across rather than as a bound on a difference, because
           // `spill` and `p_dispatch` are separate columns.
-          val production = energy(id, members).map((col, w) => (col, -kappa * w))
-          val threshold  = (fraction - below) * pNom * hoursOf(id, members)
+          val production = energy(id, active).map((col, w) => (col, -kappa * w))
+          val threshold  = (fraction - below) * pNom * hoursOf(active)
           builder.greaterThan(spillTerms ++ production, -kappa * threshold)
       }
     }

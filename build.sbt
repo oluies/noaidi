@@ -136,6 +136,18 @@ lazy val primaCyfra = project
           .map(lib => ("org.lwjgl" % lib % lwjglVersion).classifier("natives-macos-arm64"))
       else Seq.empty
     ),
+    // The whole org.lwjgl set has to move together. Cyfra declares lwjgl,
+    // lwjgl-vma *and* lwjgl-vulkan at its own 3.4.0; only the first two are
+    // named above, so raising lwjglVersion on its own reconciled those and left
+    // lwjgl-vulkan behind -- a split LWJGL set, which its own docs rule out and
+    // which surfaces as a NoSuchMethodError from the bindings into a
+    // differently-versioned core. `primaCyfra/Test/compile` cannot see it, since
+    // pure-Java bindings compile against any core; only running on a host with a
+    // Vulkan stack can. Listing lwjgl-vulkan here is what keeps it tracking
+    // lwjglVersion -- a further org.lwjgl module appearing in Cyfra's POM would
+    // need adding to this list too.
+    dependencyOverrides ++= Seq("lwjgl", "lwjgl-vma", "lwjgl-vulkan")
+      .map(lib => "org.lwjgl" % lib % lwjglVersion),
     Test / fork := true,
     // Only point the loader at a specific ICD when that ICD actually exists.
     // Setting VK_ICD_FILENAMES to a missing path makes the Vulkan loader skip

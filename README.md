@@ -171,9 +171,11 @@ settled by argument.
 
 ## Building
 
-Requires JDK 21+ and sbt 2.0.6, which the build pins. CI runs the suite on 21
-and 25; development is on 26. Nothing in the build sets a `--release` floor, so
-21 is what is *tested* rather than what is enforced.
+Requires JDK 21+ and the sbt version pinned in `project/build.properties`, which
+is the only place it is written down -- naming it here as well is how it came to
+say 2.0.6 against a build pinning 2.0.9. CI runs the suite on 21 and 25;
+development is on 26. Nothing in the build sets a `--release` floor, so 21 is
+what is *tested* rather than what is enforced.
 
 ```bash
 sbt testFull                                                    # all modules

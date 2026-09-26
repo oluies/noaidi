@@ -348,6 +348,55 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
     assert(ownerless.getMessage.contains("no weekly ceiling"), ownerless.getMessage)
   }
 
+  test("a zone limit is refused on a network with no StorageUnit table at all") {
+    assume(available, "reference/goldens is not present")
+    // The reason `table` is an Option rather than an early return, and until now the
+    // reason had no test: every case that reached the guard used a network that does
+    // have a StorageUnit table, so restoring `case None => return` would have left
+    // the suite green while reopening the silent no-op the Option was introduced to
+    // close. `ac-dc-meshed` ships no storage_units.csv.
+    val refused = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(network("ac-dc-meshed"), HydroOps.Config(maxWeeklyFractionByZone = Map("Z" -> 0.3)))
+    }
+    assert(
+      refused.getMessage.contains("matches no reservoir") && refused.getMessage.contains("none"),
+      s"the refusal did not fire for a table-less network: ${refused.getMessage}",
+    )
+  }
+
+  test("a NaN zone ceiling is refused rather than silently emitting no row") {
+    assume(fixtures, "reference/nordpsa is not present")
+    // The guard tested `<= 0.0` while the row filter tests `> 0.0`, and NaN fails
+    // both: it matched a reservoir, passed every arm of the guard, and emitted no
+    // weekly row -- the run reporting a number as though the zone limit had applied,
+    // which is the exact failure inertZones exists to refuse. Periods.scala treats a
+    // NaN slipping through a comparison as a real hazard for the same reason.
+    val refused = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(
+        variant("inflow450-cheap600"),
+        HydroOps.Config(maxWeeklyFraction = 0.6,
+          maxWeeklyFractionByZone = Map("Z" -> Double.NaN)),
+      )
+    }
+    assert(refused.getMessage.contains("NaN"), s"the refusal does not name NaN: ${refused.getMessage}")
+  }
+
+  test("a zone that is both unmatched and inert is reported once") {
+    assume(fixtures, "reference/nordpsa is not present")
+    // One config entry, one complaint. Reported by both arms it read as two problems
+    // with the same name.
+    val refused = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(
+        variant("inflow450-cheap600"),
+        HydroOps.Config(maxWeeklyFraction = 0.6, maxWeeklyFractionByZone = Map("SE9" -> 0.0)),
+      )
+    }
+    assertEquals(
+      refused.getMessage.sliding(5).count(_ == "'SE9'"),
+      1,
+      s"the zone was named more than once: ${refused.getMessage}",
+    )
+  }
   test("an inactive hinge does not fail the build over a coefficient nothing reads") {
     assume(fixtures, "reference/nordpsa is not present")
     // The mirror-image mistake, and the first version made it: `coefficientByZone`

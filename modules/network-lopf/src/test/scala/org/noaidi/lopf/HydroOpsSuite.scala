@@ -182,15 +182,6 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
     )
   }
 
-  /** A fixture directory copied, with files added or rewritten, from any root. */
-  private def copiedWith(from: Path, name: String, files: (String, String)*): Network =
-    val dir = tempDir(tempPrefix)
-    scala.util.Using.resource(Files.list(from)) { entries =>
-      entries.iterator.forEachRemaining(f => Files.copy(f, dir.resolve(f.getFileName.toString)))
-    }
-    files.foreach((file, content) => Files.writeString(dir.resolve(file), content))
-    CsvReader.read(dir, schema, name)
-
   private def rows(n: Network, config: HydroOps.Config): Int =
     Lopf.build(n, config).problem.numConstraints
 
@@ -277,6 +268,95 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
       rows(n, HydroOps.Config(maxWeeklyFraction = 0.5)) - rows(n, HydroOps.off),
       2,
       "the week was not split per investment period",
+    )
+  }
+  test("the daily floor's right-hand side is the window's own weighted hours") {
+    assume(available, "reference/goldens is not present")
+    // Asserts the value, not the masking, and the distinction is the point.
+    //
+    // A review asked for a case where masked and unmasked `H` differ. There is
+    // none: `activeAt` reduces to `activeIn(table, id, period)`, and the window key
+    // carries the period, so a window's members share one activity verdict and the
+    // window is wholly active or wholly absent. Reverting `hoursOf` to
+    // `members.map(weight).sum` leaves this suite green for that reason rather than
+    // from a gap -- see the note on `hoursOf`.
+    //
+    // What is worth pinning is that `H` is the window's summed `stores` weightings
+    // and not its snapshot count, which unequal weightings below make visible: a
+    // count would give 2, the weightings give 10.
+    val n = copiedWith(
+      goldens.resolve("networks").resolve("investment-periods"),
+      "investment-periods",
+      "snapshots.csv" ->
+        (",period,timestep,objective,stores,generators\n" +
+          "0,2030,2023-01-02 00:00:00,1.0,2.0,1.0\n" +
+          "1,2030,2023-01-02 06:00:00,1.0,2.0,1.0\n" +
+          "2,2040,2023-01-03 00:00:00,1.0,5.0,1.0\n" +
+          "3,2040,2023-01-03 06:00:00,1.0,5.0,1.0\n"),
+      "storage_units.csv" ->
+        ("name,bus,carrier,p_nom,max_hours,marginal_cost,build_year,lifetime\n" +
+          "Z hydro,b,hydro,100.0,10.0,1.0,2040,30.0\n"),
+    )
+    // Built in 2040, so only the 2040 day carries a row: H = 5.0 + 5.0 = 10.0 and
+    // the floor is 0.3 * 100 * 10 = 300. A count-based H would give 0.3 * 100 * 2.
+    val fraction = 0.3
+    val floored  = Lopf.build(n, HydroOps.Config(minDailyFraction = fraction))
+    val plain    = Lopf.build(n, HydroOps.off)
+    val added    = floored.problem.rhs.drop(plain.problem.numConstraints)
+    assertEquals(added.length, 1, "expected exactly one daily-floor row")
+    assertEqualsDouble(added(0), fraction * 100.0 * 10.0, 1e-9, "H was not the active hours")
+  }
+
+  test("a zone limit is refused even when no reservoir survives the filter") {
+    assume(fixtures, "reference/nordpsa is not present")
+    // The blind spot in the first version of this guard: it sat after the
+    // empty-units return, so it could not fire in the one case its own comment
+    // cited -- a reservoir dropped by the `carrier`/`p_nom` test. A p_nom of 0
+    // drops the only unit, and the zone key then matches nothing at all.
+    val n = copiedWith(
+      root.resolve("networks").resolve("inflow450-cheap600"),
+      "inflow450-cheap600",
+      "storage_units.csv" -> Files.readString(
+        root.resolve("networks").resolve("inflow450-cheap600").resolve("storage_units.csv"),
+      ).replace(",1000.0,", ",0.0,"),
+    )
+    val refused = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(n, HydroOps.Config(maxWeeklyFractionByZone = Map("Z" -> 0.3)))
+    }
+    assert(
+      refused.getMessage.contains("'Z' matches no reservoir"),
+      s"the refusal did not fire for a filtered-out reservoir: ${refused.getMessage}",
+    )
+  }
+
+  test("an inert zone ceiling and an ownerless kappa are both refused") {
+    assume(fixtures, "reference/nordpsa is not present")
+    val n = variant("inflow450-cheap600")
+    // A zone ceiling of 0.0 matches a reservoir but is filtered out, leaving it
+    // *less* constrained than the global ceiling would have -- silently, before.
+    val zero = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(n, HydroOps.Config(maxWeeklyFraction = 0.6,
+        maxWeeklyFractionByZone = Map("Z" -> 0.0)))
+    }
+    assert(zero.getMessage.contains("cannot constrain anything"), zero.getMessage)
+
+    // A kappa override for a reservoir with no ceiling has nothing to measure from.
+    val ownerless = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(n, HydroOps.Config(bypassSpill =
+        HydroOps.BypassSpill(active = true, coefficientByZone = Map("Z" -> 0.2))))
+    }
+    assert(ownerless.getMessage.contains("no weekly ceiling"), ownerless.getMessage)
+  }
+
+  test("an inactive hinge does not fail the build over a coefficient nothing reads") {
+    assume(fixtures, "reference/nordpsa is not present")
+    // The mirror-image mistake, and the first version made it: `coefficientByZone`
+    // was unioned into the check unconditionally, so an inactive hinge failed the
+    // whole build over a value no row could consult.
+    Lopf.build(
+      variant("inflow450-cheap600"),
+      HydroOps.Config(maxWeeklyFraction = 0.6, bypassSpill =
+        HydroOps.BypassSpill(active = false, coefficientByZone = Map("nowhere" -> 0.2))),
     )
   }
   test("the refusal names the limit that actually needed a calendar") {

@@ -340,15 +340,36 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val problem     = model.problem
     assert(problem.numConstraints > problem.numEqualities, "no inequality rows -- weak test")
 
-    val misindexed = (0 until translation.numOriginalRows).filter { r =>
+    // The terminal value has to have emitted something, or this whole test is about a
+    // model that never had a segment in it. That is not hypothetical: it is exactly the
+    // state commit 7d15d7c found, where the config said "on" and emission selected
+    // nothing, leaving the model byte-identical at 336 variables and 112 rows -- and
+    // under that regression the scan below would have been green.
+    val plain = Lopf.build(variant("terminal-week"), HydroOps.Config(maxWeeklyFraction = 0.6))
+    assert(
+      problem.numVariables > plain.problem.numVariables,
+      "no segment columns were added, so there is no terminal equality to misindex",
+    )
+    model.map.column(TerminalValue.Segment, s"$unit#0", lastSnapshot): Unit
+    assertEquals(
+      model.map.numVariables,
+      problem.numVariables,
+      "the variable map under-reports the columns, which is what Sclopf sizes its copy from",
+    )
+
+    // Sclopf's own condition, not a weaker one: it accepts `Direct(r)` and `Negated(r)`
+    // and rejects everything else, `Range` included. Flagging only a misindexed `Direct`
+    // let a misindexed `Negated` or a two-sided `Range` through.
+    val misindexed = (0 until translation.numOriginalRows).filterNot { r =>
       translation.expansionOf(r) match
-        case RowExpansion.Direct(row) => row != r && row < problem.numEqualities
-        case _                        => false
+        case RowExpansion.Direct(row)  => row == r
+        case RowExpansion.Negated(row) => row == r
+        case _                         => false
     }
     assertEquals(
       misindexed.toList,
       Nil,
-      "an equality row was emitted after an inequality, so its standard-form index moved",
+      "a row does not map to the standard-form row of the same index, so Sclopf would refuse it",
     )
   }
 

@@ -807,7 +807,12 @@ object Lopf:
     // formulation already built. Nothing above it needs to know they exist.
     HydroOps.constrain(network, snapshots, columns, builder, hydro)
     val (problem, translation) = builder.build()
-    Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))
+    // `problem.numVariables`, not `bounds.length`: the latter is the count from before
+    // the builder existed, and a family that declares a column through the builder --
+    // `TerminalValue` does -- makes the two diverge. `Sclopf` sizes its rebuild from
+    // `base.map.numVariables` and then copies `0 until baseProblem.numVariables`
+    // columns, so an under-reported count throws on the first column past it.
+    Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, problem.numVariables))
 
   /** Solve, and map the answer back onto component names.
     *

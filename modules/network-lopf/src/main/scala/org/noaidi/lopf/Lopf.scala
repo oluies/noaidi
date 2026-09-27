@@ -356,7 +356,7 @@ object Lopf:
     // everything else in this method already follows. Its rows go in beside the other
     // families, once the builder is there.
     val plannedTerminal =
-      TerminalValue.plan(network, snapshots, columns.toMap, declare, terminal)
+      TerminalValue.plan(network, snapshots, columns, declare, terminal)
 
     val builder = LpProblem.builder(bounds.length)
     bounds.zipWithIndex.foreach { case ((lo, hi), i) => builder.bounds(i, lo, hi) }
@@ -650,6 +650,16 @@ object Lopf:
       }
     }
 
+    // The terminal value's defining equality goes here, with the other equality
+    // families, and not after the inequalities below.
+    //
+    // `LpBuilder.build()` sorts equalities before inequalities, so an equality emitted
+    // after an inequality breaks the original-row-index == standard-form-row-index
+    // property that `Sclopf.build` checks and refuses to proceed without. Emitted last,
+    // terminal value and secure dispatch could never be combined: latent only because
+    // `Sclopf` calls `Lopf.build(network)` with this defaulted off.
+    TerminalValue.emit(plannedTerminal, builder)
+
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational
     // limits are no longer constants in the column bounds but multiples of a
@@ -786,13 +796,7 @@ object Lopf:
     // dispatch problem, which is where PyPSA puts them too -- an
     // `extra_functionality` callback runs against the model the rest of the
     // formulation already built. Nothing above it needs to know they exist.
-    HydroOps.constrain(network, snapshots, columns.toMap, builder, hydro)
-
-    // The other half of the terminal value: its columns were allocated above the
-    // builder, and this ties each reservoir's segments to its level. Without the row
-    // the segments would sit at their upper bounds and collect the whole curve for
-    // water that is not there.
-    TerminalValue.emit(plannedTerminal, builder)
+    HydroOps.constrain(network, snapshots, columns, builder, hydro)
 
     val (problem, translation) = builder.build()
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))

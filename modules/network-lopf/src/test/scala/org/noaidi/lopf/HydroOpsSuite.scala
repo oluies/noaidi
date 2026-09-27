@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
-import java.nio.file.{Files, Path, Paths}
-import org.noaidi.network.{CsvReader, Network}
+import java.nio.file.Files
+import org.noaidi.network.Network
 import org.noaidi.prima.{PdhgParams, SolveStatus}
 
 /** NordPSA's reservoir behaviour against this port -- [[HydroOps]] and one family
@@ -106,7 +106,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // charge at both ends of the horizon.
     assert(socReference("equivalent").bool, "the callback and the attribute disagree in PyPSA")
 
-    val stored = socReference("cases")("attribute")
+    val attribute = socReference("cases")("attribute")
     val result = Lopf.solve(variant("soc-anchor"), HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
     assertEquals(result.status, SolveStatus.Optimal)
 
@@ -117,7 +117,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
       1e-6 * target,
       "the anchored snapshot did not reach NordPSA's target level",
     )
-    val objective = stored("objective").num
+    val objective = attribute("objective").num
     assertEqualsDouble(
       result.objective,
       objective,
@@ -152,12 +152,16 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
       "storage_units-state_of_charge_set.csv" -> blanked)
     val anchored = Lopf.solve(variant("soc-anchor"), HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
     val loose    = Lopf.solve(free, HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
-    assertEqualsDouble(
-      loose.objective,
-      anchored.objective,
-      1e-6 * math.max(1.0, math.abs(anchored.objective)),
-      "removing the anchor changed the cost, which the reference says it cannot",
-    )
+
+    // Both against PyPSA's number, not against each other. `soc-anchor` is
+    // `inflow450-cheap600` plus the one extra column -- byte-identical otherwise -- so
+    // PyPSA's objective for it is already in the tree twice, as soc.json's cases and as
+    // hydro.json's `floors-ref`. Comparing the two solves only to one another passes for
+    // a port that is wrong on both, which is what this asserted before.
+    val target = socReference("cases")("control")("objective").num
+    val band   = 1e-6 * math.max(1.0, math.abs(target))
+    assertEqualsDouble(anchored.objective, target, band, "the anchored solve disagrees with PyPSA")
+    assertEqualsDouble(loose.objective, target, band, "the unanchored solve disagrees with PyPSA")
     assert(
       math.abs(loose.stateOfCharge("Z hydro", 0) - anchored.stateOfCharge("Z hydro", 0)) > 1.0,
       "removing the anchor left the level unchanged, so it was pinning nothing",

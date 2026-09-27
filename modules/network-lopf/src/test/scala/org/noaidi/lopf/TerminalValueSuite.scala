@@ -1,5 +1,6 @@
 package org.noaidi.lopf
 
+import org.noaidi.network.Network
 import org.noaidi.prima.{PdhgParams, Pdhg, SolveStatus}
 
 /** [[TerminalValue]] against NordPSA's own `hydro_terminal_value` callback.
@@ -176,6 +177,147 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     }
   }
 
+  /** `terminal-week` with a second reservoir, for the cases that need two. */
+  private def twoReservoirs: Network = copiedWith(
+    variantDir("terminal-week"),
+    "terminal-week",
+    "storage_units.csv" ->
+      ("name,bus,p_nom,p_min_pu,carrier,spill_cost,marginal_cost," +
+        "state_of_charge_initial,max_hours\n" +
+        "Z hydro,b,1000.0,0.0,hydro,0.1,1.0,28000.0,40.0\n" +
+        "Y hydro,b,1000.0,0.0,hydro,0.1,1.0,28000.0,40.0\n"),
+  )
+
+  private def refusal(n: Network, config: TerminalValue.Config): String =
+    intercept[Lopf.UnsupportedNetwork](Lopf.build(n, HydroOps.off, config)).getMessage
+
+  test("a lambda that cannot price anything is refused, NaN included") {
+    assume(fixtures, "reference/nordpsa terminal fixtures are not present")
+    // The hole commit 7d15d7c closed in HydroOps.inertZones, reopened here one commit
+    // later and in the module whose comment cites inertZones as its authority. `isOff`
+    // tested `<= 0.0` and `plan` selected `> 0.0`; NaN is neither, so it said "on" and
+    // then emitted nothing. Measured before the fix: variables 336 -> 336, rows
+    // 112 -> 112, no refusal, and the solve returned the unpriced objective as though
+    // the horizon had been priced.
+    Seq(Double.NaN, 0.0, -5.0).foreach { bad =>
+      val message = refusal(variant("terminal-week"), TerminalValue.Config(lambdaPerUnit = Map(unit -> bad)))
+      assert(message.contains("cannot price anything"), s"lambda $bad: $message")
+    }
+  }
+
+  test("a reservoir with cyclic state of charge is refused") {
+    assume(available, "reference/goldens is not present")
+    // A cyclic level is a free degree of freedom: add a constant to every state of
+    // charge and every balance row still holds, so the LP lifts the level to the cap,
+    // fills every segment and collects the whole curve without moving one dispatch.
+    // Measured on this fixture before the guard: objective 31592.698 -> 27344.698, a
+    // delta of exactly -4248 = -lambda x capacity, every generator identical.
+    //
+    // NordPSA has no such guard either, so this is a modelling gap shared with upstream
+    // rather than a porting error -- but this port refuses other configurations that
+    // price nothing, and collecting a reward for free is worse than pricing nothing.
+    val message = refusal(
+      mutate("storage-cycle", "storage_units.csv", setColumn(_, "carrier", "hydro")),
+      TerminalValue.Config(lambdaPerUnit = Map("cyclic" -> 30.0)),
+    )
+    assert(message.contains("cyclic_state_of_charge"), message)
+  }
+
+  test("a StorageUnit that is not a reservoir is refused") {
+    assume(fixtures, "reference/nordpsa terminal fixtures are not present")
+    // HydroOps filters on `carrier == hydro`; this did not, while calling every match a
+    // "reservoir" in its own refusals. A battery given a lambda was accepted, got five
+    // segment columns with negative coefficients, and reduced the objective by up to
+    // lambda times its capacity.
+    val battery = copiedWith(
+      variantDir("terminal-week"),
+      "terminal-week",
+      "storage_units.csv" ->
+        ("name,bus,p_nom,p_min_pu,carrier,spill_cost,marginal_cost," +
+          "state_of_charge_initial,max_hours\n" +
+          "Z battery,b,1000.0,0.0,battery,0.1,1.0,28000.0,40.0\n"),
+    )
+    val message = refusal(battery, TerminalValue.Config(lambdaPerUnit = Map("Z battery" -> 50.0)))
+    assert(message.contains("not carrier"), message)
+  }
+
+  test("a profile override for a reservoir with no lambda is refused") {
+    assume(fixtures, "reference/nordpsa terminal fixtures are not present")
+    // Inert in the same way an unmatched zone is, and it hid more: a rising or empty
+    // curve behind an unmatched key never reached the concavity check at all, so a
+    // one-character slip valued the reservoir along the global curve and returned a
+    // plausible number.
+    val message = refusal(
+      twoReservoirs,
+      TerminalValue.Config(
+        lambdaPerUnit = Map("Z hydro" -> 30.0),
+        profileByUnit = Map("Y hydro" -> IndexedSeq(1.0, 2.0)),
+      ),
+    )
+    assert(message.contains("has no lambda"), message)
+  }
+
+  test("a per-unit profile reaches the model, with its own multipliers") {
+    assume(fixtures, "reference/nordpsa terminal fixtures are not present")
+    // The accepted path had no test at all: the only case passing `profileByUnit`
+    // intercepted the differing-lengths refusal, which fires before any column is
+    // allocated. So an implementation reading `config.profile` unconditionally passed
+    // every test. Asserted on the coefficients, per reservoir.
+    val shared = IndexedSeq(2.0, 1.0)
+    val mine   = IndexedSeq(3.0, 0.5)
+    val model = Lopf.build(
+      twoReservoirs,
+      HydroOps.off,
+      TerminalValue.Config(
+        lambdaPerUnit = Map("Z hydro" -> 10.0, "Y hydro" -> 10.0),
+        profile = shared,
+        profileByUnit = Map("Y hydro" -> mine),
+      ),
+    )
+    Seq("Z hydro" -> shared, "Y hydro" -> mine).foreach { (id, profile) =>
+      profile.zipWithIndex.foreach { (multiplier, k) =>
+        val column = model.map.column(TerminalValue.Segment, s"$id#$k", lastSnapshot)
+        assertEqualsDouble(model.problem.objective(column), -10.0 * multiplier, 1e-9,
+          s"$id segment $k")
+      }
+    }
+  }
+
+  test("an extendable reservoir is named as extendable, not as empty") {
+    assume(available, "reference/goldens is not present")
+    // PyPSA's expansion idiom is `p_nom = 0, p_nom_extendable = True`, and testing
+    // capacity first called that "a reservoir that holds nothing" -- wrong, and the more
+    // confusing of the two messages. `storage-hvdc` ships exactly that shape.
+    val message = refusal(
+      mutate("storage-hvdc", "storage_units.csv", setColumn(_, "carrier", "hydro")),
+      TerminalValue.Config(lambdaPerUnit = Map("Storage 0" -> 30.0)),
+    )
+    assert(message.contains("extendable"), message)
+  }
+
+  test("a network with no StorageUnit table is refused by name") {
+    assume(available, "reference/goldens is not present")
+    // Reachable before with a bare `None.get`, naming neither the network nor the
+    // reservoir.
+    val message = refusal(network("ac-dc-meshed"), TerminalValue.Config(lambdaPerUnit = Map("x" -> 30.0)))
+    assert(message.contains("no StorageUnit table"), message)
+  }
+
+  test("a non-finite profile multiplier is named rather than reaching a coefficient") {
+    assume(fixtures, "reference/nordpsa terminal fixtures are not present")
+    // Every comparison in the concavity test is false for NaN, so `[1.0, NaN, 2.0]`
+    // genuinely rises and the check could not see it. The multiplier then became a NaN
+    // objective coefficient that failed hundreds of lines away as "objective coefficient
+    // 337 is not finite" -- an anonymous column, in a module whose every other refusal
+    // names the reservoir.
+    val message = refusal(
+      variant("terminal-week"),
+      TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0),
+        profile = IndexedSeq(1.0, Double.NaN, 2.0)),
+    )
+    assert(message.contains("has NaN at segment 1"), message)
+  }
+
   test("a rising profile is refused rather than solved") {
     assume(fixtures, "reference/nordpsa terminal fixtures are not present")
     // NordPSA raises on this too -- `reference("refused")` records that it does, so the
@@ -188,8 +330,13 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
         TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0), profile = IndexedSeq(1.0, 2.0)),
       )
     }
+    // Asserts the reason that is true, not the one the message used to give. It said the
+    // LP would "fill the segments in the wrong order", which it cannot -- the segments
+    // are interchangeable. The refusal is about `profile(k)` meaning the k-th fill band,
+    // and about both sides agreeing which configurations are legal.
     assert(
-      refused.getMessage.contains("not concave"),
+      refused.getMessage.contains("k-th fill band") &&
+        refused.getMessage.contains("NordPSA refuses it too"),
       s"the refusal does not say why: ${refused.getMessage}",
     )
   }

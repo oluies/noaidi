@@ -28,26 +28,35 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // until a compiler bump raised the count. A warning nobody can act on without
 // re-running the build is a warning nobody reads.
 //
-// -Werror is not set here. It is passed by CI, per invocation, in ci.yml, and the
-// reason is the one already written out above `referenceEnv` below: sbt 2's thin
-// client does not share its environment with the build server, so
-// `sys.env.get("CI")` in this file reads `None` even when the variable is set on
-// the sbt command line. Measured rather than inferred -- a probe encoding
-// `sys.env.get("CI")` into `scalacOptions` prints `None` under `CI=true`. The
-// `set` command in ci.yml travels to the server with the rest of the command
-// line, which is what makes the gate arrive; it is also what the PyPSA drift
-// workflow already does for the goldens path, for the same reason.
+// -Werror is not set here; ci.yml adds it with a `set` command on each of its three
+// compiling steps.
 //
-// An earlier version of this comment blamed something unidentified for -Werror
-// appearing in a local build that had not asked for it. That was self-inflicted:
-// each `set ThisBuild / scalacOptions += "-Werror"` accumulates in the long-lived
-// sbt server, and a session's worth of them had stacked up -- `show` printed the
-// flag fourteen times. Restarting the server clears it. Worth keeping because the
-// symptom reads exactly like a build defect, and the flag being *on* when nothing
-// asked for it is the direction that fails a build rather than passing one.
+// What is written down below is only what has been measured, because the mechanism
+// behind this has now had two wrong explanations in this file and both read as
+// confidently as this one. On sbt 2.0.9, with an isolated cache:
 //
-// One statement, not two: a second `ThisBuild / scalacOptions ++=` does not
-// accumulate onto the first here, it is silently dropped.
+//   cold server, `CI=true sbt`             sys.env.get("CI") == Some(true)
+//   a server already running               the value it started with, whatever the
+//                                          current client's environment says
+//   server killed, fresh cache, CI unset   None
+//
+// So `sys.env` in a build file is not unreadable -- a cold server does inherit the
+// client's environment, and CI cold-starts one per job, so an env-var gate would in
+// fact have worked there. What it is not is *stable* across invocations: the server
+// keeps the evaluation it loaded with, so the same command in the same directory
+// answers differently depending on what started the server. A gate whose value depends
+// on that is one nobody can reproduce, which is reason enough to pass the flag on the
+// command line instead. `referenceEnv` further down reaches the same conclusion for the
+// goldens path and the PyPSA drift workflow does the same thing with `set`.
+//
+// The other half was self-inflicted, and is kept because the symptom reads exactly like
+// a build defect: each `set ThisBuild / scalacOptions += "-Werror"` accumulates in that
+// same long-lived server, and a session's worth had stacked up -- `show
+// primaCore/Compile/scalacOptions` printed the flag fourteen times. `show` is the
+// diagnostic; killing the server is the cure. A flag that is *on* when nothing asked
+// for it fails builds rather than passing them, so the next person to meet it will be
+// debugging a compile error with a misleading cause.
+//
 ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
 val munitVersion  = "1.3.6"

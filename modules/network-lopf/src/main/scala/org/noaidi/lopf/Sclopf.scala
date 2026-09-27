@@ -154,7 +154,8 @@ object Sclopf:
     }
 
     val snapshots = network.snapshots.indices
-    val builder   = LpProblem.builder(base.map.numVariables)
+    // From the problem, which is the only thing that knows how many columns it has.
+    val builder   = LpProblem.builder(base.problem.numVariables)
 
     // The base model's rows are rebuilt rather than appended to, because
     // `LpProblem` is immutable and its builder is the only way to add rows.

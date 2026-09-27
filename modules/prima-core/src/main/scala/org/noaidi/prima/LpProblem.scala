@@ -165,13 +165,43 @@ final class LpBuilder(initialVariables: Int):
   // once by emitting its equality after the inequalities (which silently breaks the
   // row-index identity `Sclopf` depends on). Both were the split's doing rather than the
   // model's.
-  private val objective = mutable.ArrayBuffer.fill(initialVariables)(0.0)
-  private val lower     = mutable.ArrayBuffer.fill(initialVariables)(Double.NegativeInfinity)
-  private val upper     = mutable.ArrayBuffer.fill(initialVariables)(Double.PositiveInfinity)
+  // Primitive arrays with a length and manual doubling, not `ArrayBuffer[Double]`.
+  //
+  // `ArrayBuffer[Double]` is not specialised, so every coefficient and bound becomes a
+  // boxed `java.lang.Double` -- three per column at construction, another on every
+  // `objectiveCoefficient` write, then all of them unboxed again by `toArray` in
+  // `build()`. At 60,552 columns for `scigrid-de` and far more on a year-long network
+  // that is tens of megabytes of transient garbage and an indirection per element, on
+  // the one path this module optimises on purpose: `Unsafe.wrap` hands arrays over
+  // without copying, and both constraint families take a `collection.Map` to avoid a
+  // per-build copy of the column index.
+  private var objective = new Array[Double](math.max(initialVariables, 16))
+  private var lower     = Array.fill(math.max(initialVariables, 16))(Double.NegativeInfinity)
+  private var upper     = Array.fill(math.max(initialVariables, 16))(Double.PositiveInfinity)
+  private var columns   = initialVariables
   private var offset    = 0.0
 
   /** How many columns the problem has so far. */
-  def numVariables: Int = objective.length
+  def numVariables: Int = columns
+
+  /** Double the three column arrays when the next column would not fit.
+    *
+    * The fresh tail is left at whatever `copyOf` zeroes it to, and deliberately so. A
+    * first version refilled it with the unbounded defaults, on the reasoning that a
+    * column nobody has bounded must not read as `[0, 0]` -- but no column can ever be
+    * read from that tail: [[addVariable]] writes all three of its values before
+    * incrementing `columns`, and `checkVariable` refuses any index at or past `columns`,
+    * so the only entries `build` trims to are ones that were written explicitly.
+    *
+    * That refill was unreachable, and a mutation removing it failed no test -- which is
+    * how it was found, rather than by reading it back.
+    */
+  private def grow(): Unit =
+    if columns == objective.length then
+      val size = objective.length * 2
+      objective = java.util.Arrays.copyOf(objective, size)
+      lower     = java.util.Arrays.copyOf(lower, size)
+      upper     = java.util.Arrays.copyOf(upper, size)
 
   /** Add a column, and return its index.
     *
@@ -182,10 +212,12 @@ final class LpBuilder(initialVariables: Int):
     */
   def addVariable(lo: Double, hi: Double, cost: Double): Int =
     require(lo <= hi, s"new variable has empty bound interval [$lo, $hi]")
-    val index = objective.length
-    objective += cost
-    lower     += lo
-    upper     += hi
+    grow()
+    val index = columns
+    objective(index) = cost
+    lower(index)     = lo
+    upper(index)     = hi
+    columns += 1
     index
 
   private final case class Row(coefficients: Seq[(Int, Double)], lo: Double, hi: Double)
@@ -193,8 +225,8 @@ final class LpBuilder(initialVariables: Int):
 
   private def checkVariable(variable: Int): Unit =
     require(
-      variable >= 0 && variable < objective.length,
-      s"variable index $variable out of range [0, ${objective.length})",
+      variable >= 0 && variable < columns,
+      s"variable index $variable out of range [0, $columns)",
     )
 
   def objectiveCoefficient(variable: Int, value: Double): this.type =
@@ -266,12 +298,14 @@ final class LpBuilder(initialVariables: Int):
     }
 
     val problem = LpProblem(
-      objective = Unsafe.wrap(objective.toArray),
-      constraintMatrix = SparseMatrix.fromTriplets(rhs.length, objective.length, entries),
+      // Trimmed to `columns` rather than handed over whole: the arrays carry spare
+      // capacity from `grow`, and its tail is not part of the problem.
+      objective = Unsafe.wrap(java.util.Arrays.copyOf(objective, columns)),
+      constraintMatrix = SparseMatrix.fromTriplets(rhs.length, columns, entries),
       rhs = Unsafe.wrap(rhs.toArray),
       numEqualities = numEqualities,
-      variableLower = Unsafe.wrap(lower.toArray),
-      variableUpper = Unsafe.wrap(upper.toArray),
+      variableLower = Unsafe.wrap(java.util.Arrays.copyOf(lower, columns)),
+      variableUpper = Unsafe.wrap(java.util.Arrays.copyOf(upper, columns)),
       objectiveOffset = offset,
     )
     (problem, RowTranslation(expansions.toIndexedSeq))

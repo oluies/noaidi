@@ -1,0 +1,115 @@
+{
+  "source": "NordPSA nordpsa/constraints/terminal_value.py",
+  "versions": {
+    "pypsa": "1.3.0",
+    "pandas": "3.0.6"
+  },
+  "shape": {
+    "snapshots": 56,
+    "resolution_hours": 3,
+    "days": 7,
+    "p_nom": 1000.0,
+    "max_hours": 40.0,
+    "capacity_mwh": 40000.0,
+    "state_of_charge_initial": 28000.0,
+    "cyclic": false,
+    "unit": "Z hydro"
+  },
+  "default_profile": [
+    2.0,
+    1.5,
+    1.2,
+    1.0,
+    0.2
+  ],
+  "cases": {
+    "none": {
+      "status": "ok",
+      "objective": 642600.0000000006,
+      "soc_last": -0.0,
+      "soc_last_frac": -0.0,
+      "soc_min": -0.0,
+      "profile": null,
+      "lambda": null
+    },
+    "linear-25": {
+      "status": "ok",
+      "objective": 642600.0000000006,
+      "soc_last": -0.0,
+      "soc_last_frac": -0.0,
+      "soc_min": -0.0,
+      "profile": [
+        1.0
+      ],
+      "lambda": 25.0
+    },
+    "concave-25": {
+      "status": "ok",
+      "objective": 554600.0000000006,
+      "soc_last": 8000.0,
+      "soc_last_frac": 0.2,
+      "soc_min": 5450.0,
+      "profile": [
+        2.0,
+        1.5,
+        1.2,
+        1.0,
+        0.2
+      ],
+      "lambda": 25.0
+    },
+    "linear-45": {
+      "status": "ok",
+      "objective": 424200.00000000093,
+      "soc_last": 36400.0,
+      "soc_last_frac": 0.91,
+      "soc_min": 28150.0,
+      "profile": [
+        1.0
+      ],
+      "lambda": 45.0
+    },
+    "concave-45": {
+      "status": "ok",
+      "objective": -161399.9999999993,
+      "soc_last": 32000.0,
+      "soc_last_frac": 0.8,
+      "soc_min": 25700.0,
+      "profile": [
+        2.0,
+        1.5,
+        1.2,
+        1.0,
+        0.2
+      ],
+      "lambda": 45.0
+    },
+    "flat-two-45": {
+      "status": "ok",
+      "objective": 424200.00000000093,
+      "soc_last": 36400.0,
+      "soc_last_frac": 0.91,
+      "soc_min": 28150.0,
+      "profile": [
+        1.0,
+        1.0
+      ],
+      "lambda": 45.0
+    }
+  },
+  "refused": {
+    "rising": {
+      "refused": true,
+      "message": "hydro_terminal_value: profilen m\u00e5ste vara ICKE-V\u00c4XANDE (tomt\u2192fullt) f\u00f6r att V(SOC) ska bli konkav, fick [1.0, 2.0] (global)"
+    },
+    "empty": {
+      "refused": true,
+      "message": "hydro_terminal_value: tom profil (global)"
+    }
+  },
+  "control_drains": true,
+  "linear_holds_nothing_at_25": true,
+  "concave_holds_a_segment_at_25": true,
+  "concave_holds_less_than_linear_at_45": true,
+  "network": "terminal-week"
+}

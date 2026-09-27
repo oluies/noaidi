@@ -79,7 +79,11 @@ object Lopf:
     * `extra_functionality` callback that the file never carried. Passing a
     * [[HydroOps.Config]] is how a caller says it has those limits in hand.
     */
-  def build(input: Network, hydro: HydroOps.Config = HydroOps.off): Model =
+  def build(
+      input: Network,
+      hydro: HydroOps.Config = HydroOps.off,
+      terminal: TerminalValue.Config = TerminalValue.off,
+  ): Model =
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
@@ -344,6 +348,15 @@ object Lopf:
         }
       }
     }
+
+    // The terminal value's segment columns, allocated here rather than with the other
+    // families below, because the builder is sized from `bounds.length` on the next
+    // line: a column declared after it exists is outside its range, and the row that
+    // refers to it fails with an index error. Variables first, then rows -- the order
+    // everything else in this method already follows. Its rows go in beside the other
+    // families, once the builder is there.
+    val plannedTerminal =
+      TerminalValue.plan(network, snapshots, columns.toMap, declare, terminal)
 
     val builder = LpProblem.builder(bounds.length)
     bounds.zipWithIndex.foreach { case ((lo, hi), i) => builder.bounds(i, lo, hi) }
@@ -775,6 +788,12 @@ object Lopf:
     // formulation already built. Nothing above it needs to know they exist.
     HydroOps.constrain(network, snapshots, columns.toMap, builder, hydro)
 
+    // The other half of the terminal value: its columns were allocated above the
+    // builder, and this ties each reservoir's segments to its level. Without the row
+    // the segments would sit at their upper bounds and collect the whole curve for
+    // water that is not there.
+    TerminalValue.emit(plannedTerminal, builder)
+
     val (problem, translation) = builder.build()
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))
 
@@ -789,9 +808,18 @@ object Lopf:
 
   /** The same solve, with reservoir operational limits applied. */
   def solve(input: Network, hydro: HydroOps.Config, solver: LpSolver): LopfResult =
+    solve(input, hydro, TerminalValue.off, solver)
+
+  /** The same solve, with operational limits and a terminal water value. */
+  def solve(
+      input: Network,
+      hydro: HydroOps.Config,
+      terminal: TerminalValue.Config,
+      solver: LpSolver,
+  ): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
-    val model    = build(network, hydro)
+    val model    = build(network, hydro, terminal)
     val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 

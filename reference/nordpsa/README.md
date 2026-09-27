@@ -25,8 +25,8 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
 | --- | --- |
 | `hydro_ops` | ported as `HydroOps` (hourly/daily floors, weekly ceiling with per-zone override, bypass-spill hinge) |
 | `soc` | **needs no port** — `hydro_soc_initial` is PyPSA's own `state_of_charge_set`, which lives on the network and this port already honours. Equivalence established against NordPSA's callback by `generate_soc.py`, not asserted. |
-| `terminal_value` | not ported. A piecewise-**concave** value on `SOC[T]`, so it needs new LP *columns* (one per segment) plus objective coefficients, not just rows. `CsvReader` currently refuses piecewise costs outright, so this would be the first piecewise support here. |
-| `bid_ladder` | not ported. The same machinery from the other side: reservoir dispatch split into K tiers with *rising* bids, so a piecewise-convex cost on `p_dispatch`. Shares its segment columns with `terminal_value` — worth building once. |
+| `terminal_value` | ported as `TerminalValue` — a piecewise-concave value on `SOC[T]`, and the first thing here to add LP *columns* rather than only rows. |
+| `bid_ladder` | not ported. The same machinery from the other side: reservoir dispatch split into K tiers with *rising* bids, so a piecewise-convex cost on `p_dispatch`. `TerminalValue`'s plan/emit split is the shape it needs, but its segments are per *snapshot* rather than one per reservoir, so it is K x T columns rather than K. |
 | `stability` | not ported. SCR and synchronous-generation floors with commitment, so it reaches into MILP rather than LP. |
 
 ## Layout
@@ -43,7 +43,18 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
 - `soc-anchor/` plus `soc.json` — the `soc` family's evidence: one network carrying
   `state_of_charge_set`, and the three-way comparison (callback / attribute / neither)
   that shows the attribute reproduces the callback.
-- `generate.py`, `generate_soc.py` — regenerate the above.
+- `terminal-week/` plus `terminal.json` — a deliberately scarce, non-cyclic week and the
+  objectives and terminal levels PyPSA reaches on it under six terminal-value
+  configurations.
+- `generate.py`, `generate_soc.py`, `generate_terminal.py` — regenerate the above.
+
+The terminal-value fixture is scarce on purpose, and its first version was not. At 200
+`max_hours` the reservoir held more water than the week could use, so every profile
+ended at the same level and the comparison proved nothing while passing. At 40 the
+week's residual demand exceeds the starting level plus inflow, so holding a MWh back
+forgoes 39 EUR/MWh of the expensive generator — which is the number each segment's
+lambda is measured against, and what makes the concave curve hold exactly one segment
+at lambda 25 where a linear one holds none.
 
 One property of the `soc` anchor is worth knowing before reading its test, because it
 looks like a weak fixture and is not. Under cyclic state-of-charge the anchor fixes the

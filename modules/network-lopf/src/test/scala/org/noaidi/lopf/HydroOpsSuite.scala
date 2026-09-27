@@ -34,21 +34,12 @@ import org.noaidi.prima.{PdhgParams, SolveStatus}
   * Two of its cases needed strengthening rather than copying, and both are noted
   * at the assertion.
   */
-class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
+class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
 
   override protected def tempPrefix: String = "noaidi-hydroops-"
 
-  private def root: Path =
-    Paths.get(sys.env.getOrElse("NOAIDI_NORDPSA", "reference/nordpsa"))
-
-  private lazy val fixtures: Boolean =
-    available && Files.exists(root.resolve("hydro.json"))
-
-  private lazy val reference: ujson.Value =
-    ujson.read(Files.readString(root.resolve("hydro.json")))
-
-  private def variant(key: String): Network =
-    CsvReader.read(root.resolve("networks").resolve(key), schema, key)
+  private lazy val fixtures: Boolean  = hasReference("hydro.json")
+  private lazy val reference: ujson.Value = referenceJson("hydro.json")
 
   // The same tolerances LopfSuite drives the goldens with.
   private val params = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 500_000)
@@ -101,11 +92,10 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
     )
     result
 
-  private lazy val socReference: ujson.Value =
-    ujson.read(Files.readString(root.resolve("soc.json")))
+  private lazy val socReference: ujson.Value = referenceJson("soc.json")
 
   test("NordPSA's initial-SoC anchor needs no new constraint family") {
-    assume(fixtures && Files.exists(root.resolve("soc.json")), "soc fixtures are not present")
+    assume(hasReference("soc.json"), "soc fixtures are not present")
     // `hydro_soc_initial` is an extra_functionality callback pinning
     // `soc[t0] == frac * p_nom * max_hours`. PyPSA already has an attribute that does
     // exactly that -- `state_of_charge_set` -- and unlike a callback it lives on the
@@ -137,7 +127,7 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
   }
 
   test("the anchor moves the level and not the cost, and the reference says so") {
-    assume(fixtures && Files.exists(root.resolve("soc.json")), "soc fixtures are not present")
+    assume(hasReference("soc.json"), "soc fixtures are not present")
     // Worth pinning because it is the reason the test above asserts a level rather
     // than a price, and because it looked at first like a weak fixture. Under cyclic
     // state-of-charge the anchor fixes the level while the horizon's water balance is

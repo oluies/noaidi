@@ -1,0 +1,2 @@
+name,bus,p_nom,p_min_pu,carrier,spill_cost,marginal_cost,state_of_charge_initial,max_hours
+Z hydro,b,1000.0,0.0,hydro,0.1,1.0,28000.0,40.0

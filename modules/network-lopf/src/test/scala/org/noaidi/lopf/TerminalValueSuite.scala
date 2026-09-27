@@ -350,12 +350,10 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
       problem.numVariables > plain.problem.numVariables,
       "no segment columns were added, so there is no terminal equality to misindex",
     )
+    // The segment column has to be findable by name, which is what `LopfResult` reads a
+    // solution back through. There is no separate column count to compare against any
+    // more -- `VariableMap` stopped carrying one, so nothing can under-report it.
     model.map.column(TerminalValue.Segment, s"$unit#0", lastSnapshot): Unit
-    assertEquals(
-      model.map.numVariables,
-      problem.numVariables,
-      "the variable map under-reports the columns, which is what Sclopf sizes its copy from",
-    )
 
     // Sclopf's own condition, not a weaker one: it accepts `Direct(r)` and `Negated(r)`
     // and rejects everything else, `Range` included. Flagging only a misindexed `Direct`

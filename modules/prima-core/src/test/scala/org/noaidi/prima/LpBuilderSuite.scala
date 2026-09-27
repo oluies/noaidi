@@ -131,14 +131,11 @@ class LpBuilderSuite extends munit.FunSuite:
 
     // The first row, emitted before the column existed, must not have acquired an entry
     // in it.
-    val firstRowEntries = (0 until problem.constraintMatrix.rows).flatMap { r =>
-      (0 until problem.constraintMatrix.cols).collect {
-        case c if problem.constraintMatrix(r, c) != 0.0 => (r, c)
-      }
-    }.filter(_._1 == 0)
+    val firstRowEntries =
+      (0 until problem.constraintMatrix.cols).filter(c => problem.constraintMatrix(0, c) != 0.0)
     assert(
-      !firstRowEntries.exists(_._2 == added),
-      s"a row emitted before the column has an entry in it: $firstRowEntries",
+      !firstRowEntries.contains(added),
+      s"a row emitted before the column has an entry in it: columns $firstRowEntries",
     )
   }
 
@@ -162,5 +159,47 @@ class LpBuilderSuite extends munit.FunSuite:
       assertEqualsDouble(problem.variableUpper(i), i.toDouble, 1e-12, s"upper of column $i")
       assertEqualsDouble(problem.objective(i), i.toDouble, 1e-12, s"cost of column $i")
     }
+  }
+
+  test("appending to a builder whose capacity equals its declared count keeps the head") {
+    // The shape production uses, and the one neither other case covered. `Lopf` builds
+    // with `LpProblem.builder(bounds.length)` -- ~336 declared columns -- and
+    // `TerminalValue` then appends, so `columns == objective.length` already holds at
+    // construction and the very first `addVariable` has to grow from a capacity that is
+    // neither zero nor a power of two. `builder(0)` grows from the 16-element floor and
+    // `builder(1)` never grows at all, so a `grow` that mis-sized or copied only part of
+    // the head would have passed both.
+    //
+    // Most of the declared columns are left unbounded on purpose: that is what a column
+    // `Lopf` declares but never bounds looks like, and a grow that rewrote the head
+    // rather than copying it would turn them into `[0, 0]` -- a pinned column, which
+    // changes the problem silently rather than failing.
+    val declared = 20
+    val b = LpProblem.builder(declared)
+    assertEquals(b.numVariables, declared)
+    b.bounds(0, -1.0, 1.0)
+    b.objectiveCoefficient(0, 7.0)
+    b.greaterThan(Seq(0 -> 1.0), -0.5)
+
+    val appended = b.addVariable(2.0, 3.0, -4.0)
+    assertEquals(appended, declared, "the appended column should follow the declared ones")
+    b.lessThan(Seq(appended -> 1.0), 3.0)
+
+    val (problem, _) = b.build()
+    assertEquals(problem.numVariables, declared + 1)
+    // The bounded head column kept what it was given.
+    assertEqualsDouble(problem.variableLower(0), -1.0, 1e-12)
+    assertEqualsDouble(problem.variableUpper(0), 1.0, 1e-12)
+    assertEqualsDouble(problem.objective(0), 7.0, 1e-12)
+    // The untouched head columns are still unbounded, not pinned at zero.
+    (1 until declared).foreach { j =>
+      assert(problem.variableLower(j).isNegInfinity, s"column $j lost its unbounded lower")
+      assert(problem.variableUpper(j).isPosInfinity, s"column $j lost its unbounded upper")
+      assertEqualsDouble(problem.objective(j), 0.0, 1e-12, s"column $j gained a cost")
+    }
+    // And the appended column carries its own.
+    assertEqualsDouble(problem.variableLower(appended), 2.0, 1e-12)
+    assertEqualsDouble(problem.variableUpper(appended), 3.0, 1e-12)
+    assertEqualsDouble(problem.objective(appended), -4.0, 1e-12)
   }
 

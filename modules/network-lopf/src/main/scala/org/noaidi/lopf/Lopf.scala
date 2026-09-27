@@ -60,7 +60,6 @@ object Lopf:
       columns: Map[(String, String, Int), Int],
       /** `(bus, snapshot) -> row index of that bus's balance constraint`. */
       balanceRows: Map[(String, Int), Int],
-      numVariables: Int,
   ):
     def column(component: String, entity: String, snapshot: Int): Int =
       columns.getOrElse(
@@ -807,12 +806,16 @@ object Lopf:
     // formulation already built. Nothing above it needs to know they exist.
     HydroOps.constrain(network, snapshots, columns, builder, hydro)
     val (problem, translation) = builder.build()
-    // `problem.numVariables`, not `bounds.length`: the latter is the count from before
-    // the builder existed, and a family that declares a column through the builder --
-    // `TerminalValue` does -- makes the two diverge. `Sclopf` sizes its rebuild from
-    // `base.map.numVariables` and then copies `0 until baseProblem.numVariables`
-    // columns, so an under-reported count throws on the first column past it.
-    Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, problem.numVariables))
+    // No column count here. It used to carry one -- first `bounds.length`, the count
+    // from before the builder existed, which diverged the moment `TerminalValue` began
+    // declaring through the builder; then `problem.numVariables`, which was the same
+    // number stored twice with a test to keep the copies honest.
+    //
+    // Its one consumer already holds the `Model` and reads `base.problem` two lines
+    // later, so the field bought nothing and could only go stale. Removing it makes the
+    // invariant hold by construction rather than by assertion, which is the whole point
+    // of the defect it was introduced to fix.
+    Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap))
 
   /** Solve, and map the answer back onto component names.
     *

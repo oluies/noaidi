@@ -805,16 +805,10 @@ object Lopf:
     // `extra_functionality` callback runs against the model the rest of the
     // formulation already built. Nothing above it needs to know they exist.
     HydroOps.constrain(network, snapshots, columns, builder, hydro)
+
     val (problem, translation) = builder.build()
-    // No column count here. It used to carry one -- first `bounds.length`, the count
-    // from before the builder existed, which diverged the moment `TerminalValue` began
-    // declaring through the builder; then `problem.numVariables`, which was the same
-    // number stored twice with a test to keep the copies honest.
-    //
-    // Its one consumer already holds the `Model` and reads `base.problem` two lines
-    // later, so the field bought nothing and could only go stale. Removing it makes the
-    // invariant hold by construction rather than by assertion, which is the whole point
-    // of the defect it was introduced to fix.
+    // No column count travels with the map: `Sclopf` reads it from `base.problem`, so
+    // there are no two copies to diverge.
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap))
 
   /** Solve, and map the answer back onto component names.

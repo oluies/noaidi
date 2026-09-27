@@ -161,8 +161,15 @@ jobs:
           # `-Werror` here rather than in build.sbt, so the gate is visible in the
           # command that enforces it. build.sbt sets -deprecation and -feature,
           # which give warnings a location; this is what stops one scrolling past
-          # a green check. Set per invocation via `set`, because the env-var form
-          # could not be shown to switch off -- see the note in build.sbt.
+          # a green check. Passed on the command line rather than read from the
+          # environment in build.sbt because a build-load-time `sys.env` read is not
+          # stable across invocations -- the note in build.sbt has the measurements.
+          #
+          # These three steps share one job, one runner and therefore one sbt server,
+          # so the first `set` persists into the other two and the later ones are
+          # belt-and-braces rather than load-bearing. Left in deliberately: they are
+          # what makes each step readable on its own, and a step that is moved to
+          # another job keeps its gate.
           #
           # This covers the twelve projects in the root aggregate. The two outside
           # it, prima-cyfra and prima-ortools, carry the same flag in their own

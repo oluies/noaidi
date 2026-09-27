@@ -28,16 +28,35 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // until a compiler bump raised the count. A warning nobody can act on without
 // re-running the build is a warning nobody reads.
 //
-// -Werror is not set here. It is passed by CI, per invocation, in ci.yml. The
-// obvious version of that gate -- appending it from `sys.env.get("CI")` -- was
-// tried and could not be shown to toggle: with CI unset in the same invocation
-// that printed `sys.env.get("CI") == None`, -Werror was still in
-// `scalacOptions`, and it survived removing project/target and restarting the
-// server. Whatever pins it, a gate that cannot be demonstrated switching off is
-// not a gate, so the flag goes where its effect is visible in the command.
+// -Werror is not set here; ci.yml adds it with a `set` command on each of its three
+// compiling steps.
 //
-// One statement, not two: a second `ThisBuild / scalacOptions ++=` does not
-// accumulate onto the first here, it is silently dropped.
+// What is written down below is only what has been measured, because the mechanism
+// behind this has now had two wrong explanations in this file and both read as
+// confidently as this one. On sbt 2.0.9, with an isolated cache:
+//
+//   cold server, `CI=true sbt`             sys.env.get("CI") == Some(true)
+//   a server already running               the value it started with, whatever the
+//                                          current client's environment says
+//   server killed, fresh cache, CI unset   None
+//
+// So `sys.env` in a build file is not unreadable -- a cold server does inherit the
+// client's environment, and CI cold-starts one per job, so an env-var gate would in
+// fact have worked there. What it is not is *stable* across invocations: the server
+// keeps the evaluation it loaded with, so the same command in the same directory
+// answers differently depending on what started the server. A gate whose value depends
+// on that is one nobody can reproduce, which is reason enough to pass the flag on the
+// command line instead. `referenceEnv` further down reaches the same conclusion for the
+// goldens path and the PyPSA drift workflow does the same thing with `set`.
+//
+// The other half was self-inflicted, and is kept because the symptom reads exactly like
+// a build defect: each `set ThisBuild / scalacOptions += "-Werror"` accumulates in that
+// same long-lived server, and a session's worth had stacked up -- `show
+// primaCore/Compile/scalacOptions` printed the flag fourteen times. `show` is the
+// diagnostic; killing the server is the cure. A flag that is *on* when nothing asked
+// for it fails builds rather than passing them, so the next person to meet it will be
+// debugging a compile error with a misleading cause.
+//
 ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
 val munitVersion  = "1.3.6"

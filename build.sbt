@@ -28,13 +28,23 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // until a compiler bump raised the count. A warning nobody can act on without
 // re-running the build is a warning nobody reads.
 //
-// -Werror is not set here. It is passed by CI, per invocation, in ci.yml. The
-// obvious version of that gate -- appending it from `sys.env.get("CI")` -- was
-// tried and could not be shown to toggle: with CI unset in the same invocation
-// that printed `sys.env.get("CI") == None`, -Werror was still in
-// `scalacOptions`, and it survived removing project/target and restarting the
-// server. Whatever pins it, a gate that cannot be demonstrated switching off is
-// not a gate, so the flag goes where its effect is visible in the command.
+// -Werror is not set here. It is passed by CI, per invocation, in ci.yml, and the
+// reason is the one already written out above `referenceEnv` below: sbt 2's thin
+// client does not share its environment with the build server, so
+// `sys.env.get("CI")` in this file reads `None` even when the variable is set on
+// the sbt command line. Measured rather than inferred -- a probe encoding
+// `sys.env.get("CI")` into `scalacOptions` prints `None` under `CI=true`. The
+// `set` command in ci.yml travels to the server with the rest of the command
+// line, which is what makes the gate arrive; it is also what the PyPSA drift
+// workflow already does for the goldens path, for the same reason.
+//
+// An earlier version of this comment blamed something unidentified for -Werror
+// appearing in a local build that had not asked for it. That was self-inflicted:
+// each `set ThisBuild / scalacOptions += "-Werror"` accumulates in the long-lived
+// sbt server, and a session's worth of them had stacked up -- `show` printed the
+// flag fourteen times. Restarting the server clears it. Worth keeping because the
+// symptom reads exactly like a build defect, and the flag being *on* when nothing
+// asked for it is the direction that fails a build rather than passing one.
 //
 // One statement, not two: a second `ThisBuild / scalacOptions ++=` does not
 // accumulate onto the first here, it is silently dropped.

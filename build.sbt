@@ -15,12 +15,6 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // artifacts, so a TASTy version this compiler refused would fail there and
 // nowhere else.
 //
-// -deprecation and -feature are set rather than left to the compiler's defaults,
-// which report both only as a count: "there were 3 deprecation warnings; re-run
-// with -deprecation for details". That is how five calls to a method the standard
-// library documents as able to crash your program sat here as an unnamed number
-// until a compiler bump happened to raise the count. A warning nobody can act on
-// without re-running the build is a warning nobody reads.
 // -deprecation and -feature rather than the compiler's defaults, which report
 // both only as a count: "there were 3 deprecation warnings; re-run with
 // -deprecation for details". That is how five calls to a method the standard
@@ -28,8 +22,10 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // until a compiler bump raised the count. A warning nobody can act on without
 // re-running the build is a warning nobody reads.
 //
-// -Werror is not set here; ci.yml adds it with a `set` command on each of its three
-// compiling steps.
+// -Werror is not set here; ci.yml adds it with a `set` command on the three gated
+// steps of its `test` job, which the JDK matrix runs twice. Not on every step that
+// compiles: the kernel-split and validation-report jobs invoke sbt without it, so this
+// is where the gate is rather than a claim about coverage.
 //
 // What is written down below is only what has been measured, because the mechanism
 // behind this has now had two wrong explanations in this file and both read as
@@ -46,8 +42,10 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // keeps the evaluation it loaded with, so the same command in the same directory
 // answers differently depending on what started the server. A gate whose value depends
 // on that is one nobody can reproduce, which is reason enough to pass the flag on the
-// command line instead. `referenceEnv` further down reaches the same conclusion for the
-// goldens path and the PyPSA drift workflow does the same thing with `set`.
+// command line instead. `referenceEnv` further down reaches the same *conclusion* for
+// the goldens path, by the same route ci.yml takes here; its mechanism is corrected
+// below rather than cited, since the blanket version it used to give is the one these
+// measurements disprove.
 //
 // The other half was self-inflicted, and is kept because the symptom reads exactly like
 // a build defect: each `set ThisBuild / scalacOptions += "-Werror"` accumulates in that
@@ -56,7 +54,6 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 // diagnostic; killing the server is the cure. A flag that is *on* when nothing asked
 // for it fails builds rather than passing them, so the next person to meet it will be
 // debugging a compile error with a misleading cause.
-//
 ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
 val munitVersion  = "1.3.6"
@@ -243,12 +240,19 @@ val jhdfVersion    = "0.13.0"
 //
 // Neither is read from the ambient environment, and the reason is worth writing
 // down because the obvious `sys.env.getOrElse` here compiles, reads correctly,
-// and does nothing. sbt 2's thin client does not share its environment with the
-// build server, so a variable exported before `sbt` never reaches this file --
-// it silently keeps the default and a run meant to test a different schema
-// quietly tests the pinned one. The PyPSA drift workflow overrides the path with
-// an sbt `set` command instead, which travels to the server with the rest of the
-// command line.
+// and does nothing useful. A build-load-time `sys.env` read is not stable across
+// invocations: a cold server does inherit the client's environment, but a server
+// already running answers from the environment it started with, so the same command
+// in the same directory gives different answers depending on what started the
+// server. A run meant to test a different schema can therefore quietly test the
+// pinned one. The measurements are at the top of this file, above the
+// `scalacOptions` setting.
+//
+// This paragraph used to say the thin client never shares its environment with the
+// server. That is false on a cold start, and the correction is here rather than only
+// there because a wrong mechanism with a right conclusion is the shape that spreads.
+// The PyPSA drift workflow overrides the path with an sbt `set` command, which
+// travels with the command line and does not depend on any of this.
 def referenceEnv(base: File): Map[String, String] = Map(
   "NOAIDI_GOLDENS" -> (base / "reference" / "goldens").getAbsolutePath,
   "NOAIDI_SOURCES" -> (base / "modules").getAbsolutePath,

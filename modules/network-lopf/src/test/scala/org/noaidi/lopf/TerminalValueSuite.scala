@@ -1,7 +1,7 @@
 package org.noaidi.lopf
 
 import org.noaidi.network.Network
-import org.noaidi.prima.{PdhgParams, Pdhg, SolveStatus}
+import org.noaidi.prima.{PdhgParams, Pdhg, RowExpansion, SolveStatus}
 
 /** [[TerminalValue]] against NordPSA's own `hydro_terminal_value` callback.
   *
@@ -316,6 +316,40 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
         profile = IndexedSeq(1.0, Double.NaN, 2.0)),
     )
     assert(message.contains("has NaN at segment 1"), message)
+  }
+
+  test("the terminal equality keeps the row identity Sclopf depends on") {
+    assume(fixtures, "reference/nordpsa terminal fixtures are not present")
+    // `build()` sorts equalities before inequalities, so an equality emitted after any
+    // inequality gets a standard-form index that differs from its original one --
+    // and `Sclopf.build` refuses to proceed unless every row it copies maps
+    // `Direct(r)` to the same `r`. Emitted with the other optional families at the end
+    // of `Lopf.build`, after the capacity and global-constraint rows, this broke that
+    // silently: latent only because `Sclopf` builds with the terminal value off.
+    //
+    // Asserted here rather than through `Sclopf`, which has no terminal parameter to
+    // thread yet -- so this is the invariant it will need when it gets one.
+    val model = Lopf.build(
+      variant("terminal-week"),
+      // HydroOps on as well, so the model definitely contains inequality rows: without
+      // any, the ordering cannot be got wrong and the test would pass vacuously.
+      HydroOps.Config(maxWeeklyFraction = 0.6),
+      TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0)),
+    )
+    val translation = model.translation
+    val problem     = model.problem
+    assert(problem.numConstraints > problem.numEqualities, "no inequality rows -- weak test")
+
+    val misindexed = (0 until translation.numOriginalRows).filter { r =>
+      translation.expansionOf(r) match
+        case RowExpansion.Direct(row) => row != r && row < problem.numEqualities
+        case _                        => false
+    }
+    assertEquals(
+      misindexed.toList,
+      Nil,
+      "an equality row was emitted after an inequality, so its standard-form index moved",
+    )
   }
 
   test("a rising profile is refused rather than solved") {

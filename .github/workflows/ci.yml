@@ -165,11 +165,12 @@ jobs:
           # environment in build.sbt because a build-load-time `sys.env` read is not
           # stable across invocations -- the note in build.sbt has the measurements.
           #
-          # These three steps share one job, one runner and therefore one sbt server,
-          # so the first `set` persists into the other two and the later ones are
-          # belt-and-braces rather than load-bearing. Left in deliberately: they are
-          # what makes each step readable on its own, and a step that is moved to
-          # another job keeps its gate.
+          # Each of the three gated steps carries its own `set`, so each is gated
+          # independently of the others and a step moved to another job keeps its
+          # gate. Whether sbt's background server survives between `run:` steps on a
+          # runner -- which would make the later two redundant -- is not something
+          # measured here, and guessing at it is what the build.sbt note exists to
+          # discourage.
           #
           # This covers the twelve projects in the root aggregate. The two outside
           # it, prima-cyfra and prima-ortools, carry the same flag in their own

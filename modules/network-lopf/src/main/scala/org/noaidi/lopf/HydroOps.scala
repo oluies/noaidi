@@ -121,6 +121,26 @@ object HydroOps:
   /** No operational limits, which is what a plain PyPSA network means. */
   val off: Config = Config()
 
+  /** The weekly ceiling fraction for one reservoir, if it gets one.
+    *
+    * The zone override, else the global fraction, else none -- and `> 0.0` throughout,
+    * which is the test that actually decides whether a row is emitted.
+    *
+    * One definition, called by both the row builder and [[inertZones]]. They had a
+    * copy each, forty lines apart and agreeing by coincidence: adding a second
+    * override source or relaxing the positivity gate in one would have desynced the
+    * guard from the rows it guards, whose symptom is a build that refuses a valid
+    * kappa override or accepts an inert one.
+    *
+    * `> 0.0` rather than `> 0.0 || isNaN`-style permissiveness on purpose: NaN is not
+    * a ceiling, and because this is the same predicate the guard consults, a NaN zone
+    * entry is reported there rather than silently dropped here.
+    */
+  private def ceilingFor(config: Config, id: String): Option[Double] =
+    config.maxWeeklyFractionByZone
+      .collectFirst { case (zone, value) if unitFor(zone) == id => value }
+      .orElse(Option.when(config.maxWeeklyFraction > 0.0)(config.maxWeeklyFraction))
+      .filter(_ > 0.0)
   /** Refuse zone configuration that cannot take effect.
     *
     * Three ways a zone entry is inert, all silent before this existed and all the
@@ -154,14 +174,22 @@ object HydroOps:
       .toSeq.sorted
       .map(z => s"'$z' matches no reservoir (looked for '${unitFor(z)}')")
 
-    val nonPositive = ceilingZones.filter(_._2 <= 0.0).keys.toSeq.sorted
+    // `!(v > 0.0)` rather than `v <= 0.0`, which is the same for every value except
+    // NaN -- and NaN was the hole: it is not `<= 0.0`, so the guard passed it, and it
+    // is not `> 0.0`, so `ceilingFor` dropped it. The entry matched a reservoir,
+    // cleared every arm, and emitted no weekly row. Mirroring the emission predicate
+    // exactly is what closes that rather than a special case for NaN.
+    //
+    // Restricted to zones that did match a unit, so an entry that is both unmatched
+    // and inert is one complaint rather than two with the same name.
+    val nonPositive = ceilingZones
+      .filter((z, v) => units.contains(unitFor(z)) && !(v > 0.0))
+      .keys.toSeq.sorted
       .map(z => s"'$z' sets a ceiling of ${ceilingZones(z)}, which cannot constrain anything")
 
-    // A kappa override is only meaningful where a ceiling exists to measure from.
-    val ceilinged = units.filter { id =>
-      ceilingZones.collectFirst { case (z, v) if unitFor(z) == id => v > 0.0 }
-        .getOrElse(config.maxWeeklyFraction > 0.0)
-    }.toSet
+    // A kappa override is only meaningful where a ceiling exists to measure from, and
+    // "gets a ceiling" is asked of the same function the rows are built from.
+    val ceilinged = units.filter(id => ceilingFor(config, id).isDefined).toSet
     val ceilingless = kappaZones.keys.toSeq.sorted
       .filter(z => units.contains(unitFor(z)) && !ceilinged.contains(unitFor(z)))
       .map(z => s"'$z' overrides the hinge coefficient for a reservoir that has no weekly ceiling")
@@ -315,14 +343,7 @@ object HydroOps:
     // from the ceiling, so without one there is nothing to measure from. NordPSA
     // returns early on the same condition.
     val ceilings: Seq[(String, Double)] =
-      units.flatMap { id =>
-        val zoned = config.maxWeeklyFractionByZone.collectFirst {
-          case (zone, value) if unitFor(zone) == id => value
-        }
-        zoned.orElse(Option.when(config.maxWeeklyFraction > 0.0)(config.maxWeeklyFraction))
-          .filter(_ > 0.0)
-          .map(id -> _)
-      }
+      units.flatMap(id => ceilingFor(config, id).map(id -> _))
 
     if ceilings.isEmpty then return
 

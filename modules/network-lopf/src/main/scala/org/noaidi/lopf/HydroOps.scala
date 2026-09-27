@@ -217,7 +217,9 @@ object HydroOps:
   def constrain(
       network: Network,
       snapshots: Range,
-      columns: Map[(String, String, Int), Int],
+      // `collection.Map` for the reason `TerminalValue.plan` gives: read in place
+      // rather than copying every column in the horizon per build.
+      columns: scala.collection.Map[(String, String, Int), Int],
       builder: LpBuilder,
       config: Config,
   ): Unit =

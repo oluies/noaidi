@@ -79,7 +79,11 @@ object Lopf:
     * `extra_functionality` callback that the file never carried. Passing a
     * [[HydroOps.Config]] is how a caller says it has those limits in hand.
     */
-  def build(input: Network, hydro: HydroOps.Config = HydroOps.off): Model =
+  def build(
+      input: Network,
+      hydro: HydroOps.Config = HydroOps.off,
+      terminal: TerminalValue.Config = TerminalValue.off,
+  ): Model =
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
@@ -344,6 +348,15 @@ object Lopf:
         }
       }
     }
+
+    // The terminal value's segment columns, allocated here rather than with the other
+    // families below, because the builder is sized from `bounds.length` on the next
+    // line: a column declared after it exists is outside its range, and the row that
+    // refers to it fails with an index error. Variables first, then rows -- the order
+    // everything else in this method already follows. Its rows go in beside the other
+    // families, once the builder is there.
+    val plannedTerminal =
+      TerminalValue.plan(network, snapshots, columns, declare, terminal)
 
     val builder = LpProblem.builder(bounds.length)
     bounds.zipWithIndex.foreach { case ((lo, hi), i) => builder.bounds(i, lo, hi) }
@@ -637,6 +650,16 @@ object Lopf:
       }
     }
 
+    // The terminal value's defining equality goes here, with the other equality
+    // families, and not after the inequalities below.
+    //
+    // `LpBuilder.build()` sorts equalities before inequalities, so an equality emitted
+    // after an inequality breaks the original-row-index == standard-form-row-index
+    // property that `Sclopf.build` checks and refuses to proceed without. Emitted last,
+    // terminal value and secure dispatch could never be combined: latent only because
+    // `Sclopf` calls `Lopf.build(network)` with this defaulted off.
+    TerminalValue.emit(plannedTerminal, builder)
+
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational
     // limits are no longer constants in the column bounds but multiples of a
@@ -773,7 +796,7 @@ object Lopf:
     // dispatch problem, which is where PyPSA puts them too -- an
     // `extra_functionality` callback runs against the model the rest of the
     // formulation already built. Nothing above it needs to know they exist.
-    HydroOps.constrain(network, snapshots, columns.toMap, builder, hydro)
+    HydroOps.constrain(network, snapshots, columns, builder, hydro)
 
     val (problem, translation) = builder.build()
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))
@@ -789,9 +812,18 @@ object Lopf:
 
   /** The same solve, with reservoir operational limits applied. */
   def solve(input: Network, hydro: HydroOps.Config, solver: LpSolver): LopfResult =
+    solve(input, hydro, TerminalValue.off, solver)
+
+  /** The same solve, with operational limits and a terminal water value. */
+  def solve(
+      input: Network,
+      hydro: HydroOps.Config,
+      terminal: TerminalValue.Config,
+      solver: LpSolver,
+  ): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
-    val model    = build(network, hydro)
+    val model    = build(network, hydro, terminal)
     val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 

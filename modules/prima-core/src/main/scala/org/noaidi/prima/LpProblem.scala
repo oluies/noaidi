@@ -103,7 +103,7 @@ object LpProblem:
       variableUpper,
     )
 
-  def builder(numVariables: Int): LpBuilder = new LpBuilder(numVariables)
+  def builder(initialVariables: Int): LpBuilder = new LpBuilder(initialVariables)
 
 end LpProblem
 
@@ -151,21 +151,50 @@ final class RowTranslation(private val expansions: IndexedSeq[RowExpansion]):
   * builder does the conversion into equalities-then-inequalities form and hands
   * back the mapping needed to interpret the duals.
   */
-final class LpBuilder(numVariables: Int):
-  require(numVariables >= 0, s"numVariables must be non-negative, got $numVariables")
+final class LpBuilder(initialVariables: Int):
+  require(initialVariables >= 0, s"numVariables must be non-negative, got $initialVariables")
 
-  private val objective = new Array[Double](numVariables)
-  private val lower     = Array.fill(numVariables)(Double.NegativeInfinity)
-  private val upper     = Array.fill(numVariables)(Double.PositiveInfinity)
+  // Growable rather than fixed at construction, so a caller can add a column after it
+  // has started adding rows.
+  //
+  // Fixed arrays made the column count part of the constructor's contract, and a model
+  // that discovers a variable late -- a piecewise segment, a tier of a bid ladder -- then
+  // has to allocate every column before the builder exists and emit its rows afterwards,
+  // in two passes with the ordering rule between them unstated. The first family to need
+  // that got it wrong twice: once by declaring after the builder (an out-of-range index),
+  // once by emitting its equality after the inequalities (which silently breaks the
+  // row-index identity `Sclopf` depends on). Both were the split's doing rather than the
+  // model's.
+  private val objective = mutable.ArrayBuffer.fill(initialVariables)(0.0)
+  private val lower     = mutable.ArrayBuffer.fill(initialVariables)(Double.NegativeInfinity)
+  private val upper     = mutable.ArrayBuffer.fill(initialVariables)(Double.PositiveInfinity)
   private var offset    = 0.0
+
+  /** How many columns the problem has so far. */
+  def numVariables: Int = objective.length
+
+  /** Add a column, and return its index.
+    *
+    * The bounds and the objective coefficient go on at once, because a column added
+    * halfway through a build has no other moment where all three are known together --
+    * and because [[objectiveCoefficient]] sets rather than adds, so a later caller
+    * reaching for it would overwrite whatever this column was declared with.
+    */
+  def addVariable(lo: Double, hi: Double, cost: Double): Int =
+    require(lo <= hi, s"new variable has empty bound interval [$lo, $hi]")
+    val index = objective.length
+    objective += cost
+    lower     += lo
+    upper     += hi
+    index
 
   private final case class Row(coefficients: Seq[(Int, Double)], lo: Double, hi: Double)
   private val rows = mutable.ArrayBuffer.empty[Row]
 
   private def checkVariable(variable: Int): Unit =
     require(
-      variable >= 0 && variable < numVariables,
-      s"variable index $variable out of range [0, $numVariables)",
+      variable >= 0 && variable < objective.length,
+      s"variable index $variable out of range [0, ${objective.length})",
     )
 
   def objectiveCoefficient(variable: Int, value: Double): this.type =
@@ -237,12 +266,12 @@ final class LpBuilder(numVariables: Int):
     }
 
     val problem = LpProblem(
-      objective = Unsafe.wrap(objective.clone()),
-      constraintMatrix = SparseMatrix.fromTriplets(rhs.length, numVariables, entries),
+      objective = Unsafe.wrap(objective.toArray),
+      constraintMatrix = SparseMatrix.fromTriplets(rhs.length, objective.length, entries),
       rhs = Unsafe.wrap(rhs.toArray),
       numEqualities = numEqualities,
-      variableLower = Unsafe.wrap(lower.clone()),
-      variableUpper = Unsafe.wrap(upper.clone()),
+      variableLower = Unsafe.wrap(lower.toArray),
+      variableUpper = Unsafe.wrap(upper.toArray),
       objectiveOffset = offset,
     )
     (problem, RowTranslation(expansions.toIndexedSeq))

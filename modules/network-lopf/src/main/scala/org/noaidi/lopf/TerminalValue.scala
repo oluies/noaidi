@@ -152,30 +152,25 @@ object TerminalValue:
     }
     profile
 
-  /** One reservoir's segment columns, and the level column they have to sum to. */
-  final case class Planned(unit: String, segments: Seq[Int], stateOfCharge: Int)
-
-  /** Nothing to emit. */
-  val nothing: Seq[Planned] = Seq.empty
-
-  /** Allocate the segment columns, with their objective coefficients.
+  /** Emit the segment columns, their objective coefficients and their defining rows.
     *
-    * Split from [[emit]] because [[Lopf]] sizes its builder from the column count:
-    * a column declared after the builder exists is outside its range, and the row
-    * referring to it fails with an index error rather than a wrong answer. So this
-    * runs while columns are still being declared and [[emit]] runs once the builder
-    * is there -- variables first, then rows, which is the order the rest of the
-    * builder already works in.
+    * One pass. It was two for a while, because `LpBuilder` fixed its column count at
+    * construction and a column declared afterwards was out of range -- so allocation
+    * had to happen before the builder and the rows after it, with the ordering rule
+    * between them unwritten. That split cost two defects of its own (an out-of-range
+    * index, then an equality emitted after the inequalities, which silently breaks the
+    * row-index identity `Sclopf` depends on) before `LpBuilder.addVariable` made it
+    * unnecessary.
     *
-    * Every refusal lives here too, so a bad configuration fails before anything has
-    * been allocated for it.
+    * Every refusal runs before a single column is allocated, so a bad configuration
+    * fails without leaving orphan columns behind.
     *
-    * `declare` is [[Lopf]]'s own allocator. The cost goes on at declaration, which
-    * is what keeps this from having to modify an existing coefficient --
-    * [[org.noaidi.prima.LpBuilder.objectiveCoefficient]] sets rather than adds, and
-    * the state-of-charge column already carries `marginal_cost_storage`.
+    * The cost goes on at declaration rather than through
+    * [[org.noaidi.prima.LpBuilder.objectiveCoefficient]], which sets rather than adds:
+    * the state-of-charge column already carries `marginal_cost_storage`, and a family
+    * that reached for that setter would drop it.
     */
-  def plan(
+  def constrain(
       network: Network,
       snapshots: Range,
       // `collection.Map`, so the caller's mutable builder map is read in place. As
@@ -184,9 +179,10 @@ object TerminalValue:
       // lookup per reservoir.
       columns: scala.collection.Map[(String, String, Int), Int],
       declare: (String, String, Int, Double, Double, Double) => Int,
+      builder: LpBuilder,
       config: Config,
-  ): Seq[Planned] =
-    if config.isOff || snapshots.isEmpty then return nothing
+  ): Unit =
+    if config.isOff || snapshots.isEmpty then return
 
     val storage = network.tables.get("StorageUnit") match
       case Some(found) => found
@@ -320,8 +316,8 @@ object TerminalValue:
           "need not.",
       )
 
-    // Allocation only, every refusal already behind us.
-    priced.map { id =>
+    // Every refusal already behind us.
+    priced.foreach { id =>
       val soc      = columns((Storage.SoC, id, last))
       val capacity = storage.float("p_nom", id) * storage.float("max_hours", id)
       val profile  = profiles(id)
@@ -333,16 +329,10 @@ object TerminalValue:
       val segments = profile.zipWithIndex.map { (multiplier, k) =>
         declare(Segment, segmentOf(id, k), last, 0.0, width, -lambda * multiplier)
       }
-      Planned(id, segments, soc)
+
+      // Sigma_k s_k - SoC(T) = 0. The segments have nowhere else to be, so this is what
+      // makes the reward apply to water that is actually there; without it they would
+      // sit at their upper bounds and collect the whole curve for nothing.
+      builder.equalityConstraint(segments.map(_ -> 1.0) :+ (soc -> -1.0), 0.0)
     }
 
-  /** Tie each reservoir's segments to its level: `Σ_k s_k − SoC(T) = 0`.
-    *
-    * The segments have nowhere else to be, so this is what makes the reward apply to
-    * water that is actually there. Without it they would sit at their upper bounds
-    * and collect the whole curve for nothing.
-    */
-  def emit(planned: Seq[Planned], builder: LpBuilder): Unit =
-    planned.foreach { p =>
-      builder.equalityConstraint(p.segments.map(_ -> 1.0) :+ (p.stateOfCharge -> -1.0), 0.0)
-    }

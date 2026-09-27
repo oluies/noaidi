@@ -349,15 +349,6 @@ object Lopf:
       }
     }
 
-    // The terminal value's segment columns, allocated here rather than with the other
-    // families below, because the builder is sized from `bounds.length` on the next
-    // line: a column declared after it exists is outside its range, and the row that
-    // refers to it fails with an index error. Variables first, then rows -- the order
-    // everything else in this method already follows. Its rows go in beside the other
-    // families, once the builder is there.
-    val plannedTerminal =
-      TerminalValue.plan(network, snapshots, columns, declare, terminal)
-
     val builder = LpProblem.builder(bounds.length)
     bounds.zipWithIndex.foreach { case ((lo, hi), i) => builder.bounds(i, lo, hi) }
     costs.zipWithIndex.foreach { (c, i) => builder.objectiveCoefficient(i, c) }
@@ -650,15 +641,33 @@ object Lopf:
       }
     }
 
-    // The terminal value's defining equality goes here, with the other equality
-    // families, and not after the inequalities below.
+    // The terminal value, here rather than beside the other optional families at the end
+    // of this method, and the position is load-bearing.
     //
-    // `LpBuilder.build()` sorts equalities before inequalities, so an equality emitted
-    // after an inequality breaks the original-row-index == standard-form-row-index
-    // property that `Sclopf.build` checks and refuses to proceed without. Emitted last,
-    // terminal value and secure dispatch could never be combined: latent only because
-    // `Sclopf` calls `Lopf.build(network)` with this defaulted off.
-    TerminalValue.emit(plannedTerminal, builder)
+    // It emits an *equality*, and `build()` sorts equalities before inequalities, so an
+    // equality emitted after any inequality breaks the original-row-index ==
+    // standard-form-row-index property that `Sclopf.build` checks and refuses to proceed
+    // without. Every row above this point is an equality or a bound; the first
+    // inequalities are the capacity-coupling rows below. Put after `HydroOps` -- which
+    // emits only inequalities -- terminal value and secure dispatch could never be
+    // combined, and that is exactly where it sat until this was measured.
+    //
+    // Its columns are declared through the builder rather than through `declare` above,
+    // whose `bounds` and `costs` buffers were copied into the builder when it was
+    // constructed. `columns` is still updated so `LopfResult` can read the segments back.
+    def declareLate(
+        component: String,
+        entity: String,
+        t: Int,
+        lo: Double,
+        hi: Double,
+        cost: Double,
+    ): Int =
+      val index = builder.addVariable(lo, hi, cost)
+      columns((component, entity, t)) = index
+      index
+
+    TerminalValue.constrain(network, snapshots, columns, declareLate, builder, terminal)
 
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational
@@ -797,7 +806,6 @@ object Lopf:
     // `extra_functionality` callback runs against the model the rest of the
     // formulation already built. Nothing above it needs to know they exist.
     HydroOps.constrain(network, snapshots, columns, builder, hydro)
-
     val (problem, translation) = builder.build()
     Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, bounds.length))
 

@@ -4,7 +4,8 @@ import java.nio.file.{Files, Path, Paths}
 import org.noaidi.network.{CsvReader, Network}
 import org.noaidi.prima.{PdhgParams, SolveStatus}
 
-/** [[HydroOps]] against NordPSA, which is where the constraints come from.
+/** NordPSA's reservoir behaviour against this port -- [[HydroOps]] and one family
+  * that turned out to need none of it.
   *
   * The fixtures under `reference/nordpsa` are NordPSA's own toy hydro network —
   * one zone, 21 days at 3-hourly resolution, a reservoir with inflow and
@@ -100,6 +101,78 @@ class HydroOpsSuite extends munit.FunSuite, CsvFixtures:
     )
     result
 
+  private lazy val socReference: ujson.Value =
+    ujson.read(Files.readString(root.resolve("soc.json")))
+
+  test("NordPSA's initial-SoC anchor needs no new constraint family") {
+    assume(fixtures && Files.exists(root.resolve("soc.json")), "soc fixtures are not present")
+    // `hydro_soc_initial` is an extra_functionality callback pinning
+    // `soc[t0] == frac * p_nom * max_hours`. PyPSA already has an attribute that does
+    // exactly that -- `state_of_charge_set` -- and unlike a callback it lives on the
+    // network, so it survives an export and this port already honours it. So this
+    // family is a config-to-network mapping rather than a constraint to implement,
+    // and `generate_soc.py` establishes the equivalence against NordPSA's own
+    // callback rather than against a reading of it: same objective and same state of
+    // charge at both ends of the horizon.
+    assert(socReference("equivalent").bool, "the callback and the attribute disagree in PyPSA")
+
+    val stored = socReference("cases")("attribute")
+    val result = Lopf.solve(variant("soc-anchor"), HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
+    assertEquals(result.status, SolveStatus.Optimal)
+
+    val target = socReference("anchor")("target_mwh").num
+    assertEqualsDouble(
+      result.stateOfCharge("Z hydro", 0),
+      target,
+      1e-6 * target,
+      "the anchored snapshot did not reach NordPSA's target level",
+    )
+    val objective = stored("objective").num
+    assertEqualsDouble(
+      result.objective,
+      objective,
+      1e-6 * math.max(1.0, math.abs(objective)),
+      "objective disagrees with PyPSA on the anchored network",
+    )
+  }
+
+  test("the anchor moves the level and not the cost, and the reference says so") {
+    assume(fixtures && Files.exists(root.resolve("soc.json")), "soc fixtures are not present")
+    // Worth pinning because it is the reason the test above asserts a level rather
+    // than a price, and because it looked at first like a weak fixture. Under cyclic
+    // state-of-charge the anchor fixes the level while the horizon's water balance is
+    // untouched -- total dispatch still equals inflow minus spill -- so no
+    // (max_hours, fraction) pair can make it change the objective. Four were tried.
+    // What it exists for is the seam between rolling-horizon windows, where one
+    // window's terminal level is the next one's initial level.
+    assert(socReference("anchor_binds_on_soc").bool, "the anchor did not move soc[0] at all")
+    assert(
+      socReference("cost_neutral_in_one_cyclic_window").bool,
+      "the anchor moved the objective, so this port should be asserting that too",
+    )
+
+    // And this port agrees: dropping the anchor column leaves the objective alone and
+    // moves the level away from the target.
+    val source = root.resolve("networks").resolve("soc-anchor")
+    val blanked = Files.readString(source.resolve("storage_units-state_of_charge_set.csv"))
+      .linesIterator.zipWithIndex
+      .map((line, i) => if i == 0 then line else line.split(",", 2)(0) + ",")
+      .mkString("\n") + "\n"
+    val free = copiedWith(source, "soc-anchor",
+      "storage_units-state_of_charge_set.csv" -> blanked)
+    val anchored = Lopf.solve(variant("soc-anchor"), HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
+    val loose    = Lopf.solve(free, HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
+    assertEqualsDouble(
+      loose.objective,
+      anchored.objective,
+      1e-6 * math.max(1.0, math.abs(anchored.objective)),
+      "removing the anchor changed the cost, which the reference says it cannot",
+    )
+    assert(
+      math.abs(loose.stateOfCharge("Z hydro", 0) - anchored.stateOfCharge("Z hydro", 0)) > 1.0,
+      "removing the anchor left the level unchanged, so it was pinning nothing",
+    )
+  }
   test("a network with no operational limits matches PyPSA") {
     assume(fixtures, "reference/nordpsa is not present")
     agrees("floors-ref")

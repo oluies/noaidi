@@ -1,0 +1,38 @@
+{
+  "source": "NordPSA nordpsa/constraints/soc.py",
+  "question": "is hydro_soc_initial expressible as state_of_charge_set?",
+  "versions": {
+    "pypsa": "1.3.0",
+    "pandas": "3.0.6"
+  },
+  "anchor": {
+    "fraction": 0.7,
+    "p_nom": 1000.0,
+    "max_hours": 500.0,
+    "target_mwh": 350000.0
+  },
+  "cases": {
+    "callback": {
+      "status": "ok",
+      "objective": 297359.9999999999,
+      "soc_first": 350000.0,
+      "soc_last": 348650.0
+    },
+    "attribute": {
+      "status": "ok",
+      "objective": 297359.9999999999,
+      "soc_first": 350000.0,
+      "soc_last": 348650.0
+    },
+    "control": {
+      "status": "ok",
+      "objective": 297359.9999999999,
+      "soc_first": 149.99999999999966,
+      "soc_last": -0.0
+    }
+  },
+  "equivalent": true,
+  "anchor_binds_on_soc": true,
+  "cost_neutral_in_one_cyclic_window": true,
+  "network": "soc-anchor"
+}

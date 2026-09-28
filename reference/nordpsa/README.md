@@ -26,7 +26,7 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
 | `hydro_ops` | ported as `HydroOps` (hourly/daily floors, weekly ceiling with per-zone override, bypass-spill hinge) |
 | `soc` | **needs no port** — `hydro_soc_initial` is PyPSA's own `state_of_charge_set`, which lives on the network and this port already honours. Equivalence established against NordPSA's callback by `generate_soc.py`, not asserted. |
 | `terminal_value` | ported as `TerminalValue` — a piecewise-concave value on `SOC[T]`, and the first thing here to add LP *columns* rather than only rows. |
-| `bid_ladder` | not ported. The same machinery from the other side: reservoir dispatch split into K tiers with *rising* bids, so a piecewise-convex cost on `p_dispatch`. `TerminalValue`'s plan/emit split is the shape it needs, but its segments are per *snapshot* rather than one per reservoir, so it is K x T columns rather than K. |
+| `bid_ladder` | ported as `BidLadder` — reservoir dispatch split into K tiers with *rising* bids, so a piecewise-convex cost on `p_dispatch`. `TerminalValue` mirrored: a concave value with decreasing multipliers there, a convex cost with increasing ones here. K x T columns rather than K, since the tiers are per snapshot. |
 | `stability` | not ported. SCR and synchronous-generation floors with commitment, so it reaches into MILP rather than LP. |
 
 ## Layout
@@ -46,7 +46,13 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
 - `terminal-week/` plus `terminal.json` — a deliberately scarce, non-cyclic week and the
   objectives and terminal levels PyPSA reaches on it under six terminal-value
   configurations.
-- `generate.py`, `generate_soc.py`, `generate_terminal.py` — regenerate the above.
+- `ladder-week/` plus `ladder.json` — a week in which the reservoir is price-marginal and
+  its trajectory is the *unique* optimum, with the objective, the bang-bang fractions and
+  the whole hour-by-hour dispatch PyPSA reaches under four bid-ladder configurations.
+- `nordic-today/` plus `nordic.json` — the real thing: the network `nordpsa today` builds,
+  at daily resolution over 2023, solved with and without the bid-ladder callback.
+- `generate.py`, `generate_soc.py`, `generate_terminal.py`, `generate_ladder.py`,
+  `generate_nordic.py` — regenerate the above.
 
 The terminal-value fixture is scarce on purpose, and its first version was not. At 200
 `max_hours` the reservoir held more water than the week could use, so every profile
@@ -55,6 +61,34 @@ week's residual demand exceeds the starting level plus inflow, so holding a MWh 
 forgoes 39 EUR/MWh of the expensive generator — which is the number each segment's
 lambda is measured against, and what makes the concave curve hold exactly one segment
 at lambda 25 where a linear one holds none.
+
+## Why one ladder fixture is synthetic and the other is not
+
+`nordic-today` is the stronger end-to-end evidence and the weaker evidence about the
+ladder, and the two fixtures exist because of that split.
+
+What the ladder is *for* is the side effect: a flat bid makes the fleet go all-or-nothing
+as the price crosses its single bid, and a rising curve spreads the output. On
+`nordic-today` that fraction is **not a property of the model**. The continental price
+generators are perfectly elastic at one price over thousands of MW, so shifting water
+between two hours that both price against them changes the objective by nothing. The
+optimal face is enormous, and `generate_nordic.py` measures it rather than leaving it to
+be argued: HiGHS simplex returns a vertex with 37.2% of hours pinned to a bound, HiGHS
+interior-point returns 4.9%, and the two objectives agree to eleven digits. That
+measurement is recorded in `nordic.json` under `trajectory_degeneracy` so the port can
+cite it instead of asserting a solver's tie-break.
+
+So `nordic-today` carries the objective — which is determined, and agrees to ten digits
+with the ladder on and off over 57,305 columns — and `ladder-week` carries the bang-bang
+assertions. That fixture's competitor has a marginal cost that sweeps hydro's bid band and
+repeats no value, so the reservoir's water value is the one number clearing its cyclic
+balance and the hours it runs full are pinned down. Both sides then agree on the whole
+trajectory and not merely on its cost.
+
+Its first version did not have that property: a single competitor at a constant 45
+EUR/MWh, degenerate in exactly the way `nordic-today` is. It passed on objectives while
+every shape statistic disagreed — flat at 16% pinned in PyPSA against 0% in the port —
+which reads as a porting error and was a fixture error.
 
 One property of the `soc` anchor is worth knowing before reading its test, because it
 looks like a weak fixture and is not. Under cyclic state-of-charge the anchor fixes the
@@ -78,6 +112,10 @@ uv pip install --python .venv/bin/python "pypsa==1.3.0" "highspy>=1.15" pandas n
 uv pip install --python .venv/bin/python -e ./NordPSA
 .venv/bin/python generate.py <output-dir>
 ```
+
+`generate_nordic.py` is the exception to "no data tokens are needed": it drives NordPSA's
+own `build_network` over the fetched Nordic dataset, so it needs `data/processed/` built
+in the clone it imports from. The other four generators need only the repository.
 
 `generate.py` expects `NordPSA/` beside it, and imports
 `nordpsa.constraints.hydro_operation_constraints` — the production callback, not a

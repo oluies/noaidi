@@ -1,0 +1,118 @@
+name,bus,p_nom,p_nom_min,p_nom_max,p_min_pu,p_max_pu,carrier,marginal_cost
+SE-N slack,SE-N,1000000.0,0.0,inf,0.0,1.0,slack,3000.0
+SE-S slack,SE-S,1000000.0,0.0,inf,0.0,1.0,slack,3000.0
+NO-N slack,NO-N,1000000.0,0.0,inf,0.0,1.0,slack,3000.0
+NO-S slack,NO-S,1000000.0,0.0,inf,0.0,1.0,slack,3000.0
+DK slack,DK,1000000.0,0.0,inf,0.0,1.0,slack,3000.0
+FI slack,FI,1000000.0,0.0,inf,0.0,1.0,slack,3000.0
+SE-N thermal,SE-N,296.57966749999997,0.0,inf,0.0,1.0,thermal,0.0
+SE-S thermal,SE-S,1497.4134483750001,0.0,inf,0.0,1.0,thermal,0.0
+NO-N thermal,NO-N,276.8449465,0.0,inf,0.0,1.0,thermal,0.0
+NO-S thermal,NO-S,159.65807029166666,0.0,inf,0.0,1.0,thermal,0.0
+DK thermal,DK,628.8520833333333,0.0,inf,0.0,1.0,thermal,0.0
+FI thermal,FI,3744.6727194166665,0.0,inf,0.0,1.0,thermal,0.0
+SE-N hydro_ror,SE-N,2087.228789377289,0.0,inf,0.0,1.0,hydro,0.5
+SE-S hydro_ror,SE-S,397.1438098901098,0.0,inf,0.0,1.0,hydro,0.5
+NO-N hydro_ror,NO-N,1421.6925,0.0,inf,0.0,1.0,hydro,0.5
+NO-S hydro_ror,NO-S,3687.6391666666664,0.0,inf,0.0,1.0,hydro,0.5
+FI hydro_ror,FI,807.0095686771083,0.0,inf,0.0,1.0,hydro,0.5
+SE-S nuclear,SE-S,6900.0,6900.0,20000.0,0.0,1.0,nuclear,20.0
+FI nuclear,FI,4400.0,4400.0,20000.0,0.0,1.0,nuclear,20.0
+SE-N wind_onshore,SE-N,10050.0,10050.0,50000.0,0.0,1.0,wind_onshore,1.6
+SE-N solar,SE-N,134.0,134.0,50000.0,0.0,1.0,solar,1.0
+SE-S wind_onshore,SE-S,7092.0,7092.0,50000.0,0.0,1.0,wind_onshore,1.6
+SE-S wind_offshore,SE-S,127.0,127.0,50000.0,0.0,1.0,wind_offshore,3.0
+SE-S solar,SE-S,2778.0,2778.0,50000.0,0.0,1.0,solar,1.0
+NO-N wind_onshore,NO-N,3468.0,3468.0,50000.0,0.0,1.0,wind_onshore,1.6
+NO-N solar,NO-N,23.0,23.0,50000.0,0.0,1.0,solar,1.0
+NO-S wind_onshore,NO-S,2208.0,2208.0,50000.0,0.0,1.0,wind_onshore,1.6
+NO-S solar,NO-S,343.0,343.0,50000.0,0.0,1.0,solar,1.0
+DK wind_onshore,DK,5458.0,5458.0,50000.0,0.0,1.0,wind_onshore,1.6
+DK wind_offshore,DK,2613.0,2613.0,50000.0,0.0,1.0,wind_offshore,3.0
+DK solar,DK,3395.0,3395.0,50000.0,0.0,1.0,solar,1.0
+FI wind_onshore,FI,8960.0,8960.0,50000.0,0.0,1.0,wind_onshore,1.6
+FI solar,FI,571.0,571.0,50000.0,0.0,1.0,solar,1.0
+SE-N gas,SE-N,0.0,0.0,20000.0,0.0,1.0,gas,100.0
+SE-S gas,SE-S,0.0,0.0,20000.0,0.0,1.0,gas,100.0
+NO-N gas,NO-N,0.0,0.0,20000.0,0.0,1.0,gas,100.0
+NO-S gas,NO-S,0.0,0.0,20000.0,0.0,1.0,gas,100.0
+DK gas,DK,0.0,0.0,20000.0,0.0,1.0,gas,100.0
+FI gas,FI,0.0,0.0,20000.0,0.0,1.0,gas,100.0
+FI EE imp1,FI,338.6666666666667,0.0,inf,0.0,1.0,market,0.0
+FI EE exp1,FI,338.6666666666667,0.0,inf,-1.0,0.0,market,0.0
+FI EE imp2,FI,338.6666666666667,0.0,inf,0.0,1.0,market,0.0
+FI EE exp2,FI,338.6666666666667,0.0,inf,-1.0,0.0,market,0.0
+FI EE imp3,FI,338.6666666666667,0.0,inf,0.0,1.0,market,0.0
+FI EE exp3,FI,338.6666666666667,0.0,inf,-1.0,0.0,market,0.0
+SE-S LT imp1,SE-S,233.33333333333334,0.0,inf,0.0,1.0,market,0.0
+SE-S LT exp1,SE-S,233.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+SE-S LT imp2,SE-S,233.33333333333334,0.0,inf,0.0,1.0,market,0.0
+SE-S LT exp2,SE-S,233.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+SE-S LT imp3,SE-S,233.33333333333334,0.0,inf,0.0,1.0,market,0.0
+SE-S LT exp3,SE-S,233.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+SE-S PL imp1,SE-S,200.0,0.0,inf,0.0,1.0,market,0.0
+SE-S PL exp1,SE-S,200.0,0.0,inf,-1.0,0.0,market,0.0
+SE-S PL imp2,SE-S,200.0,0.0,inf,0.0,1.0,market,0.0
+SE-S PL exp2,SE-S,200.0,0.0,inf,-1.0,0.0,market,0.0
+SE-S PL imp3,SE-S,200.0,0.0,inf,0.0,1.0,market,0.0
+SE-S PL exp3,SE-S,200.0,0.0,inf,-1.0,0.0,market,0.0
+SE-S DE imp1,SE-S,205.0,0.0,inf,0.0,1.0,market,0.0
+SE-S DE exp1,SE-S,205.0,0.0,inf,-1.0,0.0,market,0.0
+SE-S DE imp2,SE-S,205.0,0.0,inf,0.0,1.0,market,0.0
+SE-S DE exp2,SE-S,205.0,0.0,inf,-1.0,0.0,market,0.0
+SE-S DE imp3,SE-S,205.0,0.0,inf,0.0,1.0,market,0.0
+SE-S DE exp3,SE-S,205.0,0.0,inf,-1.0,0.0,market,0.0
+DK DE imp1,DK,1133.3333333333333,0.0,inf,0.0,1.0,market,0.0
+DK DE exp1,DK,1133.3333333333333,0.0,inf,-1.0,0.0,market,0.0
+DK DE imp2,DK,1133.3333333333333,0.0,inf,0.0,1.0,market,0.0
+DK DE exp2,DK,1133.3333333333333,0.0,inf,-1.0,0.0,market,0.0
+DK DE imp3,DK,1133.3333333333333,0.0,inf,0.0,1.0,market,0.0
+DK DE exp3,DK,1133.3333333333333,0.0,inf,-1.0,0.0,market,0.0
+DK NL imp1,DK,233.33333333333334,0.0,inf,0.0,1.0,market,0.0
+DK NL exp1,DK,233.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+DK NL imp2,DK,233.33333333333334,0.0,inf,0.0,1.0,market,0.0
+DK NL exp2,DK,233.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+DK NL imp3,DK,233.33333333333334,0.0,inf,0.0,1.0,market,0.0
+DK NL exp3,DK,233.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+DK GB imp1,DK,485.3333333333333,0.0,inf,0.0,1.0,market,0.0
+DK GB exp1,DK,485.3333333333333,0.0,inf,-1.0,0.0,market,0.0
+DK GB imp2,DK,485.3333333333333,0.0,inf,0.0,1.0,market,0.0
+DK GB exp2,DK,485.3333333333333,0.0,inf,-1.0,0.0,market,0.0
+DK GB imp3,DK,485.3333333333333,0.0,inf,0.0,1.0,market,0.0
+DK GB exp3,DK,485.3333333333333,0.0,inf,-1.0,0.0,market,0.0
+NO DE imp1,NO-S,466.6666666666667,0.0,inf,0.0,1.0,market,0.0
+NO DE exp1,NO-S,466.6666666666667,0.0,inf,-1.0,0.0,market,0.0
+NO DE imp2,NO-S,466.6666666666667,0.0,inf,0.0,1.0,market,0.0
+NO DE exp2,NO-S,466.6666666666667,0.0,inf,-1.0,0.0,market,0.0
+NO DE imp3,NO-S,466.6666666666667,0.0,inf,0.0,1.0,market,0.0
+NO DE exp3,NO-S,466.6666666666667,0.0,inf,-1.0,0.0,market,0.0
+NO NL imp1,NO-S,213.33333333333334,0.0,inf,0.0,1.0,market,0.0
+NO NL exp1,NO-S,213.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+NO NL imp2,NO-S,213.33333333333334,0.0,inf,0.0,1.0,market,0.0
+NO NL exp2,NO-S,213.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+NO NL imp3,NO-S,213.33333333333334,0.0,inf,0.0,1.0,market,0.0
+NO NL exp3,NO-S,213.33333333333334,0.0,inf,-1.0,0.0,market,0.0
+NO GB imp1,NO-S,483.0,0.0,inf,0.0,1.0,market,0.0
+NO GB exp1,NO-S,483.0,0.0,inf,-1.0,0.0,market,0.0
+NO GB imp2,NO-S,483.0,0.0,inf,0.0,1.0,market,0.0
+NO GB exp2,NO-S,483.0,0.0,inf,-1.0,0.0,market,0.0
+NO GB imp3,NO-S,483.0,0.0,inf,0.0,1.0,market,0.0
+NO GB exp3,NO-S,483.0,0.0,inf,-1.0,0.0,market,0.0
+SE-N DSR1,SE-N,65.8,0.0,inf,0.0,1.0,DSR,100.0
+SE-N DSR2,SE-N,131.6,0.0,inf,0.0,1.0,DSR,250.0
+SE-N DSR3,SE-N,82.25,0.0,inf,0.0,1.0,DSR,500.0
+SE-S DSR1,SE-S,237.60000000000002,0.0,inf,0.0,1.0,DSR,100.0
+SE-S DSR2,SE-S,475.20000000000005,0.0,inf,0.0,1.0,DSR,250.0
+SE-S DSR3,SE-S,297.0,0.0,inf,0.0,1.0,DSR,500.0
+NO-N DSR1,NO-N,149.20000000000002,0.0,inf,0.0,1.0,DSR,100.0
+NO-N DSR2,NO-N,298.40000000000003,0.0,inf,0.0,1.0,DSR,250.0
+NO-N DSR3,NO-N,186.5,0.0,inf,0.0,1.0,DSR,500.0
+NO-S DSR1,NO-S,246.60000000000002,0.0,inf,0.0,1.0,DSR,100.0
+NO-S DSR2,NO-S,493.20000000000005,0.0,inf,0.0,1.0,DSR,250.0
+NO-S DSR3,NO-S,308.25,0.0,inf,0.0,1.0,DSR,500.0
+DK DSR1,DK,45.400000000000006,0.0,inf,0.0,1.0,DSR,100.0
+DK DSR2,DK,90.80000000000001,0.0,inf,0.0,1.0,DSR,250.0
+DK DSR3,DK,56.75,0.0,inf,0.0,1.0,DSR,500.0
+FI DSR1,FI,455.20000000000005,0.0,inf,0.0,1.0,DSR,100.0
+FI DSR2,FI,910.4000000000001,0.0,inf,0.0,1.0,DSR,250.0
+FI DSR3,FI,569.0,0.0,inf,0.0,1.0,DSR,500.0

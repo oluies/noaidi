@@ -88,6 +88,7 @@ object Lopf:
       hydro: HydroOps.Config = HydroOps.off,
       terminal: TerminalValue.Config = TerminalValue.off,
       ladder: BidLadder.Config = BidLadder.off,
+      stability: Stability.Config = Stability.off,
   )
 
   object Families:
@@ -107,6 +108,7 @@ object Lopf:
     val hydro    = families.hydro
     val terminal = families.terminal
     val ladder   = families.ladder
+    val stability = families.stability
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
@@ -697,6 +699,15 @@ object Lopf:
     // or every one of its rows takes a standard-form index that differs from its
     // original, which `Sclopf` refuses to proceed past.
     BidLadder.constrain(network, snapshots, columns, declareLate, builder, ladder)
+
+    // Here too, and for a different reason from the two above: `Stability` emits no
+    // equality at all -- three inequalities per online unit and one per requirement -- so
+    // the row-index identity `Sclopf` depends on cannot be broken by where it sits. It is
+    // here anyway, with the other families that allocate columns late, because that keeps
+    // one place in this function where an optional family appears; and the invariant is
+    // asserted in its suite rather than assumed, since "emits no equality" is a property
+    // of the code and not of the signature.
+    Stability.constrain(network, snapshots, columns, declareLate, builder, stability)
 
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational

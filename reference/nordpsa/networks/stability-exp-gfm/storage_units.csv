@@ -1,0 +1,2 @@
+name,bus,p_nom_extendable,carrier,capital_cost,cyclic_state_of_charge,max_hours
+Z battery gfm,Z,True,battery_gfm,1.0,True,4.0

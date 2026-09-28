@@ -1,0 +1,2 @@
+name,bus0,bus1,carrier,p_nom,p_min_pu
+A-B,A,B,AC,2000.0,-1.0

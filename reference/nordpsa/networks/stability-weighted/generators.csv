@@ -1,0 +1,4 @@
+name,bus,p_nom,p_max_pu,carrier,marginal_cost
+A wind,A,2000.0,0.9,wind_onshore,0.0
+B wind,B,1000.0,0.9,wind_onshore,0.0
+B gas,B,500.0,1.0,gas,100.0

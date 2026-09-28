@@ -82,6 +82,7 @@ object Lopf:
       input: Network,
       hydro: HydroOps.Config = HydroOps.off,
       terminal: TerminalValue.Config = TerminalValue.off,
+      ladder: BidLadder.Config = BidLadder.off,
   ): Model =
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
@@ -668,6 +669,12 @@ object Lopf:
 
     TerminalValue.constrain(network, snapshots, columns, declareLate, builder, terminal)
 
+    // Here for the same reason, and it is the same hazard: the bid ladder emits an
+    // equality per reservoir per snapshot, so it has to land before the first inequality
+    // or every one of its rows takes a standard-form index that differs from its
+    // original, which `Sclopf` refuses to proceed past.
+    BidLadder.constrain(network, snapshots, columns, declareLate, builder, ladder)
+
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational
     // limits are no longer constants in the column bounds but multiples of a
@@ -831,9 +838,27 @@ object Lopf:
       terminal: TerminalValue.Config,
       solver: LpSolver,
   ): LopfResult =
+    solve(input, hydro, terminal, BidLadder.off, solver)
+
+  /** The same solve, with a bid ladder as well.
+    *
+    * Five overloads is more than this wants, and the shape a fourth family should take is
+    * one `Options` carrying all of them. Not done here: it would touch about thirty test
+    * call sites alongside a new formulation, and this feature's record with combined
+    * changes is poor. The risk a reviewer raised for the positional form -- transposing
+    * two `off` values -- does not arise, because the three `Config` types are distinct and
+    * a swap does not compile.
+    */
+  def solve(
+      input: Network,
+      hydro: HydroOps.Config,
+      terminal: TerminalValue.Config,
+      ladder: BidLadder.Config,
+      solver: LpSolver,
+  ): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
-    val model    = build(network, hydro, terminal)
+    val model    = build(network, hydro, terminal, ladder)
     val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 

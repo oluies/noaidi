@@ -1,0 +1,9 @@
+name,bus,p_nom,p_nom_min,p_min_pu,carrier,spill_cost,marginal_cost,cyclic_state_of_charge,max_hours,efficiency_store,efficiency_dispatch
+SE-N hydro,SE-N,11212.771210622712,0.0,0.0,hydro,0.1,0.6,True,2585.8014450996534,1.0,1.0
+SE-S hydro,SE-S,2502.85619010989,0.0,0.0,hydro,0.1,0.6,True,1398.5222218645795,1.0,1.0
+NO-N hydro,NO-N,9578.307499999999,0.0,0.0,hydro,0.1,0.6,True,3131.7641451790937,1.0,1.0
+NO-S hydro,NO-S,18312.360833333332,0.0,0.0,hydro,0.1,0.6,True,3134.3855946482054,1.0,1.0
+FI hydro,FI,2392.9904313228917,0.0,0.0,hydro,0.1,0.6,True,2298.713746614963,1.0,1.0
+SE-S battery,SE-S,1500.0,1500.0,-1.0,battery,0.0,0.01,True,2.0,0.95,0.95
+FI battery,FI,500.0,500.0,-1.0,battery,0.0,0.01,True,2.0,0.95,0.95
+DK battery,DK,400.0,400.0,-1.0,battery,0.0,0.01,True,2.0,0.95,0.95

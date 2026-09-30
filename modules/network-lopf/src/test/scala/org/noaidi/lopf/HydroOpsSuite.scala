@@ -77,7 +77,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
 
   private def solve(name: String): LopfResult =
     val key = stored(name)("network").str
-    Lopf.solve(variant(key), configOf(name), org.noaidi.prima.Pdhg.Solver(params))
+    Lopf.solve(variant(key), Lopf.Families(hydro = configOf(name)), org.noaidi.prima.Pdhg.Solver(params))
 
   /** Assert this port reaches the objective PyPSA reached on the same case. */
   private def agrees(name: String): LopfResult =
@@ -107,7 +107,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     assert(socReference("equivalent").bool, "the callback and the attribute disagree in PyPSA")
 
     val attribute = socReference("cases")("attribute")
-    val result = Lopf.solve(variant("soc-anchor"), HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
+    val result = Lopf.solve(variant("soc-anchor"), org.noaidi.prima.Pdhg.Solver(params))
     assertEquals(result.status, SolveStatus.Optimal)
 
     val target = socReference("anchor")("target_mwh").num
@@ -150,8 +150,8 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
       .mkString("\n") + "\n"
     val free = copiedWith(source, "soc-anchor",
       "storage_units-state_of_charge_set.csv" -> blanked)
-    val anchored = Lopf.solve(variant("soc-anchor"), HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
-    val loose    = Lopf.solve(free, HydroOps.off, org.noaidi.prima.Pdhg.Solver(params))
+    val anchored = Lopf.solve(variant("soc-anchor"), org.noaidi.prima.Pdhg.Solver(params))
+    val loose    = Lopf.solve(free, org.noaidi.prima.Pdhg.Solver(params))
 
     // Both against PyPSA's number, not against each other. `soc-anchor` is
     // `inflow450-cheap600` plus the one extra column -- byte-identical otherwise -- so
@@ -250,7 +250,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
   }
 
   private def rows(n: Network, config: HydroOps.Config): Int =
-    Lopf.build(n, config).problem.numConstraints
+    Lopf.build(n, Lopf.Families(hydro = config)).problem.numConstraints
 
   test("an inflow-free reservoir gets no hinge, rather than a tighter ceiling") {
     assume(fixtures, "reference/nordpsa is not present")
@@ -367,8 +367,8 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // Built in 2040, so only the 2040 day carries a row: H = 5.0 + 5.0 = 10.0 and
     // the floor is 0.3 * 100 * 10 = 300. A count-based H would give 0.3 * 100 * 2.
     val fraction = 0.3
-    val floored  = Lopf.build(n, HydroOps.Config(minDailyFraction = fraction))
-    val plain    = Lopf.build(n, HydroOps.off)
+    val floored  = Lopf.build(n, Lopf.Families(hydro = HydroOps.Config(minDailyFraction = fraction)))
+    val plain    = Lopf.build(n)
     val added    = floored.problem.rhs.drop(plain.problem.numConstraints)
     assertEquals(added.length, 1, "expected exactly one daily-floor row")
     assertEqualsDouble(added(0), fraction * 100.0 * 10.0, 1e-9, "H was not the active hours")
@@ -388,7 +388,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
       ).replace(",1000.0,", ",0.0,"),
     )
     val refused = intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(n, HydroOps.Config(maxWeeklyFractionByZone = Map("Z" -> 0.3)))
+      Lopf.build(n, Lopf.Families(hydro = HydroOps.Config(maxWeeklyFractionByZone = Map("Z" -> 0.3))))
     }
     assert(
       refused.getMessage.contains("'Z' matches no reservoir"),
@@ -402,15 +402,15 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // A zone ceiling of 0.0 matches a reservoir but is filtered out, leaving it
     // *less* constrained than the global ceiling would have -- silently, before.
     val zero = intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(n, HydroOps.Config(maxWeeklyFraction = 0.6,
-        maxWeeklyFractionByZone = Map("Z" -> 0.0)))
+      Lopf.build(n, Lopf.Families(hydro = HydroOps.Config(maxWeeklyFraction = 0.6,
+        maxWeeklyFractionByZone = Map("Z" -> 0.0))))
     }
     assert(zero.getMessage.contains("cannot constrain anything"), zero.getMessage)
 
     // A kappa override for a reservoir with no ceiling has nothing to measure from.
     val ownerless = intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(n, HydroOps.Config(bypassSpill =
-        HydroOps.BypassSpill(active = true, coefficientByZone = Map("Z" -> 0.2))))
+      Lopf.build(n, Lopf.Families(hydro = HydroOps.Config(bypassSpill =
+        HydroOps.BypassSpill(active = true, coefficientByZone = Map("Z" -> 0.2)))))
     }
     assert(ownerless.getMessage.contains("no weekly ceiling"), ownerless.getMessage)
   }
@@ -423,7 +423,10 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // the suite green while reopening the silent no-op the Option was introduced to
     // close. `ac-dc-meshed` ships no storage_units.csv.
     val refused = intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(network("ac-dc-meshed"), HydroOps.Config(maxWeeklyFractionByZone = Map("Z" -> 0.3)))
+      Lopf.build(
+        network("ac-dc-meshed"),
+        Lopf.Families(hydro = HydroOps.Config(maxWeeklyFractionByZone = Map("Z" -> 0.3))),
+      )
     }
     assert(
       refused.getMessage.contains("matches no reservoir") && refused.getMessage.contains("none"),
@@ -441,8 +444,8 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         variant("inflow450-cheap600"),
-        HydroOps.Config(maxWeeklyFraction = 0.6,
-          maxWeeklyFractionByZone = Map("Z" -> Double.NaN)),
+        Lopf.Families(hydro = HydroOps.Config(maxWeeklyFraction = 0.6,
+          maxWeeklyFractionByZone = Map("Z" -> Double.NaN))),
       )
     }
     assert(refused.getMessage.contains("NaN"), s"the refusal does not name NaN: ${refused.getMessage}")
@@ -455,7 +458,8 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         variant("inflow450-cheap600"),
-        HydroOps.Config(maxWeeklyFraction = 0.6, maxWeeklyFractionByZone = Map("SE9" -> 0.0)),
+        Lopf.Families(hydro =
+          HydroOps.Config(maxWeeklyFraction = 0.6, maxWeeklyFractionByZone = Map("SE9" -> 0.0))),
       )
     }
     assertEquals(
@@ -471,8 +475,8 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // whole build over a value no row could consult.
     Lopf.build(
       variant("inflow450-cheap600"),
-      HydroOps.Config(maxWeeklyFraction = 0.6, bypassSpill =
-        HydroOps.BypassSpill(active = false, coefficientByZone = Map("nowhere" -> 0.2))),
+      Lopf.Families(hydro = HydroOps.Config(maxWeeklyFraction = 0.6, bypassSpill =
+        HydroOps.BypassSpill(active = false, coefficientByZone = Map("nowhere" -> 0.2)))),
     )
   }
   test("the refusal names the limit that actually needed a calendar") {
@@ -481,7 +485,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // weekly-only config reported that it had been "asked for a daily window" and
     // sent the reader to the wrong line.
     val refused = intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(integerSnapshots, HydroOps.Config(maxWeeklyFraction = 0.5))
+      Lopf.build(integerSnapshots, Lopf.Families(hydro = HydroOps.Config(maxWeeklyFraction = 0.5)))
     }
     assert(
       refused.getMessage.contains("weekly window"),
@@ -497,7 +501,8 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         variant("inflow450-cheap600"),
-        HydroOps.Config(maxWeeklyFraction = 0.6, maxWeeklyFractionByZone = Map("SE2" -> 0.3)),
+        Lopf.Families(hydro =
+          HydroOps.Config(maxWeeklyFraction = 0.6, maxWeeklyFractionByZone = Map("SE2" -> 0.3))),
       )
     }
     assert(
@@ -522,7 +527,7 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // A daily window over `0, 1, 2` is meaningless, and the two silent alternatives
     // -- drop the row, or invent an ordinal window -- are both worse than stopping.
     val refused = intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(integerSnapshots, HydroOps.Config(minDailyFraction = 0.2))
+      Lopf.build(integerSnapshots, Lopf.Families(hydro = HydroOps.Config(minDailyFraction = 0.2)))
     }
     assert(
       refused.getMessage.contains("not a") && refused.getMessage.contains("timestamp"),
@@ -539,8 +544,10 @@ class HydroOpsSuite extends munit.FunSuite, NordPsaFixtures:
     // throw" is also what a version that silently emitted nothing would report,
     // and that version is the one this whole file exists to rule out.
     val network = integerSnapshots
-    val without = Lopf.build(network, HydroOps.off).problem.numConstraints
-    val with_   = Lopf.build(network, HydroOps.Config(minHourlyFraction = 0.1)).problem.numConstraints
+    val without = Lopf.build(network).problem.numConstraints
+    val with_   = Lopf
+      .build(network, Lopf.Families(hydro = HydroOps.Config(minHourlyFraction = 0.1)))
+      .problem.numConstraints
     assert(
       with_ > without,
       s"the hourly floor emitted no rows: $without constraints either way",

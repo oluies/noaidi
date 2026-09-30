@@ -67,23 +67,48 @@ object Lopf:
         throw new NoSuchElementException(s"no variable for $component '$entity' at snapshot $snapshot"),
       )
 
+  /** The optional constraint families, all off by default.
+    *
+    * One record rather than one parameter each. With three families `build` and `solve`
+    * had grown to four and five overloads, each delegating to the next with one more
+    * `off`, and a fourth family would have made six -- so the shape a reviewer asked for
+    * when the third landed is here before the fourth arrives.
+    *
+    * Every default is "off", and that default is what a plain PyPSA network '''means''': each
+    * of these lives in an `extra_functionality` callback that an export never carried, so
+    * a file read back has none of them. Passing a config is how a caller says it has that
+    * callback's contents in hand.
+    *
+    * Named rather than positional, which is the safety the overloads got for free from
+    * having distinct types: `Families(ladder = ...)` cannot be mistaken for
+    * `Families(terminal = ...)`, and a reader of a call site can see which family is meant
+    * without counting commas.
+    */
+  final case class Families(
+      hydro: HydroOps.Config = HydroOps.off,
+      terminal: TerminalValue.Config = TerminalValue.off,
+      ladder: BidLadder.Config = BidLadder.off,
+      stability: Stability.Config = Stability.off,
+  )
+
+  object Families:
+    /** Every family off, which is a plain PyPSA network. */
+    val none: Families = Families()
+
   final case class Model(problem: LpProblem, translation: RowTranslation, map: VariableMap)
 
   final class UnsupportedNetwork(message: String) extends RuntimeException(message)
 
   /** Turn a network into a dispatch LP.
     *
-    * `hydro` is off by default, and that default is what a plain PyPSA network
-    * means: its operational limits, if it has any, live in an
-    * `extra_functionality` callback that the file never carried. Passing a
-    * [[HydroOps.Config]] is how a caller says it has those limits in hand.
+    * The optional families are off by default; see [[Families]] for why that default is
+    * what a plain PyPSA network means.
     */
-  def build(
-      input: Network,
-      hydro: HydroOps.Config = HydroOps.off,
-      terminal: TerminalValue.Config = TerminalValue.off,
-      ladder: BidLadder.Config = BidLadder.off,
-  ): Model =
+  def build(input: Network, families: Families = Families.none): Model =
+    val hydro    = families.hydro
+    val terminal = families.terminal
+    val ladder   = families.ladder
+    val stability = families.stability
     // Idempotent, and called here as well as in `solve` so a caller that builds
     // a model directly -- `Sclopf` does -- cannot get a network whose typed
     // branches still have no impedance.
@@ -675,6 +700,15 @@ object Lopf:
     // original, which `Sclopf` refuses to proceed past.
     BidLadder.constrain(network, snapshots, columns, declareLate, builder, ladder)
 
+    // Here too, and for a different reason from the two above: `Stability` emits no
+    // equality at all -- three inequalities per online unit and one per requirement -- so
+    // the row-index identity `Sclopf` depends on cannot be broken by where it sits. It is
+    // here anyway, with the other families that allocate columns late, because that keeps
+    // one place in this function where an optional family appears; and the invariant is
+    // asserted in its suite rather than assumed, since "emits no equality" is a property
+    // of the code and not of the signature.
+    Stability.constrain(network, snapshots, columns, declareLate, builder, stability)
+
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational
     // limits are no longer constants in the column bounds but multiples of a
@@ -827,38 +861,11 @@ object Lopf:
   def solve(input: Network, params: PdhgParams = PdhgParams.default): LopfResult =
     solve(input, Pdhg.Solver(params))
 
-  /** The same solve, with reservoir operational limits applied. */
-  def solve(input: Network, hydro: HydroOps.Config, solver: LpSolver): LopfResult =
-    solve(input, hydro, TerminalValue.off, solver)
-
-  /** The same solve, with operational limits and a terminal water value. */
-  def solve(
-      input: Network,
-      hydro: HydroOps.Config,
-      terminal: TerminalValue.Config,
-      solver: LpSolver,
-  ): LopfResult =
-    solve(input, hydro, terminal, BidLadder.off, solver)
-
-  /** The same solve, with a bid ladder as well.
-    *
-    * Five overloads is more than this wants, and the shape a fourth family should take is
-    * one `Options` carrying all of them. Not done here: it would touch about thirty test
-    * call sites alongside a new formulation, and this feature's record with combined
-    * changes is poor. The risk a reviewer raised for the positional form -- transposing
-    * two `off` values -- does not arise, because the three `Config` types are distinct and
-    * a swap does not compile.
-    */
-  def solve(
-      input: Network,
-      hydro: HydroOps.Config,
-      terminal: TerminalValue.Config,
-      ladder: BidLadder.Config,
-      solver: LpSolver,
-  ): LopfResult =
+  /** The same solve, with some of the optional constraint families applied. */
+  def solve(input: Network, families: Families, solver: LpSolver): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
-    val model    = build(network, hydro, terminal, ladder)
+    val model    = build(network, families)
     val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 
@@ -875,7 +882,7 @@ object Lopf:
     * constructing one to adjust a tolerance.
     */
   def solve(input: Network, solver: LpSolver): LopfResult =
-    solve(input, HydroOps.off, solver)
+    solve(input, Families.none, solver)
 
   /** Reject component classes the builder does not model.
     *

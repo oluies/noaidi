@@ -27,7 +27,7 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
 | `soc` | **needs no port** — `hydro_soc_initial` is PyPSA's own `state_of_charge_set`, which lives on the network and this port already honours. Equivalence established against NordPSA's callback by `generate_soc.py`, not asserted. |
 | `terminal_value` | ported as `TerminalValue` — a piecewise-concave value on `SOC[T]`, and the first thing here to add LP *columns* rather than only rows. |
 | `bid_ladder` | ported as `BidLadder` — reservoir dispatch split into K tiers with *rising* bids, so a piecewise-convex cost on `p_dispatch`. `TerminalValue` mirrored: a concave value with decreasing multipliers there, a convex cost with increasing ones here. K x T columns rather than K, since the tiers are per snapshot. |
-| `stability` | not ported. SCR and synchronous-generation floors with commitment, so it reaches into MILP rather than LP. |
+| `stability` | ported as `Stability` — rotational-energy and grid-strength floors over a **linearised** commitment. Not MILP: `p_online` is continuous, and `p <= u`, `p >= m_min·u` is the LP relaxation of unit commitment. This row said MILP for three families' worth of commits and was wrong. |
 
 ## Layout
 
@@ -51,8 +51,14 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
   the whole hour-by-hour dispatch PyPSA reaches under four bid-ladder configurations.
 - `nordic-today/` plus `nordic.json` — the real thing: the network `nordpsa today` builds,
   at daily resolution over 2023, solved with and without the bid-ladder callback.
+- `stability-*/` plus `stability.json` — seven networks and nineteen cases for the
+  rotational-energy and grid-strength floors, plus the technology table and zone data out of
+  `zones.yaml`, which no export can carry. `stability-toy` and the three `stability-exp-*`
+  are NordPSA's own, from `tests/unit/test_stability.py`; `stability-tight`, `-mustrun`,
+  `-joint`, `-weighted` and `-derated` are not, and each exists because a mutation of the
+  port survived without it. See below.
 - `generate.py`, `generate_soc.py`, `generate_terminal.py`, `generate_ladder.py`,
-  `generate_nordic.py` — regenerate the above.
+  `generate_nordic.py`, `generate_stability.py` — regenerate the above.
 
 The terminal-value fixture is scarce on purpose, and its first version was not. At 200
 `max_hours` the reservoir held more water than the week could use, so every profile
@@ -61,6 +67,34 @@ week's residual demand exceeds the starting level plus inflow, so holding a MWh 
 forgoes 39 EUR/MWh of the expensive generator — which is the number each segment's
 lambda is measured against, and what makes the concave curve hold exactly one segment
 at lambda 25 where a linear one holds none.
+
+## The stability fixtures, and why there are seven of them
+
+`stability-toy` is NordPSA's own: two zones where wind covers the load, so **nothing
+synchronous runs** unless a requirement makes it. That is the property that makes any
+comparison worth something — on a network where the machines were running anyway, every
+configuration returns the same answer.
+
+It is not enough on its own. Five more networks exist because a mutation of the port survived
+the suite built on it, and each one names the term that was invisible:
+
+| network | what it makes visible |
+| --- | --- |
+| `stability-tight` | the wind becalmed, so machines run for the load. `p <= u` is slack in `toy` — the requirement always pushes `u` **up** — so deleting that row changed nothing. |
+| `stability-mustrun` | a must-run unit, a fixed condenser and a CHP link. `K(z,t)`, the constant term, is zero in `toy`; and a link's coefficients carry an efficiency, which no classified link existed to test. |
+| `stability-joint` | a nearly islanded zone whose machine is online for its own reasons, so the joint share multiplies something other than zero — on all three of its terms. |
+| `stability-weighted` | a snapshot weighting of 3, so the slack's price is not its penalty. Every other network is at 1.0. |
+| `stability-derated` | a committable unit at `p_max_pu = 0.8`, so the online ceiling is not simply `p_nom`. Set on both sides of feasibility, so the ceiling decides the verdict. |
+
+Two more terms needed a config override rather than a network: `ibr_w` ships at 1.0 in every
+converter class, so the converter weight was a no-op until a case set 0.7 (upstream's own
+`gfm_share`), and `sync_weight` was only ever exercised at 0 — which is handled by dropping
+the zone from the sum, not by the multiplication — until a case set 0.5.
+
+The lesson is the one the ladder fixture already carried, in a different shape. There the
+fixture agreed with PyPSA on everything measurable while the quantity being measured was a
+solver's tie-break. Here every case agreed with PyPSA while eight separate terms of the
+formulation could be deleted without any of them noticing.
 
 ## Why one ladder fixture is synthetic and the other is not
 
@@ -112,6 +146,14 @@ uv pip install --python .venv/bin/python "pypsa==1.3.0" "highspy>=1.15" pandas n
 uv pip install --python .venv/bin/python -e ./NordPSA
 .venv/bin/python generate.py <output-dir>
 ```
+
+`generate_stability.py` records, per case, which of its series both a simplex and an
+interior-point solve of the same problem agree on, and the port asserts only those. These
+toys are degenerate in their zero-cost dispatch — two wind farms feeding one load through an
+unconstrained link can split it any way at all — so a dispatch comparison would otherwise be
+comparing tie-breaks. `presolve: off` is load-bearing in that probe: with presolve on, HiGHS
+solved the toys outright and returned the simplex answer, and the probe reported every case
+determined including the control.
 
 `generate_nordic.py` is the exception to "no data tokens are needed": it drives NordPSA's
 own `build_network` over the fetched Nordic dataset, so it needs `data/processed/` built

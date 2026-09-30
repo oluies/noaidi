@@ -58,7 +58,8 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
       )
 
   private def solve(name: String): LopfResult =
-    Lopf.solve(variant("terminal-week"), HydroOps.off, configOf(name), Pdhg.Solver(params))
+    Lopf.solve(
+      variant("terminal-week"), Lopf.Families(terminal = configOf(name)), Pdhg.Solver(params))
 
   /** Assert this port reaches PyPSA's objective and terminal level on one case. */
   private def agrees(name: String): LopfResult =
@@ -163,8 +164,8 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val lambda  = stored("concave-45")("lambda").num
     val model = Lopf.build(
       variant("terminal-week"),
-      HydroOps.off,
-      TerminalValue.Config(lambdaPerUnit = Map(unit -> lambda), profile = profile),
+      Lopf.Families(terminal =
+        TerminalValue.Config(lambdaPerUnit = Map(unit -> lambda), profile = profile)),
     )
     profile.zipWithIndex.foreach { (multiplier, k) =>
       val column = model.map.column(TerminalValue.Segment, s"$unit#$k", lastSnapshot)
@@ -189,7 +190,7 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
   )
 
   private def refusal(n: Network, config: TerminalValue.Config): String =
-    intercept[Lopf.UnsupportedNetwork](Lopf.build(n, HydroOps.off, config)).getMessage
+    intercept[Lopf.UnsupportedNetwork](Lopf.build(n, Lopf.Families(terminal = config))).getMessage
 
   test("a lambda that cannot price anything is refused, NaN included") {
     assume(fixtures, "reference/nordpsa terminal fixtures are not present")
@@ -267,12 +268,11 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val mine   = IndexedSeq(3.0, 0.5)
     val model = Lopf.build(
       twoReservoirs,
-      HydroOps.off,
-      TerminalValue.Config(
+      Lopf.Families(terminal = TerminalValue.Config(
         lambdaPerUnit = Map("Z hydro" -> 10.0, "Y hydro" -> 10.0),
         profile = shared,
         profileByUnit = Map("Y hydro" -> mine),
-      ),
+      )),
     )
     Seq("Z hydro" -> shared, "Y hydro" -> mine).foreach { (id, profile) =>
       profile.zipWithIndex.foreach { (multiplier, k) =>
@@ -333,8 +333,10 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
       variant("terminal-week"),
       // HydroOps on as well, so the model definitely contains inequality rows: without
       // any, the ordering cannot be got wrong and the test would pass vacuously.
-      HydroOps.Config(maxWeeklyFraction = 0.6),
-      TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0)),
+      Lopf.Families(
+        hydro = HydroOps.Config(maxWeeklyFraction = 0.6),
+        terminal = TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0)),
+      ),
     )
     val translation = model.translation
     val problem     = model.problem
@@ -345,7 +347,10 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     // state commit 7d15d7c found, where the config said "on" and emission selected
     // nothing, leaving the model byte-identical at 336 variables and 112 rows -- and
     // under that regression the scan below would have been green.
-    val plain = Lopf.build(variant("terminal-week"), HydroOps.Config(maxWeeklyFraction = 0.6))
+    val plain = Lopf.build(
+      variant("terminal-week"),
+      Lopf.Families(hydro = HydroOps.Config(maxWeeklyFraction = 0.6)),
+    )
     assert(
       problem.numVariables > plain.problem.numVariables,
       "no segment columns were added, so there is no terminal equality to misindex",
@@ -379,8 +384,8 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         variant("terminal-week"),
-        HydroOps.off,
-        TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0), profile = IndexedSeq(1.0, 2.0)),
+        Lopf.Families(terminal = TerminalValue.Config(
+          lambdaPerUnit = Map(unit -> 30.0), profile = IndexedSeq(1.0, 2.0))),
       )
     }
     // Asserts the reason that is true, not the one the message used to give. It said the
@@ -400,8 +405,8 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         variant("terminal-week"),
-        HydroOps.off,
-        TerminalValue.Config(lambdaPerUnit = Map(unit -> 30.0), profile = IndexedSeq.empty),
+        Lopf.Families(terminal = TerminalValue.Config(
+          lambdaPerUnit = Map(unit -> 30.0), profile = IndexedSeq.empty)),
       )
     }
     assert(refused.getMessage.contains("no segments"), refused.getMessage)
@@ -414,8 +419,7 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         variant("terminal-week"),
-        HydroOps.off,
-        TerminalValue.Config(lambdaPerUnit = Map("NO2 hydro" -> 30.0)),
+        Lopf.Families(terminal = TerminalValue.Config(lambdaPerUnit = Map("NO2 hydro" -> 30.0))),
       )
     }
     assert(refused.getMessage.contains("NO2 hydro"), refused.getMessage)
@@ -439,12 +443,11 @@ class TerminalValueSuite extends munit.FunSuite, NordPsaFixtures:
     val refused = intercept[Lopf.UnsupportedNetwork] {
       Lopf.build(
         twoUnits,
-        HydroOps.off,
-        TerminalValue.Config(
-          lambdaPerUnit = Map("Z hydro" -> 30.0, "Y hydro" -> 30.0),
-          profile = IndexedSeq(1.0),
-          profileByUnit = Map("Y hydro" -> IndexedSeq(2.0, 1.0, 0.5)),
-        ),
+        Lopf.Families(terminal = TerminalValue.Config(
+            lambdaPerUnit = Map("Z hydro" -> 30.0, "Y hydro" -> 30.0),
+            profile = IndexedSeq(1.0),
+            profileByUnit = Map("Y hydro" -> IndexedSeq(2.0, 1.0, 0.5)),
+          )),
       )
     }
     assert(refused.getMessage.contains("differing lengths"), refused.getMessage)

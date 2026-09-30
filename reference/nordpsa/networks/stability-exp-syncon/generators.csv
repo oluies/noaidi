@@ -1,0 +1,4 @@
+name,bus,p_nom,p_nom_extendable,p_min_pu,p_max_pu,carrier,marginal_cost,capital_cost
+Z wind,Z,1000.0,False,0.0,0.8,wind_onshore,0.0,0.0
+Z gas,Z,1000.0,False,0.0,1.0,gas,100.0,1.0
+Z syncon,Z,0.0,True,-0.01,-0.01,syncon,0.0,1.0

@@ -1,0 +1,3 @@
+name,bus0,bus1,carrier,efficiency,p_nom,p_min_pu
+A-B,A,B,AC,1.0,2000.0,-1.0
+A chp,A chp fuel,A,heat chp,0.25,400.0,0.0

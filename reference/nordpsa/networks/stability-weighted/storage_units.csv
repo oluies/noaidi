@@ -1,0 +1,2 @@
+name,bus,p_nom,carrier,marginal_cost,state_of_charge_initial,max_hours
+A hydro,A,1000.0,hydro,20.0,50000.0,100.0

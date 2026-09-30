@@ -87,7 +87,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
   /** This port's dispatch on `ladder-week` under one stored case. */
   private def trajectory(name: String): (LopfResult, IndexedSeq[Double]) =
     val network = variant("ladder-week")
-    val result  = Lopf.solve(network, HydroOps.off, TerminalValue.off, configOf(name), solver)
+    val result  = Lopf.solve(network, Lopf.Families(ladder = configOf(name)), solver)
     assertEquals(result.status, SolveStatus.Optimal, s"$name did not solve")
     (result, network.snapshots.indices.map(t => result.discharging(unit, t)))
 
@@ -193,7 +193,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
     // for output nobody produced.
     val network = variant("ladder-week")
     val config  = BidLadder.Config(3, 36.0)
-    val result  = Lopf.solve(network, HydroOps.off, TerminalValue.off, config, solver)
+    val result  = Lopf.solve(network, Lopf.Families(ladder = config), solver)
     val cap     = pNom / config.tiers
     val tolerance = 1e-6 * pNom
 
@@ -231,7 +231,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
       assertEqualsDouble(mine, pypsa, 1e-9, s"offset $k disagrees with NordPSA")
     }
 
-    val model = Lopf.build(network, HydroOps.off, TerminalValue.off, config)
+    val model = Lopf.build(network, Lopf.Families(ladder = config))
     network.snapshots.indices.foreach { t =>
       val weight = Periods.objectiveWeight(network, t)
       theirs.zipWithIndex.foreach { (offset, k) =>
@@ -267,7 +267,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
     // ladder, so a default that quietly emitted something would show up here.
     val network = variant("ladder-week")
     val plain   = Lopf.build(network)
-    val explicit = Lopf.build(network, HydroOps.off, TerminalValue.off, BidLadder.off)
+    val explicit = Lopf.build(network, Lopf.Families(ladder = BidLadder.off))
     assertEquals(explicit.problem.numVariables, plain.problem.numVariables)
     assertEquals(explicit.problem.numConstraints, plain.problem.numConstraints)
   }
@@ -280,8 +280,10 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
     // the same `r`. This family has now broken that twice, once in the very commit that
     // removed the previous instance, so it is pinned per family rather than once.
     val hydro = HydroOps.Config(maxWeeklyFraction = 0.6)
-    val model = Lopf.build(variant("ladder-week"), hydro, TerminalValue.off,
-      BidLadder.Config(3, 36.0))
+    val model = Lopf.build(
+      variant("ladder-week"),
+      Lopf.Families(hydro = hydro, ladder = BidLadder.Config(3, 36.0)),
+    )
     val problem = model.problem
     assert(problem.numConstraints > problem.numEqualities, "no inequality rows -- weak test")
 
@@ -289,7 +291,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
     // that never had a tier in it -- which is the state a NaN width reached in this
     // family's predecessor: config said "on", emission selected nothing, and the model
     // came out byte-identical.
-    val plain = Lopf.build(variant("ladder-week"), hydro)
+    val plain = Lopf.build(variant("ladder-week"), Lopf.Families(hydro = hydro))
     assert(
       problem.numVariables > plain.problem.numVariables,
       "no tier columns were added, so there is no tier equality to misindex",
@@ -324,7 +326,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
           tiers = nordic("ladder")("tiers").num.toInt,
           width = nordic("ladder")("width").num,
         )
-    val result = Lopf.solve(nordicNetwork, HydroOps.off, TerminalValue.off, config, solver)
+    val result = Lopf.solve(nordicNetwork, Lopf.Families(ladder = config), solver)
     assertEquals(result.status, SolveStatus.Optimal, s"nordic $name did not solve")
     result
 
@@ -412,7 +414,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
 
   private def refusal(n: Network, config: BidLadder.Config): String =
     intercept[Lopf.UnsupportedNetwork] {
-      Lopf.build(n, HydroOps.off, TerminalValue.off, config)
+      Lopf.build(n, Lopf.Families(ladder = config))
     }.getMessage
 
   test("a width that cannot make a ladder is refused, NaN included") {
@@ -508,7 +510,7 @@ class BidLadderSuite extends munit.FunSuite, NordPsaFixtures:
           "late hydro,b,100.0,0.0,hydro,0.1,3.0,True,10.0,2040,30.0\n"),
     )
     val config = BidLadder.Config(2, 10.0)
-    val model  = Lopf.build(periods, HydroOps.off, TerminalValue.off, config)
+    val model  = Lopf.build(periods, Lopf.Families(ladder = config))
     val store  = periods.require("StorageUnit")
     val active = periods.snapshots.indices.filter(t =>
       Periods.activeAt(periods, store, "late hydro", t))

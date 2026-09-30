@@ -1,0 +1,2991 @@
+{
+  "source": "NordPSA nordpsa/constraints/stability.py, networks from its own tests",
+  "versions": {
+    "pypsa": "1.3.0",
+    "pandas": "3.0.6"
+  },
+  "is_lp": true,
+  "zone_data": {
+    "x_t": 0.12,
+    "sync_weight": {
+      "DK": 0.35
+    },
+    "scr_exempt": [
+      "DK"
+    ],
+    "mapping": {
+      "Generator:hydro": "hydro_ror",
+      "StorageUnit:hydro": "hydro_res",
+      "Generator:nuclear": "nuclear",
+      "Generator:thermal": "thermal",
+      "Generator:gas": "gas",
+      "Link:heat chp": "chp",
+      "Generator:wind_onshore": "ibr_wind",
+      "Generator:wind_offshore": "ibr_wind",
+      "Generator:solar": "ibr_solar",
+      "StorageUnit:battery": "ibr_battery",
+      "StorageUnit:battery_gfm": "gfm",
+      "Generator:syncon": "syncon",
+      "Generator:syncon_fw": "syncon_fw",
+      "Generator:market": "hvdc"
+    },
+    "name_overrides": {
+      "nuclear exp": "nuclear_new",
+      "nuclear fixed": "nuclear_new"
+    }
+  },
+  "tech": {
+    "nuclear": {
+      "mode": "commit",
+      "H": 6.0,
+      "cos_phi": 0.9,
+      "xd2": 0.25,
+      "m_min": 1.0,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 6.666666666666666,
+      "s_coef": 3.003003003003003
+    },
+    "nuclear_new": {
+      "mode": "commit",
+      "H": 6.0,
+      "cos_phi": 0.9,
+      "xd2": 0.25,
+      "m_min": 0.6,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 6.666666666666666,
+      "s_coef": 3.003003003003003
+    },
+    "hydro_res": {
+      "mode": "commit",
+      "H": 3.0,
+      "cos_phi": 0.9,
+      "xd2": 0.22,
+      "m_min": 0.3,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 3.333333333333333,
+      "s_coef": 3.2679738562091503
+    },
+    "hydro_ror": {
+      "mode": "commit",
+      "H": 2.5,
+      "cos_phi": 0.9,
+      "xd2": 0.22,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 2.7777777777777777,
+      "s_coef": 3.2679738562091503
+    },
+    "thermal": {
+      "mode": "commit",
+      "H": 4.0,
+      "cos_phi": 0.85,
+      "xd2": 0.17,
+      "m_min": 0.4,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 4.705882352941177,
+      "s_coef": 4.056795131845841
+    },
+    "chp": {
+      "mode": "commit",
+      "H": 4.0,
+      "cos_phi": 0.85,
+      "xd2": 0.17,
+      "m_min": 0.4,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 4.705882352941177,
+      "s_coef": 4.056795131845841
+    },
+    "gas": {
+      "mode": "commit",
+      "H": 5.0,
+      "cos_phi": 0.85,
+      "xd2": 0.16,
+      "m_min": 0.4,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 5.882352941176471,
+      "s_coef": 4.201680672268907
+    },
+    "syncon": {
+      "mode": "syncon",
+      "H": 1.5,
+      "cos_phi": 1.0,
+      "xd2": 0.15,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 1.5,
+      "s_coef": 3.7037037037037033
+    },
+    "syncon_fw": {
+      "mode": "syncon",
+      "H": 6.0,
+      "cos_phi": 1.0,
+      "xd2": 0.15,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 6.0,
+      "s_coef": 3.7037037037037033
+    },
+    "gfm": {
+      "mode": "gfm",
+      "H": 3.0,
+      "cos_phi": 1.0,
+      "xd2": null,
+      "m_min": 0.0,
+      "avail": 0.9,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 1.2,
+      "e_coef": 3.0,
+      "s_coef": 1.2
+    },
+    "ibr_wind": {
+      "mode": "ibr",
+      "H": 0.0,
+      "cos_phi": 1.0,
+      "xd2": null,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 1.0,
+      "i_ibr": 1.2,
+      "sk_pu": 0.0,
+      "e_coef": 0.0,
+      "s_coef": 0.0
+    },
+    "ibr_solar": {
+      "mode": "ibr",
+      "H": 0.0,
+      "cos_phi": 1.0,
+      "xd2": null,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 1.0,
+      "i_ibr": 1.2,
+      "sk_pu": 0.0,
+      "e_coef": 0.0,
+      "s_coef": 0.0
+    },
+    "ibr_battery": {
+      "mode": "ibr",
+      "H": 0.0,
+      "cos_phi": 1.0,
+      "xd2": null,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 1.0,
+      "i_ibr": 1.2,
+      "sk_pu": 0.0,
+      "e_coef": 0.0,
+      "s_coef": 0.0
+    },
+    "hvdc": {
+      "mode": "ibr",
+      "H": 0.0,
+      "cos_phi": 1.0,
+      "xd2": null,
+      "m_min": 0.0,
+      "avail": 1.0,
+      "ibr_w": 0.0,
+      "i_ibr": 0.0,
+      "sk_pu": 0.0,
+      "e_coef": 0.0,
+      "s_coef": 0.0
+    }
+  },
+  "units": {
+    "stability-toy": {
+      "A wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 2000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 2000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B gas": {
+        "component": "Generator",
+        "carrier": "gas",
+        "tech": "gas",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 500.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 500.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 5.882352941176471,
+        "s_coef": 4.201680672268907
+      },
+      "A hydro": {
+        "component": "StorageUnit",
+        "carrier": "hydro",
+        "tech": "hydro_res",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "commit",
+        "m_min": 0.3,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 3.333333333333333,
+        "s_coef": 3.2679738562091503
+      }
+    },
+    "stability-tight": {
+      "A wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 2000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 2000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B gas": {
+        "component": "Generator",
+        "carrier": "gas",
+        "tech": "gas",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 500.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 500.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 5.882352941176471,
+        "s_coef": 4.201680672268907
+      },
+      "A hydro": {
+        "component": "StorageUnit",
+        "carrier": "hydro",
+        "tech": "hydro_res",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "commit",
+        "m_min": 0.3,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 3.333333333333333,
+        "s_coef": 3.2679738562091503
+      }
+    },
+    "stability-mustrun": {
+      "A wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 2000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 2000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B gas": {
+        "component": "Generator",
+        "carrier": "gas",
+        "tech": "gas",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 500.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 500.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 5.882352941176471,
+        "s_coef": 4.201680672268907
+      },
+      "A ror": {
+        "component": "Generator",
+        "carrier": "hydro",
+        "tech": "hydro_ror",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 200.0,
+        "eff": 1.0,
+        "fixed": true,
+        "cap": 200.0,
+        "mode": "commit",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 2.7777777777777777,
+        "s_coef": 3.2679738562091503
+      },
+      "A syncon": {
+        "component": "Generator",
+        "carrier": "syncon",
+        "tech": "syncon",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 100.0,
+        "eff": 1.0,
+        "fixed": true,
+        "cap": 100.0,
+        "mode": "syncon",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 1.5,
+        "s_coef": 3.7037037037037033
+      },
+      "A hydro": {
+        "component": "StorageUnit",
+        "carrier": "hydro",
+        "tech": "hydro_res",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "commit",
+        "m_min": 0.3,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 3.333333333333333,
+        "s_coef": 3.2679738562091503
+      },
+      "A chp": {
+        "component": "Link",
+        "carrier": "heat chp",
+        "tech": "chp",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 400.0,
+        "eff": 0.25,
+        "fixed": false,
+        "cap": 400.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 1.1764705882352942,
+        "s_coef": 1.0141987829614603
+      }
+    },
+    "stability-joint": {
+      "A wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 2000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 2000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 600.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 600.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B gas": {
+        "component": "Generator",
+        "carrier": "gas",
+        "tech": "gas",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 500.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 500.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 5.882352941176471,
+        "s_coef": 4.201680672268907
+      },
+      "B chp": {
+        "component": "Generator",
+        "carrier": "thermal",
+        "tech": "thermal",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 100.0,
+        "eff": 1.0,
+        "fixed": true,
+        "cap": 100.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 4.705882352941177,
+        "s_coef": 4.056795131845841
+      },
+      "A hydro": {
+        "component": "StorageUnit",
+        "carrier": "hydro",
+        "tech": "hydro_res",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "commit",
+        "m_min": 0.3,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 3.333333333333333,
+        "s_coef": 3.2679738562091503
+      }
+    },
+    "stability-weighted": {
+      "A wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 2000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 2000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B gas": {
+        "component": "Generator",
+        "carrier": "gas",
+        "tech": "gas",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 500.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 500.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 5.882352941176471,
+        "s_coef": 4.201680672268907
+      },
+      "A hydro": {
+        "component": "StorageUnit",
+        "carrier": "hydro",
+        "tech": "hydro_res",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "commit",
+        "m_min": 0.3,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 3.333333333333333,
+        "s_coef": 3.2679738562091503
+      }
+    },
+    "stability-derated": {
+      "A wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 2000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 2000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B wind": {
+        "component": "Generator",
+        "carrier": "wind_onshore",
+        "tech": "ibr_wind",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "ibr",
+        "m_min": 0.0,
+        "avail": 1.0,
+        "ibr_w": 1.0,
+        "e_coef": 0.0,
+        "s_coef": 0.0
+      },
+      "B gas": {
+        "component": "Generator",
+        "carrier": "gas",
+        "tech": "gas",
+        "zone": "B",
+        "extendable": false,
+        "p_nom": 500.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 500.0,
+        "mode": "commit",
+        "m_min": 0.4,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 5.882352941176471,
+        "s_coef": 4.201680672268907
+      },
+      "A hydro": {
+        "component": "StorageUnit",
+        "carrier": "hydro",
+        "tech": "hydro_res",
+        "zone": "A",
+        "extendable": false,
+        "p_nom": 1000.0,
+        "eff": 1.0,
+        "fixed": false,
+        "cap": 1000.0,
+        "mode": "commit",
+        "m_min": 0.3,
+        "avail": 1.0,
+        "ibr_w": 0.0,
+        "e_coef": 3.333333333333333,
+        "s_coef": 3.2679738562091503
+      }
+    }
+  },
+  "cases": {
+    "none": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 0.0,
+      "dispatch": {
+        "A wind": [
+          200.0,
+          200.0,
+          200.0,
+          200.0,
+          200.0,
+          200.0
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A-B": [
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0
+        ]
+      },
+      "network": "stability-toy",
+      "config": {},
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        }
+      }
+    },
+    "ek-system": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 21600.000000000004,
+      "dispatch": {
+        "A wind": [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003
+        ],
+        "A-B": [
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 2.0
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-system-w0": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 21600.000000000004,
+      "dispatch": {
+        "A wind": [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003
+        ],
+        "A-B": [
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "A hydro": [
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 2.0,
+        "weights": {
+          "B": 0.0
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-system-wa0": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 40799.99999999999,
+      "dispatch": {
+        "A wind": [
+          132.0,
+          132.0,
+          132.0,
+          132.0,
+          132.0,
+          132.0
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999
+        ],
+        "A hydro": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A-B": [
+          -668.0,
+          -668.0,
+          -668.0,
+          -668.0,
+          -668.0,
+          -668.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          170.0,
+          170.0,
+          170.0,
+          170.0,
+          170.0,
+          170.0
+        ],
+        "A hydro": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 1.0,
+        "weights": {
+          "A": 0.0
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-zone-b": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 40799.99999999999,
+      "dispatch": {
+        "A wind": [
+          132.0,
+          132.0,
+          132.0,
+          132.0,
+          132.0,
+          132.0
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999,
+          67.99999999999999
+        ],
+        "A hydro": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A-B": [
+          -668.0,
+          -668.0,
+          -668.0,
+          -668.0,
+          -668.0,
+          -668.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          170.0,
+          170.0,
+          170.0,
+          170.0,
+          170.0,
+          170.0
+        ],
+        "A hydro": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "dual": {
+        "B": [
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "floors": {
+          "B": 1.0
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-both": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 42000.0,
+      "dispatch": {
+        "A wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B wind": [
+          886.0,
+          886.0,
+          886.0,
+          886.0,
+          886.0,
+          886.0
+        ],
+        "B gas": [
+          33.99999999999999,
+          33.99999999999999,
+          33.99999999999999,
+          33.99999999999999,
+          33.99999999999999,
+          33.99999999999999
+        ],
+        "A hydro": [
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003
+        ],
+        "A-B": [
+          -620.0,
+          -620.0,
+          -620.0,
+          -620.0,
+          -620.0,
+          -620.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          85.0,
+          85.0,
+          85.0,
+          85.0,
+          85.0,
+          85.0
+        ],
+        "A hydro": [
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003
+        ],
+        "B": [
+          4.999999999999998,
+          4.999999999999998,
+          4.999999999999998,
+          4.999999999999998,
+          4.999999999999998,
+          4.999999999999998
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 2.5,
+        "floors": {
+          "B": 0.5
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-hard": {
+      "status": "warning",
+      "condition": "infeasible",
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 5.0,
+        "weights": {
+          "B": 0.0
+        }
+      },
+      "determined": {
+        "probed": false
+      }
+    },
+    "ek-soft": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 1036000.0000000002,
+      "dispatch": {
+        "A wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B wind": [
+          800.0,
+          800.0,
+          800.0,
+          800.0,
+          800.0,
+          800.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ],
+        "A-B": [
+          -500.0,
+          -500.0,
+          -500.0,
+          -500.0,
+          -500.0,
+          -500.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "A hydro": [
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0
+        ]
+      },
+      "slack": {
+        "SYSTEM": [
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 5.0,
+        "weights": {
+          "B": 0.0
+        },
+        "penalty": 100.0
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        },
+        "slack": {
+          "SYSTEM": true
+        }
+      }
+    },
+    "scr": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 15976.443702206205,
+      "dispatch": {
+        "A wind": [
+          966.8629691482816,
+          966.8629691482816,
+          966.8629691482816,
+          966.8629691482816,
+          966.8629691482816,
+          966.8629691482816
+        ],
+        "B wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          133.13703085171838,
+          133.13703085171838,
+          133.13703085171838,
+          133.13703085171838,
+          133.13703085171838,
+          133.13703085171838
+        ],
+        "A-B": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          443.7901028390613,
+          443.7901028390613,
+          443.7901028390613,
+          443.7901028390613,
+          443.7901028390613,
+          443.7901028390613
+        ]
+      },
+      "dual": {
+        "SCR_A": [
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041
+        ],
+        "SCR_B": [
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "scr": 1.5,
+        "exempt": []
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": true,
+          "B wind": true,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "scr-exempt-a": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 0.0,
+      "dispatch": {
+        "A wind": [
+          1100.0,
+          1100.0,
+          1100.0,
+          1100.0,
+          1100.0,
+          1100.0
+        ],
+        "B wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A-B": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "A hydro": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "dual": {
+        "SCR_B": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "scr": 1.5,
+        "exempt": [
+          "A"
+        ]
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": true,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "scr-joint": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 9440.625824030938,
+      "dispatch": {
+        "A wind": [
+          121.3281181330755,
+          121.3281181330755,
+          121.3281181330755,
+          121.3281181330755,
+          121.3281181330755,
+          121.3281181330755
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          78.6718818669245,
+          78.6718818669245,
+          78.6718818669245,
+          78.6718818669245,
+          78.6718818669245,
+          78.6718818669245
+        ],
+        "A-B": [
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          262.23960622308164,
+          262.23960622308164,
+          262.23960622308164,
+          262.23960622308164,
+          262.23960622308164,
+          262.23960622308164
+        ]
+      },
+      "dual": {
+        "SCR_A": [
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "scr": 1.5,
+        "exempt": [
+          "B"
+        ],
+        "joint": {
+          "A": {
+            "B": 0.5
+          }
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": true,
+          "B wind": true,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-and-scr": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 21600.000000000004,
+      "dispatch": {
+        "A wind": [
+          920.0,
+          1307.1895424836605,
+          920.0,
+          1307.1895424836605,
+          920.0,
+          1307.1895424836605
+        ],
+        "B wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003,
+          180.00000000000003
+        ],
+        "A-B": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0,
+          600.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003
+        ],
+        "SCR_A": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "SCR_B": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "sys_gws": 2.0,
+        "scr": 1.5,
+        "exempt": []
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": true,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-slack-online": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 96000.0,
+      "dispatch": {
+        "A wind": [
+          200.0,
+          200.0,
+          200.0,
+          200.0,
+          200.0,
+          200.0
+        ],
+        "B wind": [
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          800.0,
+          800.0,
+          800.0,
+          800.0,
+          800.0,
+          800.0
+        ],
+        "A-B": [
+          200.0,
+          200.0,
+          200.0,
+          200.0,
+          200.0,
+          200.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "A hydro": [
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ]
+      },
+      "network": "stability-tight",
+      "config": {
+        "sys_gws": 0.5
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": true,
+          "B wind": true,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": false
+        }
+      }
+    },
+    "ek-mustrun": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 3017.6470588235297,
+      "dispatch": {
+        "A wind": [
+          1051.8529411764707,
+          51.85294117647061,
+          51.85294117647061,
+          1051.8529411764707,
+          51.85294117647061,
+          1051.8529411764707
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A ror": [
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        "A syncon": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ],
+        "A chp fuel supply": [
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ],
+        "A hydro": [
+          9.147058823529406,
+          9.147058823529406,
+          9.147058823529406,
+          9.147058823529406,
+          9.147058823529406,
+          9.147058823529406
+        ],
+        "A-B": [
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0,
+          -600.0
+        ],
+        "A chp": [
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "A hydro": [
+          30.49019607843135,
+          30.49019607843135,
+          30.49019607843135,
+          30.49019607843135,
+          30.49019607843135,
+          30.49019607843135
+        ],
+        "A chp": [
+          400.0,
+          400.0,
+          400.0,
+          400.0,
+          400.0,
+          400.0
+        ]
+      },
+      "dual": {
+        "A": [
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003,
+          1.8000000000000003
+        ]
+      },
+      "network": "stability-mustrun",
+      "config": {
+        "floors": {
+          "A": 1.0
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A ror": true,
+          "A syncon": true,
+          "A chp fuel supply": true,
+          "A hydro": true,
+          "A-B": false,
+          "A chp": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true,
+          "A chp": true
+        }
+      }
+    },
+    "scr-mustrun": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 5199.0704779455245,
+      "dispatch": {
+        "A wind": [
+          933.6744126837873,
+          933.6744126837873,
+          933.6744126837873,
+          933.6744126837873,
+          933.6744126837873,
+          933.6744126837873
+        ],
+        "B wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A ror": [
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        "A syncon": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ],
+        "A chp fuel supply": [
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ],
+        "A hydro": [
+          27.325587316212705,
+          27.325587316212705,
+          27.325587316212705,
+          27.325587316212705,
+          27.325587316212705,
+          27.325587316212705
+        ],
+        "A-B": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ],
+        "A chp": [
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          91.08529105404236,
+          91.08529105404236,
+          91.08529105404236,
+          91.08529105404236,
+          91.08529105404236,
+          91.08529105404236
+        ],
+        "A chp": [
+          400.0,
+          400.0,
+          400.0,
+          400.0,
+          400.0,
+          400.0
+        ]
+      },
+      "dual": {
+        "SCR_A": [
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041
+        ],
+        "SCR_B": [
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041
+        ]
+      },
+      "network": "stability-mustrun",
+      "config": {
+        "scr": 1.5,
+        "exempt": []
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": true,
+          "B wind": true,
+          "B gas": true,
+          "A ror": true,
+          "A syncon": true,
+          "A chp fuel supply": true,
+          "A hydro": true,
+          "A-B": true,
+          "A chp": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true,
+          "A chp": true
+        }
+      }
+    },
+    "ek-system-half": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 13817.647058823528,
+      "dispatch": {
+        "A wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B wind": [
+          861.8529411764706,
+          861.8529411764706,
+          861.8529411764706,
+          861.8529411764706,
+          861.8529411764706,
+          861.8529411764706
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A ror": [
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        "A syncon": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ],
+        "A chp fuel supply": [
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ],
+        "A hydro": [
+          99.14705882352942,
+          99.14705882352942,
+          99.14705882352942,
+          99.14705882352942,
+          99.14705882352942,
+          99.14705882352942
+        ],
+        "A-B": [
+          -561.8529411764706,
+          -561.8529411764706,
+          -561.8529411764706,
+          -561.8529411764706,
+          -561.8529411764706,
+          -561.8529411764706
+        ],
+        "A chp": [
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          330.49019607843144,
+          330.49019607843144,
+          330.49019607843144,
+          330.49019607843144,
+          330.49019607843144,
+          330.49019607843144
+        ],
+        "A chp": [
+          400.0,
+          400.0,
+          400.0,
+          400.0,
+          400.0,
+          400.0
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          3.6000000000000005,
+          3.6000000000000005,
+          3.6000000000000005,
+          3.6000000000000005,
+          3.6000000000000005,
+          3.6000000000000005
+        ]
+      },
+      "network": "stability-mustrun",
+      "config": {
+        "sys_gws": 1.0,
+        "weights": {
+          "A": 0.5
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A ror": true,
+          "A syncon": true,
+          "A chp fuel supply": true,
+          "A hydro": true,
+          "A-B": false,
+          "A chp": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true,
+          "A chp": true
+        }
+      }
+    },
+    "scr-joint-online": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 80594.9162838689,
+      "dispatch": {
+        "A wind": [
+          842.5635464516389,
+          842.5635464516389,
+          842.5635464516389,
+          842.5635464516389
+        ],
+        "B wind": [
+          540.0,
+          540.0,
+          540.0,
+          540.0
+        ],
+        "B gas": [
+          160.0,
+          160.0,
+          160.0,
+          160.0
+        ],
+        "B chp": [
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        "A hydro": [
+          57.436453548361136,
+          57.436453548361136,
+          57.436453548361136,
+          57.436453548361136
+        ],
+        "A-B": [
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          400.0,
+          400.0,
+          400.0,
+          400.0
+        ],
+        "A hydro": [
+          191.45484516120382,
+          191.45484516120382,
+          191.45484516120382,
+          191.45484516120382
+        ]
+      },
+      "dual": {
+        "SCR_A": [
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041,
+          1.613782192142041
+        ]
+      },
+      "network": "stability-joint",
+      "config": {
+        "scr": 1.5,
+        "exempt": [
+          "B"
+        ],
+        "joint": {
+          "A": {
+            "B": 0.5
+          }
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": true,
+          "B wind": true,
+          "B gas": true,
+          "B chp": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-soft-weighted": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 3108000.0000000005,
+      "dispatch": {
+        "A wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B wind": [
+          800.0,
+          800.0,
+          800.0,
+          800.0,
+          800.0,
+          800.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ],
+        "A-B": [
+          -500.0,
+          -500.0,
+          -500.0,
+          -500.0,
+          -500.0,
+          -500.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "A hydro": [
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0,
+          1000.0
+        ]
+      },
+      "slack": {
+        "SYSTEM": [
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667,
+          1666.666666666667
+        ]
+      },
+      "dual": {
+        "SYSTEM": [
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ]
+      },
+      "network": "stability-weighted",
+      "config": {
+        "sys_gws": 5.0,
+        "weights": {
+          "B": 0.0
+        },
+        "penalty": 100.0
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        },
+        "slack": {
+          "SYSTEM": true
+        }
+      }
+    },
+    "scr-gfm-share": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 11604.885122994554,
+      "dispatch": {
+        "A wind": [
+          1003.2926239750454,
+          1003.2926239750454,
+          1003.2926239750454,
+          1003.2926239750454,
+          1003.2926239750454,
+          1003.2926239750454
+        ],
+        "B wind": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          96.7073760249546,
+          96.7073760249546,
+          96.7073760249546,
+          96.7073760249546,
+          96.7073760249546,
+          96.7073760249546
+        ],
+        "A-B": [
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0,
+          300.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A hydro": [
+          322.3579200831821,
+          322.3579200831821,
+          322.3579200831821,
+          322.3579200831821,
+          322.3579200831821,
+          322.3579200831821
+        ]
+      },
+      "dual": {
+        "SCR_A": [
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712
+        ],
+        "SCR_B": [
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712,
+          1.674586597834712
+        ]
+      },
+      "network": "stability-toy",
+      "config": {
+        "scr": 1.5,
+        "exempt": [],
+        "tech": {
+          "ibr_wind": {
+            "ibr_w": 0.7
+          }
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": true,
+          "B wind": true,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": true
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "ek-derated-hard": {
+      "status": "warning",
+      "condition": "infeasible",
+      "network": "stability-derated",
+      "config": {
+        "floors": {
+          "B": 2.6
+        }
+      },
+      "determined": {
+        "probed": false
+      }
+    },
+    "ek-derated": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 81599.99999999999,
+      "dispatch": {
+        "A wind": [
+          64.0,
+          64.0,
+          64.0,
+          64.0,
+          64.0,
+          64.0
+        ],
+        "B wind": [
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0,
+          900.0
+        ],
+        "B gas": [
+          135.99999999999997,
+          135.99999999999997,
+          135.99999999999997,
+          135.99999999999997,
+          135.99999999999997,
+          135.99999999999997
+        ],
+        "A hydro": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "A-B": [
+          -736.0,
+          -736.0,
+          -736.0,
+          -736.0,
+          -736.0,
+          -736.0
+        ]
+      },
+      "online": {
+        "B gas": [
+          340.0,
+          340.0,
+          340.0,
+          340.0,
+          340.0,
+          340.0
+        ],
+        "A hydro": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "dual": {
+        "B": [
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999,
+          6.799999999999999
+        ]
+      },
+      "network": "stability-derated",
+      "config": {
+        "floors": {
+          "B": 2.0
+        }
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "A wind": false,
+          "B wind": false,
+          "B gas": true,
+          "A hydro": true,
+          "A-B": false
+        },
+        "online": {
+          "B gas": true,
+          "A hydro": true
+        }
+      }
+    },
+    "exp-syncon": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 203.32346001305288,
+      "dispatch": {
+        "Z wind": [
+          502.0332346001305,
+          502.0332346001305,
+          502.0332346001305,
+          502.0332346001305
+        ],
+        "Z gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "Z syncon": [
+          -2.033234600130529,
+          -2.033234600130529,
+          -2.033234600130529,
+          -2.033234600130529
+        ]
+      },
+      "online": {
+        "Z gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "dual": {
+        "SCR_Z": [
+          -0.0,
+          -0.0,
+          0.2710979466840705,
+          -0.0
+        ]
+      },
+      "capacity": {
+        "Z syncon": 203.32346001305288
+      },
+      "network": "stability-exp-syncon",
+      "config": {
+        "scr": 1.5,
+        "exempt": []
+      },
+      "build": {
+        "syncon_cost": 1.0
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "Z wind": true,
+          "Z gas": true,
+          "Z syncon": true
+        },
+        "online": {
+          "Z gas": true
+        },
+        "capacity": {
+          "Z syncon": true
+        }
+      }
+    },
+    "exp-gfm": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 694.4444444444443,
+      "dispatch": {
+        "Z wind": [
+          500.0,
+          499.99999999999994,
+          499.99999999999994,
+          499.99999999999994
+        ],
+        "Z gas": [
+          -0.0,
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        "Z battery gfm": [
+          -0.0,
+          5.684341886080802e-14,
+          5.684341886080802e-14,
+          5.684341886080802e-14
+        ]
+      },
+      "online": {
+        "Z gas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "dual": {
+        "SCR_Z": [
+          0.2314814814814814,
+          0.23148148148148145,
+          0.23148148148148145,
+          0.23148148148148145
+        ]
+      },
+      "capacity": {
+        "Z battery gfm": 694.4444444444443
+      },
+      "network": "stability-exp-gfm",
+      "config": {
+        "scr": 1.5,
+        "exempt": []
+      },
+      "build": {
+        "gfm_cost": 1.0
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "Z wind": true,
+          "Z gas": true,
+          "Z battery gfm": false
+        },
+        "online": {
+          "Z gas": true
+        },
+        "capacity": {
+          "Z battery gfm": true
+        }
+      }
+    },
+    "exp-gas": {
+      "status": "ok",
+      "condition": "optimal",
+      "objective": 25147.44487224362,
+      "dispatch": {
+        "Z wind": [
+          437.5218760938047,
+          437.5218760938047,
+          437.5218760938047,
+          437.5218760938047
+        ],
+        "Z gas": [
+          62.47812390619533,
+          62.47812390619533,
+          62.47812390619533,
+          62.47812390619533
+        ]
+      },
+      "online": {
+        "Z gas": [
+          156.1953097654883,
+          156.1953097654883,
+          156.1953097654883,
+          156.1953097654883
+        ]
+      },
+      "dual": {
+        "SCR_Z": [
+          8.330416520826043,
+          8.538676933846693,
+          8.330416520826043,
+          8.330416520826043
+        ]
+      },
+      "capacity": {
+        "Z gas": 156.1953097654883
+      },
+      "network": "stability-exp-gas",
+      "config": {
+        "scr": 1.5,
+        "exempt": []
+      },
+      "build": {
+        "gas_ext": true
+      },
+      "determined": {
+        "probed": true,
+        "same_objective": true,
+        "dispatch": {
+          "Z wind": true,
+          "Z gas": true
+        },
+        "online": {
+          "Z gas": true
+        },
+        "capacity": {
+          "Z gas": true
+        }
+      }
+    }
+  },
+  "refused": {
+    "unknown-zone": {
+      "refused": true,
+      "message": "stability.scr_joint: 'C' m\u00e5ste vara en zon i scr_exempt"
+    },
+    "host-exempt": {
+      "refused": true,
+      "message": "stability.scr_joint: v\u00e4rdzonen 'B' saknas eller \u00e4r undantagen"
+    },
+    "member-not-exempt": {
+      "refused": true,
+      "message": "stability.scr_joint: v\u00e4rdzonen 'B' saknas eller \u00e4r undantagen"
+    },
+    "share-zero": {
+      "refused": true,
+      "message": "stability.scr_joint: andelen f\u00f6r 'B' ska ligga i (0, 1]"
+    },
+    "share-above-1": {
+      "refused": true,
+      "message": "stability.scr_joint: andelen f\u00f6r 'B' ska ligga i (0, 1]"
+    },
+    "free-inertia": {
+      "refused": true,
+      "message": "stability: m_min = 0 ger gratis tr\u00f6ghet f\u00f6r ['B gas'] (bara must-run-enheter f\u00e5r ha m_min 0)"
+    }
+  },
+  "controls": {
+    "reference_is_idle": true,
+    "reference_max_synchronous_mw": 0.0,
+    "system_costs_more": true,
+    "zone_floor_runs_local_gas": true,
+    "hard_is_infeasible": true,
+    "soft_is_feasible": true,
+    "scr_costs_more": true,
+    "sync_weight_changes_the_answer": true,
+    "weighting_b_to_zero_changes_nothing": true,
+    "tight_runs_for_the_load": true,
+    "tight_requirement_is_below_what_the_load_forces": true,
+    "mustrun_constant_is_a_real_share": true,
+    "syncon_constant_is_a_real_share": true,
+    "gfm_share_changes_the_answer": true,
+    "derated_ceiling_decides_feasibility": true,
+    "weighting_prices_the_slack_higher": true,
+    "weighting_leaves_the_shortfall_alone": true,
+    "joint_member_has_stiffness_online": true,
+    "joint_member_has_a_constant": true,
+    "chp_link_carries_the_requirement": true,
+    "fractional_weight_changes_the_answer": true,
+    "reference_has_wind": true
+  }
+}

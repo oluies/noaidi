@@ -1,0 +1,7 @@
+name,bus,p_nom,p_min_pu,p_max_pu,carrier,marginal_cost
+A wind,A,2000.0,0.0,0.9,wind_onshore,0.0
+B wind,B,1000.0,0.0,0.9,wind_onshore,0.0
+B gas,B,500.0,0.0,1.0,gas,100.0
+A ror,A,200.0,0.5,0.5,hydro,0.0
+A syncon,A,100.0,-0.01,-0.01,syncon,0.0
+A chp fuel supply,A chp fuel,2000.0,0.0,1.0,chp fuel,2.0

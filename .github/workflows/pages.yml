@@ -1,0 +1,79 @@
+# Publishes modules/demo-js to GitHub Pages.
+#
+# The page is built here rather than committed: `main.js` is a megabyte of generated
+# JavaScript and `schema.json` is a copy of a file already in the repository, so both are
+# gitignored and produced by this job from the sources.
+#
+# `fullLinkJS` rather than `fastLinkJS` -- the optimised output is 1.07 MB against 1.7 MB,
+# and 171 KB over the wire once the server gzips it.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    # Only when something the page is built from changes. The demo is not the point of the
+    # repository and a full Scala.js link on every documentation commit is waste.
+    paths:
+      - 'modules/demo-js/**'
+      - 'modules/prima-core/**'
+      - 'modules/network-model/**'
+      - 'modules/network-pf/**'
+      - 'modules/network-lopf/**'
+      - 'build.sbt'
+      - 'project/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a queued one supersedes rather than cancels: a half-deployed
+# page is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+
+      - name: Link the demo
+        run: sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; demoJs/fullLinkJS'
+
+      - name: Assemble the site
+        run: |
+          set -euo pipefail
+          out=site
+          mkdir -p "$out"
+          cp modules/demo-js/public/index.html "$out/"
+          cp modules/demo-js/public/screenshot.png "$out/"
+          cp target/out/sjs1/scala-3.9.0/demo-js/demo-js-opt/main.js "$out/"
+          # The page fetches this at run time; it is the same file network-model's own tests
+          # read, so the demo cannot drift from the schema the JVM build is tested against.
+          cp reference/goldens/schema.json "$out/"
+          ls -la "$out"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -57,8 +57,11 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
   are NordPSA's own, from `tests/unit/test_stability.py`; `stability-tight`, `-mustrun`,
   `-joint`, `-weighted` and `-derated` are not, and each exists because a mutation of the
   port survived without it. See below.
+- `sclopf-families/` plus `sclopf.json` — the four families applied to a
+  **security-constrained** dispatch, each on its own and in combination, solved by PyPSA's
+  own `optimize_security_constrained`. See below for why this one is separate.
 - `generate.py`, `generate_soc.py`, `generate_terminal.py`, `generate_ladder.py`,
-  `generate_nordic.py`, `generate_stability.py` — regenerate the above.
+  `generate_nordic.py`, `generate_stability.py`, `generate_sclopf.py` — regenerate the above.
 
 The terminal-value fixture is scarce on purpose, and its first version was not. At 200
 `max_hours` the reservoir held more water than the week could use, so every profile
@@ -67,6 +70,46 @@ week's residual demand exceeds the starting level plus inflow, so holding a MWh 
 forgoes 39 EUR/MWh of the expensive generator — which is the number each segment's
 lambda is measured against, and what makes the concave curve hold exactly one segment
 at lambda 25 where a linear one holds none.
+
+## The SCLOPF fixture, and the invariant that had no consumer
+
+Each family's suite asserts one thing it cannot itself exercise: that every row the family
+emits keeps the standard-form index its original row had. `Sclopf.build` rebuilds the base
+model row by row and is the only thing that depends on that — so until the families could be
+passed to it, the invariant had three assertions and **no consumer**.
+
+Two of the families, `terminal_value` and `bid_ladder`, emit an *equality*, which has to land
+before the first inequality `Lopf.build` emits or every one of its rows is misindexed. That
+defect has appeared three times in this repository, once in the commit that removed the
+previous instance. `sclopf-families` is the fixture that makes those assertions about
+something: moving either family's equality after the inequalities now makes
+`Sclopf.build` refuse, by name, with the row it could not place.
+
+The requirement on this fixture is stricter than for any single family. The security rows have
+to bind, each family has to bind, **and** the two together have to differ from either alone —
+a setting where the family makes the contingency limits slack proves only that rows can be
+added to a model. Several of the settings swept for these cases did exactly that, and one of
+them is kept as a test: a weekly hydro ceiling of 0.30 binds hard enough on its own that plain
+and secure both cost 571,200, and the contingency limits do nothing at all. The generator
+measures all three conditions per case and the suite reads them rather than recomputing them
+from the port's own numbers.
+
+The line rating is 150 on all three lines and was swept for: at 200 the security rows are
+slack, at 130 the secure problem is so tight that nothing can move it. At 150 the plain optimum
+costs 336,000 and the secure one 448,034.
+
+One incidental result worth recording. Every **secure** case comes back fully determined,
+while every **plain** case but one does not: with 300 MW of gas at a flat 40 EUR/MWh available
+in every hour, moving the reservoir's water between hours costs nothing, so dispatch, flow and
+state of charge are all tie-breaks. The contingency limits are what pin the flow pattern. So
+the plain cases are asserted on the objective and the secure ones on everything — which
+happens to suit, since the secure answer is what the fixture is about.
+
+PyPSA has no `extra_functionality` hook on `optimize_security_constrained`, so the callback is
+run by wrapping `solve_model`: PyPSA builds the dispatch model and its own outage rows, the
+callback adds its rows, then PyPSA solves. Nothing on the generator side reimplements the
+outage factors, which is the point — a reimplementation could agree with itself and disagree
+with PyPSA.
 
 ## The stability fixtures, and why there are seven of them
 

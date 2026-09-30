@@ -1,0 +1,4 @@
+name,bus,p_nom,carrier,marginal_cost
+B gas,B,300.0,gas,40.0
+C dear,C,300.0,gas,90.0
+C wind,C,100.0,wind_onshore,0.0

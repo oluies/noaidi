@@ -68,26 +68,58 @@ object Sclopf:
       outages: Option[IndexedSeq[Outage]] = None,
       params: PdhgParams = PdhgParams.default,
   ): LopfResult =
-    solve(input, outages, Pdhg.Solver(params))
+    solve(input, outages, Lopf.Families.none, Pdhg.Solver(params))
 
   /** The same solve, with the backend chosen by the caller. See `Lopf.solve`. */
   def solve(input: Network, outages: Option[IndexedSeq[Outage]], solver: LpSolver): LopfResult =
+    solve(input, outages, Lopf.Families.none, solver)
+
+  /** The same solve, with some of the optional constraint families applied as well.
+    *
+    * Secure dispatch and the NordPSA families are independent questions and a study asks
+    * both at once: a reservoir fleet does not stop needing its operating limits because the
+    * dispatch has to survive an outage, and a rotational-energy floor is about the case
+    * where something has just tripped.
+    *
+    * What makes this work is a property the families were each written to have and none of
+    * them could check on its own. [[build]] rebuilds the base model row by row, and that copy
+    * requires every original row to map to the standard-form row of the same index -- so a
+    * family emitting an equality '''after''' any inequality breaks it. Each family's suite
+    * asserts that invariant against a model it builds itself; this is the path that actually
+    * depends on it.
+    */
+  def solve(
+      input: Network,
+      outages: Option[IndexedSeq[Outage]],
+      families: Lopf.Families,
+      solver: LpSolver,
+  ): LopfResult =
     val expanded = StandardTypes.expand(input)
     val network  = Active.only(expanded)
-    val model    = build(network, outages)
+    val model    = build(network, outages, families)
     val solution = solver.solve(model.problem)
     LopfResult(network, model, solution, Active.inactive(expanded))
 
   /** Build the LP: the dispatch model plus one rating pair per (branch, outage,
     * snapshot).
+    *
+    * `families` is threaded straight into [[Lopf.build]] and nothing here reads it. That is
+    * the whole of the integration, and it is worth saying that it is: the security rows
+    * constrain '''branch flows''' against static ratings, and no family touches a branch
+    * flow or a branch rating. A family that did would need its own scope note here, the way
+    * extendable transmission has one.
     */
-  def build(input: Network, outages: Option[IndexedSeq[Outage]] = None): Lopf.Model =
+  def build(
+      input: Network,
+      outages: Option[IndexedSeq[Outage]] = None,
+      families: Lopf.Families = Lopf.Families.none,
+  ): Lopf.Model =
     // Before `Topology` and `Lodf` below, not only inside `Lopf.build`: the
     // outage factors are computed from susceptance, so an unexpanded network
     // would give the dispatch model the right impedances and the contingency
     // rows the wrong ones.
     val network = Active.only(StandardTypes.expand(input))
-    val base    = Lopf.build(network)
+    val base    = Lopf.build(network, families)
 
     // The empty case is exactly the dispatch model, and returning before any
     // factors are computed matters: building them can refuse a network for a
@@ -172,6 +204,15 @@ object Sclopf:
     // single standard-form row of the same index. `Direct` and `Negated` both
     // satisfy that; only `Range` (one original row becoming two) and a
     // reordering would break it.
+    //
+    // This is the check the optional families are written against, and until they could be
+    // passed in it was the only consumer of an invariant nothing exercised. Two of them --
+    // `TerminalValue` and `BidLadder` -- emit an equality, so they have to land before the
+    // first inequality `Lopf.build` emits or every one of their rows takes a standard-form
+    // index that differs from its original. That defect has appeared three times in this
+    // code base, once in the very commit that removed the previous instance; it is pinned
+    // per family in their own suites, and reaching it from here is what makes those
+    // assertions about something.
     //
     // Demanding `Direct` alone was too strong and regressed real networks:
     // `Lopf.build` emits global constraints through `lessThan`, which the

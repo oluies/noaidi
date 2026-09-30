@@ -64,35 +64,10 @@ class StabilitySuite extends munit.FunSuite, NordPsaFixtures:
     * digit would make this suite agree with a PyPSA run that answered a different
     * question.
     */
-  private lazy val tech: Map[String, Stability.Tech] =
-    reference("tech").obj.map { (name, t) =>
-      val mode = Stability.Mode.parse(t("mode").str)
-        .getOrElse(fail(s"the reference file has an unknown mode '${t("mode").str}' for $name"))
-      def num(key: String, fallback: Double): Double =
-        t.obj.get(key).filterNot(_.isNull).map(_.num).getOrElse(fallback)
-      name -> Stability.Tech(
-        mode = mode,
-        inertiaSeconds = num("H", 0.0),
-        cosPhi = num("cos_phi", 1.0),
-        subtransientReactance = num("xd2", Double.NaN),
-        minStableFraction = num("m_min", 0.0),
-        availability = num("avail", 1.0),
-        converterWeight = num("ibr_w", 0.0),
-        shortCircuitPerUnit = num("sk_pu", 0.0),
-      )
-    }.toMap
+  private lazy val tech: Map[String, Stability.Tech] = stabilityTech(reference)
 
   /** `zones.yaml`'s data half: what the units are, not what the run asks for. */
-  private lazy val zoneData: Stability.Config =
-    val z = reference("zone_data")
-    Stability.Config(
-      tech = tech,
-      mapping = z("mapping").obj.map((k, v) => k -> v.str).toMap,
-      nameOverrides = z("name_overrides").obj.map((k, v) => k -> v.str).toMap,
-      transformerReactance = z("x_t").num,
-      syncWeight = z("sync_weight").obj.map((k, v) => k -> v.num).toMap,
-      scrExempt = z("scr_exempt").arr.map(_.str).toSet,
-    )
+  private lazy val zoneData: Stability.Config = stabilityZoneData(reference)
 
   /** One case's configuration, rebuilt from what the generator recorded it as. */
   private def configOf(name: String): Stability.Config =

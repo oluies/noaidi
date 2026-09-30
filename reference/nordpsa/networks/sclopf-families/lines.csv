@@ -1,0 +1,4 @@
+name,bus0,bus1,x,s_nom
+AB,A,B,0.1,150.0
+BC,B,C,0.1,150.0
+AC,A,C,0.1,150.0

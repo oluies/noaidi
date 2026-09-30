@@ -35,3 +35,42 @@ trait NordPsaFixtures extends CsvFixtures:
   /** A reference file, as parsed JSON. */
   protected def referenceJson(file: String): ujson.Value =
     ujson.read(Files.readString(root.resolve(file)))
+
+  /** NordPSA's technology table, as a reference file records it.
+    *
+    * Here rather than in one suite because two read it, and because it is the part of the
+    * stability configuration most expensive to get wrong by hand: fourteen classes times
+    * eight numbers, and a single wrong digit makes a suite agree with a PyPSA run that
+    * answered a different question. It lives in `config/zones.yaml`, which no network export
+    * can carry, so both sides have to read it from the same place or drift.
+    */
+  protected def stabilityTech(reference: ujson.Value): Map[String, Stability.Tech] =
+    reference("tech").obj.map { (name, t) =>
+      val mode = Stability.Mode.parse(t("mode").str).getOrElse(
+        throw new IllegalArgumentException(
+          s"the reference file gives $name an unknown mode '${t("mode").str}'"))
+      def num(key: String, fallback: Double): Double =
+        t.obj.get(key).filterNot(_.isNull).map(_.num).getOrElse(fallback)
+      name -> Stability.Tech(
+        mode = mode,
+        inertiaSeconds = num("H", 0.0),
+        cosPhi = num("cos_phi", 1.0),
+        subtransientReactance = num("xd2", Double.NaN),
+        minStableFraction = num("m_min", 0.0),
+        availability = num("avail", 1.0),
+        converterWeight = num("ibr_w", 0.0),
+        shortCircuitPerUnit = num("sk_pu", 0.0),
+      )
+    }.toMap
+
+  /** The zone half of `zones.yaml`: what the units are, not what a run asks for. */
+  protected def stabilityZoneData(reference: ujson.Value): Stability.Config =
+    val z = reference("zone_data")
+    Stability.Config(
+      tech = stabilityTech(reference),
+      mapping = z("mapping").obj.map((k, v) => k -> v.str).toMap,
+      nameOverrides = z("name_overrides").obj.map((k, v) => k -> v.str).toMap,
+      transformerReactance = z("x_t").num,
+      syncWeight = z("sync_weight").obj.map((k, v) => k -> v.num).toMap,
+      scrExempt = z("scr_exempt").arr.map(_.str).toSet,
+    )

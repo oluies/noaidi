@@ -59,6 +59,7 @@ ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.26"
 val ojalgoVersion = "57.3.1"
+val scalajsDomVersion = "2.8.1"
 
 // Note for CI and for anyone reading test output: under sbt 2 the `test` task is
 // incremental and will happily report success having run nothing. Use `testFull`
@@ -86,6 +87,67 @@ lazy val primaCore = project
     // appears to set.
     Test / fork := true,
     Test / javaOptions += "--add-modules=jdk.incubator.vector",
+  )
+
+// ---------------------------------------------------------------------------- Scala.js
+//
+// The same sources as `primaCore` and `networkModel`, compiled to JavaScript. Not a
+// `crossProject`: that would move every source file into a `.jvm`/`.js` layout and touch
+// every module that depends on these two, which is a large change to make in order to
+// answer a question. These projects point `unmanagedSourceDirectories` at the existing
+// sources instead, so there is exactly one copy of the code and the JVM build is untouched.
+//
+// What has to be excluded, and it is one file: `kernels/VectorKernels.scala` uses
+// `jdk.incubator.vector`. It already sits behind the `Kernels` trait with `ScalaKernels`
+// as the fallback, and nothing inside `prima-core` constructs it -- a caller opts in -- so
+// the linker would drop it anyway. It is excluded explicitly so that a future reference to
+// it fails here rather than as a confusing link error.
+//
+// Nothing else in either module needed changing. `Unsafe` is two `asInstanceOf` casts,
+// there are no threads and no `Future`, and the only `java.nio.file` in `network-model` is
+// in `Schema.fromFile` and `CsvReader.read`, which the Scala.js linker drops as
+// unreachable -- a browser fetches over HTTP rather than reading a path.
+lazy val scalaJsSettings = Seq(
+  // `%%%` is not available in the sbt 2 build of sbt-scalajs, so the platform suffix is
+  // written out. `_sjs1_3` is exactly what `%%%` would have produced: Scala.js 1.x,
+  // Scala 3.
+  libraryDependencies += "org.scalameta" % s"munit_sjs1_3" % munitVersion % Test,
+  // The JVM build fails a run that executed nothing; the JS build has the same hazard and
+  // the same answer.
+  Test / testOptions += Tests.Argument("+l"),
+)
+
+lazy val primaCoreJs = project
+  .in(file("modules/prima-core-js"))
+  .enablePlugins(ScalaJSPlugin)
+  .settings(scalaJsSettings)
+  .settings(
+    name := "prima-core-js",
+    Compile / unmanagedSourceDirectories := Seq((primaCore / Compile / scalaSource).value),
+    Compile / unmanagedSources / excludeFilter := HiddenFileFilter || "VectorKernels.scala",
+  )
+
+lazy val networkModelJs = project
+  .in(file("modules/network-model-js"))
+  .enablePlugins(ScalaJSPlugin)
+  .settings(scalaJsSettings)
+  .settings(
+    name := "network-model-js",
+    libraryDependencies += "com.lihaoyi" % "upickle_sjs1_3" % upickleVersion,
+    Compile / unmanagedSourceDirectories := Seq((networkModel / Compile / scalaSource).value),
+  )
+
+// The demo itself: a page that builds a linear program from what the sliders say and
+// solves it with Prima, in the browser, with no server in the loop.
+lazy val demoJs = project
+  .in(file("modules/demo-js"))
+  .enablePlugins(ScalaJSPlugin)
+  .dependsOn(primaCoreJs, networkModelJs)
+  .settings(scalaJsSettings)
+  .settings(
+    name := "demo-js",
+    scalaJSUseMainModuleInitializer := true,
+    libraryDependencies += "org.scala-js" % "scalajs-dom_sjs1_3" % scalajsDomVersion,
   )
 
 // Effect boundary. Solver runs, cancellation and device interaction are ZIO

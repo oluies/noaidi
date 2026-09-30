@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prima i webbläsaren</title>
+<style>
+  :root { --ink:#1b1f24; --muted:#5b6673; --line:#e3e7ec; --bg:#fbfcfd; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 48px; background:var(--bg); color:var(--ink);
+         font:15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lede { color: var(--muted); margin: 0 0 22px; max-width: 70ch; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px;
+          padding:18px 20px; margin-bottom:16px; }
+  .controls { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+              gap:16px 22px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:5px; }
+  label b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width:100%; }
+  #readout { font-size:14px; color:var(--muted); margin-top:10px;
+             font-variant-numeric: tabular-nums; }
+  #schema { font-size:13px; color:var(--muted); }
+  .key { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--muted);
+         margin-top:8px; }
+  .key i { display:inline-block; width:12px; height:12px; border-radius:2px;
+           margin-right:6px; vertical-align:-1px; }
+  code { background:#f1f4f7; padding:1px 5px; border-radius:4px; font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prima i webbläsaren</h1>
+  <p class="lede">
+    Samma <code>prima-core</code> och <code>network-model</code> som på JVM:en, kompilerade
+    till JavaScript med Scala.js. Reglagen bygger om det linjära programmet och löser det på
+    nytt — ingen server i loopen. Villkoren är de som <code>Stability.scala</code> ställer:
+    <code>p ≤ u</code>, <code>p ≥ m_min·u</code> och
+    <code>s_h·u_h + s_g·u_g ≥ SCR·p_vind</code>.
+  </p>
+
+  <div class="card">
+    <div class="controls">
+      <div>
+        <label for="scr">Krav SCR ≥ <b id="scr-value">2</b></label>
+        <input id="scr" type="range" min="0" max="8" step="0.25" value="2">
+      </div>
+      <div>
+        <label for="wind">Vindkapacitet <b id="wind-value">1400</b> MW</label>
+        <input id="wind" type="range" min="200" max="2600" step="50" value="1400">
+      </div>
+      <div>
+        <label for="mmin">Vattenkraftens m_min <b id="mmin-value">0.3</b></label>
+        <input id="mmin" type="range" min="0.05" max="0.8" step="0.05" value="0.3">
+      </div>
+      <div>
+        <label for="gas">Gaskostnad <b id="gas-value">90</b> €/MWh</label>
+        <input id="gas" type="range" min="30" max="200" step="5" value="90">
+      </div>
+    </div>
+    <div id="readout"></div>
+  </div>
+
+  <div class="card">
+    <div id="chart"></div>
+    <div class="key">
+      <span><i style="background:#7fb2dd"></i>Vind</span>
+      <span><i style="background:#1f6fb2"></i>Vattenkraft</span>
+      <span><i style="background:#c98f5a"></i>Gas</span>
+      <span>168 timmar, en zon</span>
+    </div>
+  </div>
+
+  <div class="card"><div id="schema">Schema.fromJson: läser …</div></div>
+</main>
+<script type="text/javascript" src="main.js"></script>
+</body>
+</html>

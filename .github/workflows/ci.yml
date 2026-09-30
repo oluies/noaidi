@@ -211,6 +211,19 @@ jobs:
           fi
           echo "$total tests passed (floor $MINIMUM_TESTS)" >> "$GITHUB_STEP_SUMMARY"
 
+      # The Scala.js build is not aggregated into root either, and for a third
+      # reason: it is a demo, and putting it in `testFull` would move the test
+      # count that the floor above is anchored to. Linking it here is what stops
+      # it rotting -- the two projects compile the JVM modules' own sources, so a
+      # change that reaches for `java.nio.file` or a thread in `prima-core` or
+      # `network-model` breaks this step and nothing else.
+      #
+      # `fullLinkJS` rather than `compile`: compiling only proves the sources are
+      # valid Scala, while linking is what fails on a JVM-only class that the
+      # reachability analysis cannot drop. That is the property being guarded.
+      - name: Link the Scala.js demo
+        run: sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; demoJs/fullLinkJS'
+
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only
       # the Maven artifacts, and it reaches into prima-core's package-private

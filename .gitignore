@@ -21,3 +21,8 @@ reference/.venv/
 
 # Python bytecode
 __pycache__/
+
+# Scala.js demo build outputs, copied into the page directory by hand.
+modules/demo-js/public/main.js
+modules/demo-js/public/main.js.map
+modules/demo-js/public/schema.json

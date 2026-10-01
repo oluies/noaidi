@@ -438,6 +438,12 @@ Not implemented, and rejected rather than mis-solved in every case:
   row that is quietly not PyPSA's. Under `<=` the omission only loosened the cap,
   which is how it survived until `>=` and `==` became legal and a missing term
   stopped having a safe direction.
+- **A `>=` or `==` global constraint whose left-hand side is empty is refused**, where
+  PyPSA's `if emissions.empty: continue` solves the network. A deliberate divergence, and
+  the same one `docs/pypsa-and-noaidi.md` records for zone limits: a floor or a target over
+  no terms is a claim that can be false, and satisfying it silently is how a carrier typo
+  becomes an unconstrained run. `<=` over nothing is left alone, because `0 <= constant` is
+  vacuous for a non-negative cap and that is PyPSA's own skip path.
 - **Per-period global constraints.** PyPSA scopes a constraint to an
   `investment_period` and weights the transmission limits per period. Neither is
   reachable here: expansion across investment periods is itself refused.

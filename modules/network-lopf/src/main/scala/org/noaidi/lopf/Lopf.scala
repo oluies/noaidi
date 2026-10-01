@@ -718,10 +718,24 @@ object Lopf:
       // not count towards it. So the omission is refused rather than left to loosen or
       // tighten silently, and the refusal covers `<=` too -- a cap that is wrong in the safe
       // direction is still wrong, and nothing here can say by how much.
+      // Non-cyclic only. PyPSA filters `not cyclic_state_of_charge` for a StorageUnit and
+      // `not e_cyclic` for a Store, because a cyclic unit returns to its starting level and
+      // so has no net primary energy to charge. For one of those the generators-only row
+      // this port builds IS PyPSA's row, and refusing it would reject a network that used
+      // to build and agree.
+      //
+      // The first version of this guard scanned every emitting unit, which the comment
+      // above already described correctly as "non-cyclic" -- prose and code disagreeing in
+      // the same edit. `storage-hvdc` is exactly that shape (Storage 2 and Storage 4 are
+      // cyclic) and escaped only because its battery carrier reads 0.0.
       val emittingStorage = IndexedSeq("StorageUnit", "Store").flatMap { component =>
         network.table(component).toIndexedSeq.flatMap { table =>
+          val cyclic =
+            if component == "StorageUnit" then Storage.isCyclic(table, _: String)
+            else Stores.isCyclic(table, _: String)
           table.ids.filter(unit =>
-            carrierAttribute(network, table.string("carrier", unit), attribute) != 0.0)
+            !cyclic(unit) &&
+              carrierAttribute(network, table.string("carrier", unit), attribute) != 0.0)
             .map(unit => s"$component '$unit'")
         }
       }
@@ -839,8 +853,12 @@ object Lopf:
       // inherits `ac-dc-meshed`'s `co2_limit` and adds an `==` of its own: original row 110
       // mapped to `Negated(111)` and 111 to `Direct(110)`.
       //
-      // Sorting on the sense rather than reordering the file keeps the refusals and the
-      // messages in file order, which is what a reader of an error expects.
+      // One consequence worth stating because the comment here first claimed the opposite:
+      // refusals now fire in EMISSION order, not file order. Given a `<=` row with an
+      // unsupported `type` listed ahead of an `==` row with a bad `carrier_attribute`, the
+      // second is reported first. Validating everything in file order and emitting in a
+      // second pass would restore it, at the cost of two walks for a diagnostic ordering no
+      // test depends on -- so the behaviour stands and the comment now describes it.
       val ordered = constraints.ids.sortBy(id => if constraints.string("sense", id) == "==" then 0 else 1)
       ordered.foreach { id =>
         val sense     = constraints.string("sense", id)
@@ -876,7 +894,11 @@ object Lopf:
         // which is how a silent divergence acquires a certificate.
         //
         // Only the absent case. A column that exists and is all zero is PyPSA's own
-        // skip-the-constraint path, and is left alone.
+        // skip-the-constraint path -- but it is left alone here only under `<=`, because the
+        // emptiness branch below refuses `>=` and `==` over no terms where PyPSA's
+        // `if emissions.empty: continue` solves. That is the deliberate loud-refusal choice
+        // this port makes elsewhere, and it is listed in NOTES.md as a divergence rather
+        // than described here as agreement.
         if kind == "primary_energy" && !network.table("Carrier")
             .exists(t => t.spec.attribute(attribute).isDefined || t.static.contains(attribute))
         then
@@ -891,6 +913,16 @@ object Lopf:
         // `0 <= constant`, vacuous for a non-negative cap and therefore harmless; `>=` and
         // `==` over no terms are claims that can be false, and dropping those silently is
         // how a carrier typo turns a binding requirement into an unconstrained run.
+        // The right-hand side, guarded for the same reason the branch weights are. A NaN
+        // reaches `LpBuilder.constraint`, whose `require(lo <= hi)` is false for NaN, and
+        // the build dies as "constraint has empty range [NaN, NaN]" -- naming neither the
+        // constraint nor the column. Reproduced on all three senses before this was added.
+        if !constant.isFinite then
+          throw new UnsupportedNetwork(
+            s"global constraint '$id' has constant $constant; a non-finite right-hand side " +
+              "cannot be a row."
+          )
+
         // The sense is validated before the emptiness branch below, so an unsupported sense
         // over an empty left-hand side reports the sense rather than "a claim about
         // nothing" -- which named the wrong problem and sent the reader to the wrong column.

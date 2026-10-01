@@ -102,7 +102,7 @@ def ac_dc_txvolume():
     Volume is `sum(length * s_nom_opt)` over the extendable branches of the named carrier,
     which is why the lengths above had to be invented -- PyPSA's example ships zeros.
 
-    The cap costs a great deal: the objective moves from -3,474,256.04 to -1,522,312.46, a
+    The cap costs a great deal: the objective moves from -3,474,256.04 to -1,522,164.75, a
     56% spread. That is deliberate and is the same argument `ac-dc-co2` makes. A limit that
     merely touched the optimum would be reproduced exactly by an implementation that never
     built the row.
@@ -117,8 +117,9 @@ def ac_dc_txvolume_exact():
     free optimum for it to do so. Below it the two senses agree -- a binding cap sits exactly
     on its constant either way -- and a port that read `==` as `<=` would pass.
 
-    At twice the free volume they disagree completely: `==` builds 1,266,680 and `<=` builds
-    633,340, because `<=` is simply slack there. The objectives differ by only 8e-6 relative,
+    At the constant below -- 1,266,000, rounded down from twice the free volume's
+    1,266,680.32 -- they disagree completely: `==` builds 1,266,000 and `<=` builds 633,340,
+    because `<=` is simply slack there. The objectives differ by only 8e-6 relative,
     so it is the *capacities* that carry this one, which is why the suite asserts them.
     """
     return _ac_dc_tx("transmission_volume_expansion_limit", "==", 1_266_000.0)

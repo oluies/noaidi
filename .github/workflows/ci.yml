@@ -228,17 +228,34 @@ jobs:
       #
       # The count is asserted for the same reason the JVM one is: a Scala.js test project
       # whose sources stopped being found runs nothing and reports success.
+      # Once, not once per JDK. The emitted JavaScript and its results do not depend
+      # on the host JVM, so the second matrix leg would link and run the suites
+      # again for no signal -- which was cheap when this step only linked and is
+      # not now that it runs 158 tests.
       - name: Cross-compile and test on Scala.js
+        if: matrix.java == '25'
         run: |
           set -euo pipefail
           sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; crossJs' 2>&1 | tee sbt-js.log
-          total=$(grep -oE 'Passed: Total [0-9]+' sbt-js.log | grep -oE '[0-9]+' | paste -sd+ - | bc)
-          echo "Scala.js tests run: ${total:-0}"
-          if [ "${total:-0}" -lt 150 ]; then
-            echo "::error::Only ${total:-0} Scala.js tests ran, below the floor of 150."
+          # Through `count_tests.sh`, not a `Passed: Total` grep. That script exists
+          # because the summary alone undercounts on a partially warm sbt 2 action
+          # cache -- observed at 613 against a true 755 -- and this floor leaves 5%
+          # of slack, so the documented undercount would fail the step with the
+          # exact misleading message the script was written to prevent. It also
+          # guards each grep with `|| true`: an empty match under `pipefail` aborts
+          # the assignment, so a log with no counts at all died on an opaque
+          # pipeline failure instead of reporting zero.
+          counts=$(.github/scripts/count_tests.sh sbt-js.log)
+          eval "$counts"
+          echo "Scala.js tests run: $total ($suites from per-suite lines, $summary from the summary)"
+          # 158 today: 138 from prima-core and 20 from prima-mps. A floor rather
+          # than an exact count, for the reason the aggregate step gives.
+          MINIMUM_JS_TESTS=150
+          if [ "$total" -lt "$MINIMUM_JS_TESTS" ]; then
+            echo "::error::Only $total Scala.js tests ran, below the floor of $MINIMUM_JS_TESTS -- either the suite shrank or something stopped running."
             exit 1
           fi
-          echo "$total tests passed on Scala.js" >> "$GITHUB_STEP_SUMMARY"
+          echo "$total tests passed on Scala.js (floor $MINIMUM_JS_TESTS)" >> "$GITHUB_STEP_SUMMARY"
 
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only

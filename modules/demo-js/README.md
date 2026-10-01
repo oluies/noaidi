@@ -25,7 +25,11 @@ on `fastLinkJS` is 2–3× slower, so an unoptimised build will mislead you abou
 | Safari, `fullLinkJS`, 240–1,680 columns | **16–22 ns** |
 | Safari, `fastLinkJS`, same problems | 43–61 ns |
 
-**But the iteration count is what actually limits the size**, and it is platform-independent.
+**But the iteration count is what actually limits the size**, and it does not depend on the
+optimiser level — `fastLinkJS` and `fullLinkJS` report identical counts, which is the
+evidence actually shown below. That it is *platform*-independent is a property of the
+algorithm rather than a measurement here: PDHG is deterministic given the same problem and
+parameters, and the only JVM count in this file is for `nordic-today`, a different problem.
 Holding everything else fixed and lengthening the horizon:
 
 | horizon | columns | rows | iterations | time | ns/col/iter |
@@ -37,10 +41,12 @@ Holding everything else fixed and lengthening the horizon:
 | 168 h | 1,680 | 840 | 47,680 | 1.28 s | 16.0 |
 
 Seven times the columns from 24 h to 168 h, eleven times the iterations, and **fifty-six
-times the wall clock**. The per-iteration cost is flat — it is the iteration count that
-moves, and it does not move monotonically: 168 h is *faster* than 120 h because it happened
-to need 6,000 fewer iterations on a problem 40% larger. Time tracks iterations × columns, and
-of those two only one is under your control.
+times the wall clock**. Seven times eleven is seventy-seven, not fifty-six, and the gap is
+the last column: ns/col/iter is roughly flat but not exactly, drifting from 22.3 down to 16.0
+with no trend that tracks size. Taking that drift out, 77 × (16.0 / 22.3) = 56. So the per-
+iteration cost is the stable term and the iteration count is the one that moves — and it does
+not move monotonically either: 168 h is *faster* than 120 h because it needed 6,000 fewer
+iterations on a problem 40% larger.
 
 The reservoir's state of charge chains every snapshot to the next, and a first-order method
 is sensitive to the conditioning that produces — `nordic-today` needs 233,344 iterations on
@@ -91,12 +97,21 @@ page does, and `Schema.fromJson` then parses the schema with the same code the J
 `sbt crossJs` is the whole JavaScript half in one command. It does two different jobs and
 both are needed:
 
-- **`testFull` on the suites that can cross-compile** — 138 from `prima-core`, 20 from
-  `prima-mps`, **158 in total**, the same sources the JVM runs. This is what says the two
-  platforms give the same *answers*, which linking cannot.
-- **`fullLinkJS` on everything else** — linking is what fails on a JVM-only class the
-  reachability analysis cannot drop. Compiling alone does not; that is how the classpath
+- **`testFull` on the suites that can cross-compile** — 162 from `prima-core`, 20 from
+  `prima-mps`, **182 in total**, the same sources the JVM runs. This is what says the two
+  platforms give the same *answers*, which linking cannot. It includes the kernel contract
+  suite and its float32 case, which matters most here: Scala.js implements `Float`
+  arithmetic through `Math.fround`, so that is the likeliest place for the platforms to
+  disagree.
+- **`fullLinkJS` on `demoJs`** — which covers `prima-core`, `network-model`, `network-pf`
+  and `network-lopf` transitively. Linking is what fails on a JVM-only class the
+  reachability analysis cannot drop; compiling alone does not, which is how the classpath
   resource in `StandardTypes` was found.
+- **`compile` on `primaModelJs`**, and that is the remaining gap rather than a check.
+  Nothing links that project, and linking it on its own would prove nothing either: the
+  reachability analysis starts from a main or an export, and a library has neither. So
+  `prima-model` is compile-checked only, and it is also the module with no JS tests — the
+  one ported module with neither.
 
 `testFull` rather than `test`, because under sbt 2 `test` is incremental and will report
 success having run nothing — written with `test` first and it printed `Passed: Total 0`
@@ -110,8 +125,10 @@ zero tests and reports success is worse than one that visibly has none. `network
 reach — porting those would mean bundling the fixtures, and the demo already exercises the
 same code end to end.
 
-`KernelsSuite` is excluded on JavaScript because it names the SIMD backend, which is the one
-file the compile excludes.
+`VectorKernelsSuite` is excluded on JavaScript because it names the SIMD backend, which is
+the one file the compile excludes. It was split out of `KernelsSuite.scala` for exactly that:
+excluding the whole file took `ScalaKernelsSuite` and `Float32KernelsSuite` with it, and
+those are the contract itself.
 
 ## Which modules are ported
 

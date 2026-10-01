@@ -68,6 +68,10 @@ is the cell that would settle it — see [`HPC.md`](HPC.md).
 - [`HPC.md`](HPC.md) — a plan for running this on NAISS Arrhenius, and what it would change.
 - [`modules/prima-core/NOTES.md`](modules/prima-core/NOTES.md) — the numbers,
   the numerical caveats, and the known gaps.
+- [`docs/pypsa-and-noaidi.md`](docs/pypsa-and-noaidi.md) — the same constraint written
+  in PyPSA's linopy and in this port, side by side, and what each stack is better at.
+- [`modules/demo-js/README.md`](modules/demo-js/README.md) — Prima and the model layer
+  compiled to JavaScript, what that costs, and what still bounds it.
 
 ### What the GPU investigation found
 

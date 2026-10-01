@@ -424,9 +424,23 @@ Not implemented, and rejected rather than mis-solved in every case:
 - **Multi-investment periods, and `Link.delay`.** See *The two the sweep left*
   below: both were silently mis-solved rather than merely unimplemented, which is
   why they are listed here at all.
-- **Global constraints other than `primary_energy` with sense `<=`.** PyPSA
-  dispatches on `type` to entirely different builders, so assuming one would
-  build an energy cap as an emissions cap wearing the same right-hand side.
+- **Global constraint types other than `primary_energy`,
+  `transmission_volume_expansion_limit` and `transmission_expansion_cost_limit`.**
+  PyPSA dispatches on `type` to entirely different builders, so assuming one
+  would build an energy cap as an emissions cap wearing the same right-hand
+  side. `operational_limit` and `tech_capacity_expansion_limit` are the two that
+  remain, and `GlobalConstraintSuite` checks the three that are built against
+  PyPSA on `ac-dc-txvolume`, `ac-dc-txvolume-exact` and `ac-dc-txcost`.
+- **`primary_energy` charged against storage.** PyPSA also sums StorageUnit
+  state-of-charge and Store energy for carriers with a non-zero intensity; this
+  port sums generators only, and refuses a network where a storage carrier
+  carries a non-zero value for the constraint's attribute rather than building a
+  row that is quietly not PyPSA's. Under `<=` the omission only loosened the cap,
+  which is how it survived until `>=` and `==` became legal and a missing term
+  stopped having a safe direction.
+- **Per-period global constraints.** PyPSA scopes a constraint to an
+  `investment_period` and weights the transmission limits per period. Neither is
+  reachable here: expansion across investment periods is itself refused.
 
 ## L2: linear power flow
 

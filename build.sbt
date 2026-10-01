@@ -131,9 +131,13 @@ lazy val primaCoreJs = project
     // the answers agree. These say that, and they are the reason this is cross-compilation
     // rather than a second build that happens to typecheck.
     Test / unmanagedSourceDirectories := Seq((primaCore / Test / scalaSource).value),
-    // `KernelsSuite` exercises the SIMD backend by name, so it goes where that backend
-    // goes. Everything else in the suite runs on both platforms.
-    Test / unmanagedSources / excludeFilter := HiddenFileFilter || "KernelsSuite.scala",
+    // Only the SIMD suites, which name `jdk.incubator.vector`. They were split out of
+    // `KernelsSuite.scala` for this: excluding that whole file took `ScalaKernelsSuite` and
+    // `Float32KernelsSuite` with it, which is the kernel contract itself -- and the float32
+    // path is the code most likely to differ on a platform where `Float` arithmetic goes
+    // through `Math.fround`, so it is the last thing that should have been dropped from a
+    // run whose stated purpose is whether the answers agree.
+    Test / unmanagedSources / excludeFilter := HiddenFileFilter || "VectorKernelsSuite.scala",
   )
 
 lazy val networkModelJs = project
@@ -254,9 +258,18 @@ lazy val primaMpsJs = project
 // it would be weight for its own sake.
 
 // One entry point for the JavaScript half, so a change that breaks it is one command away
-// rather than six. `fullLinkJS` is what catches a JVM-only class the reachability analysis
-// cannot drop, which compiling alone does not; and the two compile-only projects are named
-// because nothing links them.
+// rather than four.
+//
+// `demoJs/fullLinkJS` covers `primaCoreJs`, `networkModelJs`, `networkPfJs` and
+// `networkLopfJs`, because it depends on all four -- linking is what fails on a JVM-only
+// class the reachability analysis cannot drop, and compiling alone does not. The alias used
+// to name `networkPfJs/compile` and `networkLopfJs/compile` as well, with a comment saying
+// they were there because nothing linked them. Both were already linked transitively, so the
+// entries were redundant and the reason given for them was wrong.
+//
+// `primaModelJs/compile` stays, and it is the one genuine gap: nothing links that project,
+// and linking it alone would prove nothing either, since the reachability analysis starts
+// from a main or an export and a library has neither. It is compile-checked only.
 //
 // `testFull` and not `test`, for the reason stated beside `commonSettings`: under sbt 2
 // `test` is incremental and reports success having run nothing. Written with `test` first,
@@ -264,8 +277,7 @@ lazy val primaMpsJs = project
 // assertion in CI, since that is what noticed.
 addCommandAlias(
   "crossJs",
-  "primaCoreJs/testFull; primaMpsJs/testFull; primaModelJs/compile; networkPfJs/compile; " +
-    "networkLopfJs/compile; demoJs/fullLinkJS",
+  "primaCoreJs/testFull; primaMpsJs/testFull; primaModelJs/compile; demoJs/fullLinkJS",
 )
 
 // The demo itself: a page that builds a network from what the sliders say, turns it into a

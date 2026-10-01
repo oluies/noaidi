@@ -42,8 +42,15 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
   private def results(name: String): ujson.Value =
     ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))
 
-  /** The lengths `generate_goldens.py` gives the lines, in file order. */
-  private val lengths = IndexedSeq(120.0, 80.0, 200.0, 150.0, 60.0, 90.0, 110.0)
+  /** The lengths `generate_goldens.py` gives the lines, in file order.
+    *
+    * Needed as a literal for exactly one thing: the free-volume comparison against
+    * `ac-dc-meshed`, which ships every line at `length = 0` and so cannot supply them. Every
+    * other use reads `length` from the fixture's own table -- a positional copy is both a
+    * cross-language duplicate that can drift and a coupling to row order, so reordering
+    * `lines.csv` would leave the assertions passing against the wrong weights.
+    */
+  private val freeVolumeLengths = IndexedSeq(120.0, 80.0, 200.0, 150.0, 60.0, 90.0, 110.0)
 
   /** Assert this port reaches PyPSA's objective, and its capacities where they are decided.
     *
@@ -86,10 +93,7 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
   /** The left-hand side of a transmission limit, recomputed from the solved capacities. */
   private def transmissionTotal(n: Network, result: LopfResult, weight: String): Double =
     val lines = n.require("Line")
-    lines.ids.zipWithIndex.map { (id, i) =>
-      val w = if weight == "length" then lengths(i) else lines.float("capital_cost", id)
-      w * result.capacity("Line", id)
-    }.sum
+    lines.ids.map(id => lines.float(weight, id) * result.capacity("Line", id)).sum
 
   private def constantOf(n: Network, id: String): Double =
     n.require("GlobalConstraint").float("constant", id)
@@ -141,8 +145,9 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
 
     // What `<=` would have given at the same constant: the free optimum, roughly half.
     val free = Lopf.solve(network("ac-dc-meshed"), params)
+    // `ac-dc-meshed` ships zero lengths, so this is the one place the literal is needed.
     val freeTotal = network("ac-dc-meshed").require("Line").ids.zipWithIndex.map { (id, i) =>
-      lengths(i) * free.capacity("Line", id)
+      freeVolumeLengths(i) * free.capacity("Line", id)
     }.sum
     assert(freeTotal < 0.75 * exact,
       s"the free optimum ($freeTotal) is not far enough below the constant ($exact) for " +
@@ -165,7 +170,9 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     val mu = results("ac-dc-txvolume")("optimize")("global_constraint_mu")
     assert(math.abs(mu("co2_limit").num) > 1e-9, "the CO2 cap does not bind here")
     assert(math.abs(mu("tx_limit").num) > 1e-9, "the transmission cap does not bind here")
-    agrees("ac-dc-txvolume"): Unit
+    // No re-solve here: the first test already asserts this network's objective and every
+    // capacity against PyPSA, and repeating it costs two 500k-iteration solves for no new
+    // assertion.
   }
 
   test("an equality global constraint keeps the row identity Sclopf depends on") {
@@ -215,9 +222,9 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
       "the fixed line's capacity was counted against a limit on expansion")
     // And the row is still over the six that remain, tight at the cap.
     val cap = constantOf(fixed, "tx_limit")
-    val built = lines.ids.zipWithIndex.collect {
-      case (id, i) if Expansion.isExtendable(lines, id) =>
-        lengths(i) * result.capacity("Line", id)
+    val built = lines.ids.collect {
+      case id if Expansion.isExtendable(lines, id) =>
+        lines.float("length", id) * result.capacity("Line", id)
     }.sum
     assertEqualsDouble(built, cap, 1e-4 * cap, "the cap is not tight over the extendables")
   }
@@ -254,8 +261,25 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
       "the quoted list did not survive the reader, so this test cannot see the difference",
     )
 
+    // And the bracketed form, which is how a Python list literal lands in a CSV. PyPSA
+    // strips `[](){}` per entry for exactly this; without it the set is `{"[AC", "DC]"}`,
+    // which matches nothing and -- under `<=` with a non-negative constant -- is accepted as
+    // vacuous, so the port would undercut PyPSA on a row PyPSA builds and binds.
+    val bracketed = copiedWith(
+      goldens.resolve("networks").resolve("ac-dc-txcost"),
+      "ac-dc-txcost",
+      "global_constraints.csv" ->
+        ("name,type,carrier_attribute,sense,constant\n" +
+          "co2_limit,primary_energy,co2_emissions,<=,1000.0\n" +
+          "tx_limit,transmission_expansion_cost_limit,\"[AC, DC]\",>=,4800.0\n"),
+    )
+
     val both   = Lopf.solve(listed, params)
+    val square = Lopf.solve(bracketed, params)
     val acOnly = Lopf.solve(network("ac-dc-txcost"), params)
+    assertEquals(square.status, SolveStatus.Optimal)
+    assertEqualsDouble(square.objective, both.objective, 1e-6 * math.abs(both.objective),
+      "the bracketed list did not parse to the same carriers as the bare one")
     assertEquals(both.status, SolveStatus.Optimal)
     assertEquals(acOnly.status, SolveStatus.Optimal)
 
@@ -310,36 +334,139 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     assertEqualsDouble(result.objective, expected, 1e-6 * math.abs(expected),
       "renaming the carrier column changed the answer, so the name is not being read")
 
-    // The control: with the constraint pointed at a column that is not there, the cap is
-    // over nothing and the answer is the cheaper unconstrained one. Without this, the
-    // assertion above would also pass for a port that had dropped the row entirely.
-    val wrong = copiedWith(
-      goldens.resolve("networks").resolve("ac-dc-co2"),
-      "ac-dc-co2",
-      "global_constraints.csv" ->
-        ("name,type,carrier_attribute,sense,constant\n" +
-          "co2_limit,primary_energy,not_a_column,<=,2000.0\n"),
-    )
-    val dropped = Lopf.solve(wrong, params)
-    assert(math.abs(dropped.objective - expected) > 1.0,
-      "pointing the cap at a missing column changed nothing, so this fixture cannot tell " +
-        "a read attribute from a hardcoded one")
+    // No separate control, and the reason is worth recording because two were written and
+    // both were wrong.
+    //
+    // The first pointed the cap at a missing column and asserted the answer got cheaper --
+    // a control over a defect, since silently dropping the row is what the refusal below now
+    // prevents. The second renamed the CSV column and expected that refusal to fire; it does
+    // not, and correctly: `co2_emissions` is a PyPSA-defined attribute, so the spec keeps it
+    // and every carrier reads the 0.0 default. That is PyPSA's own all-zero skip path, not
+    // its KeyError path.
+    //
+    // The positive assertion above is sufficient on its own. A port looking up a hardcoded
+    // `co2_emissions` on this network finds it in the spec, reads 0.0 for every carrier,
+    // builds no terms, drops the row, and returns the unconstrained optimum -- 12.7%
+    // cheaper, which the comparison catches. Confirmed by mutation rather than argued.
   }
 
-  test("a sense or type PyPSA does not write is refused by name") {
+  /** A stability config this network can carry, for the ordering test below. */
+  private def stabilityOn: Stability.Config = Stability.Config(
+    tech = Map("gas" -> Stability.Tech(Stability.Mode.Commit, inertiaSeconds = 5.0,
+      cosPhi = 0.85, subtransientReactance = 0.16, minStableFraction = 0.4)),
+    mapping = Map("Generator:gas" -> "gas"),
+    systemInertiaGws = 0.001,
+  )
+
+  test("an equality keeps its row index with another family's inequalities present") {
     assume(available, "goldens missing")
-    Seq(
-      "sense" -> "<",
-      "type"  -> "operational_limit",
-    ).foreach { (column, value) =>
-      val mutated = mutate("ac-dc-txvolume", "global_constraints.csv",
-        setColumn(_, column, (id, current) => if id == "tx_limit" then value else current))
-      val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(mutated)).getMessage
-      assert(message.contains(value), s"$column = $value: $message")
+    // The regression. Moving the global-constraint block ahead of the capacity-coupling
+    // inequalities was not enough: `Stability` emits only inequalities and sat ABOVE the
+    // block, so a `==` cap with a stability config was still an equality after inequalities.
+    // Measured before the fix: original rows 110-113 of this network came back misindexed.
+    //
+    // Neither family's own suite could see it, because each builds without the other. That
+    // is the shape of the gap, and it is why this test pairs them rather than adding another
+    // case to either side.
+    val families = Lopf.Families(stability = stabilityOn)
+    val model    = Lopf.build(network("ac-dc-txvolume-exact"), families)
+    val plain    = Lopf.build(network("ac-dc-txvolume-exact"))
+    assert(model.problem.numConstraints > plain.problem.numConstraints,
+      "the stability config emitted no rows, so this test is about the wrong model")
+
+    val translation = model.translation
+    val misindexed = (0 until translation.numOriginalRows).filterNot { r =>
+      translation.expansionOf(r) match
+        case RowExpansion.Direct(row)  => row == r
+        case RowExpansion.Negated(row) => row == r
+        case _                         => false
+    }
+    assertEquals(misindexed.toList, Nil,
+      "an equality global constraint lost its row index once another family emitted " +
+        "inequalities, so Sclopf would refuse the model")
+  }
+
+  test("a cap charging a carrier this port cannot account for is refused") {
+    assume(available, "goldens missing")
+    // PyPSA charges StorageUnit and Store carriers against a `primary_energy` cap through
+    // their state of charge; this port sums generators only. Under `<=` that merely loosened
+    // the row, which is why no golden caught it -- `storage-hvdc` gives its battery carrier
+    // 0.0. Under `==` and `>=` a missing term has no defensible sign, so the omission is
+    // named rather than left to loosen or tighten silently.
+    val carriers = network("storage-hvdc").require("Carrier")
+    assert(carriers.ids.contains("battery"), "this fixture has no battery carrier")
+    assert(network("storage-hvdc").require("StorageUnit").ids.nonEmpty,
+      "this fixture has no storage unit to charge")
+
+    // As shipped it is zero, so it builds.
+    Lopf.build(network("storage-hvdc")): Unit
+
+    val charged = copiedWith(
+      goldens.resolve("networks").resolve("storage-hvdc"),
+      "storage-hvdc",
+      "carriers.csv" -> "name,co2_emissions\ngas,0.24\nwind,0.0\nbattery,0.3\n",
+    )
+    val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(charged)).getMessage
+    assert(message.contains("StorageUnit") && message.contains("state of charge"), message)
+  }
+
+  test("a non-finite transmission weight is refused rather than reaching the matrix") {
+    assume(available, "goldens missing")
+    // A NaN `length` becomes a NaN coefficient and surfaces far away as an anonymous row,
+    // which is the failure `TerminalValue` and `Stability` already refuse by name.
+    val nan = mutate("ac-dc-txvolume", "lines.csv",
+      setColumn(_, "length", (id, current) => if id == "0" then "nan" else current))
+    val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(nan)).getMessage
+    assert(message.contains("length") && message.contains("non-finite"), message)
+  }
+
+  test("a carrier_attribute no column defines is refused, whatever the sense") {
+    assume(available, "goldens missing")
+    // PyPSA indexes the column directly -- `n.c.carriers.static[glc.carrier_attribute]` --
+    // so a misspelling raises. Here `carrierAttribute` returns 0.0 both for "zero" and for
+    // "no such column", so it dropped every term, dropped the row, and reported the cheaper
+    // unconstrained optimum.
+    //
+    // This suite previously had a test asserting that `<=` accepted exactly that, on the
+    // reasoning that a cap over nothing is vacuous. The reasoning holds for a column that
+    // exists and is all zero -- which is PyPSA's own skip path -- and not for one that does
+    // not exist, which is a typo. Pinning the two together certified the divergence.
+    Seq("<=", ">=", "==").foreach { sense =>
+      val typo = mutate("ac-dc-co2", "global_constraints.csv", text =>
+        setColumn(setColumn(text, "carrier_attribute",
+          (id, current) => if id == "co2_limit" then "co2_emission" else current),
+          "sense", (id, current) => if id == "co2_limit" then sense else current))
+      val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(typo)).getMessage
+      assert(message.contains("co2_emission") && message.contains("no Carrier column"),
+        s"$sense: $message")
     }
   }
 
-  test("a constraint matching nothing is refused where its sense makes it a claim") {
+  test("a carrier column that exists and is all zero is skipped, as PyPSA skips it") {
+    assume(available, "goldens missing")
+    // The other half of the pair above, and the reason the refusal is narrow. PyPSA builds
+    // no row when the column is present and every carrier reads zero, so neither does this.
+    val allZero = copiedWith(
+      goldens.resolve("networks").resolve("ac-dc-co2"),
+      "ac-dc-co2",
+      "carriers.csv" ->
+        ("name,co2_emissions,color,marginal_cost,efficiency,capital_cost\n" +
+          "gas,0.0,red,0.0,1.0,0.0\n" +
+          "wind,0.0,blue,0.0,1.0,0.0\n" +
+          "battery,0.0,green,0.0,1.0,0.0\n" +
+          "load,0.0,black,,,\n" +
+          "AC,0.0,orange,,,\n" +
+          "DC,0.0,purple,,,\n"),
+    )
+    val result = Lopf.solve(allZero, params)
+    assertEquals(result.status, SolveStatus.Optimal)
+    // No row, so the answer is the unconstrained one -- which is what PyPSA gives too.
+    val free = Lopf.solve(network("ac-dc-dispatch"), params)
+    assert(result.objective <= free.objective + 1.0,
+      "an all-zero emissions column still constrained the dispatch")
+  }
+
+  test("a transmission limit matching nothing is refused where its sense makes it a claim") {
     assume(available, "goldens missing")
     // `<=` over no terms is `0 <= constant`, which a non-negative cap satisfies and which is
     // therefore harmless. `>=` and `==` over no terms are claims that can be false, and
@@ -357,6 +484,8 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
           .getMessage
       assert(message.contains("NOT_A_CARRIER"), s"$sense: $message")
     }
-    // The `<=` direction is accepted, because it genuinely constrains nothing.
+    // The `<=` direction is accepted, because a cap over no branch genuinely constrains
+    // nothing -- and unlike the `primary_energy` case above, a carrier naming no branch is
+    // an ordinary thing in PyPSA (it filters `carrier in @car` and may match none).
     Lopf.build(carrierTypo("ac-dc-txvolume", "<=")): Unit
   }

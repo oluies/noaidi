@@ -64,10 +64,20 @@ Network(
 ```
 
 The Scala is wordier and that is the trade, not an accident. `Column` is a sum type, so a
-float column cannot hold a string; `ComponentTable` carries its `ComponentSpec`, so an
-attribute PyPSA does not define cannot be set; and the whole value is immutable, so nothing
-can add a generator halfway through a build. In Python those are runtime concerns and in
-practice PyPSA catches them well — but it catches them when you run it.
+float column cannot hold a string, and the whole value is immutable, so nothing can add a
+generator halfway through a build.
+
+What it does **not** do is validate attribute names at construction. `ComponentTable` is a
+plain case class: it checks neither that `static`'s keys are in its `ComponentSpec` nor that
+its columns are as long as `ids`. An attribute PyPSA does not define can be put in the map
+quite happily — it is simply never read. The check that does exist is on the read side, and
+it is `ComponentSpec.require` throwing `NoSuchElementException` for an attribute the spec
+does not have. A *misspelled* read of a defined attribute is worse than either: `float` and
+`string` fall back to the schema default, so it returns a plausible number.
+
+So the honest comparison is narrower than "the types catch it". It is that values cannot be
+the wrong type and nothing mutates — which is real, and is not the same as a validated
+network.
 
 In normal use nobody writes either: both read the same CSV directory.
 
@@ -182,8 +192,11 @@ pandas, so anything you can express in pandas you can express about a network; a
 ecosystem around it — plotting, statistics, the atlite/pypsa-eur toolchain — does not exist
 on the other side and would be years of work.
 
-**noaidi** is better at being depended on. The types make a malformed network unconstructible
-rather than merely unlikely; the solver is in the same process with no file round-trip; the
+**noaidi** is better at being depended on — though narrowly, and the paragraph above says
+where the narrowness is. Column values cannot be the wrong type, the model is immutable, and
+`Network` checks that its snapshot-period axis matches its snapshot axis; beyond that a
+malformed network is perfectly constructible. The solver is in the same process with no file
+round-trip; the
 formulation is a value that can be rebuilt, re-indexed and handed to a different backend; and
 it runs where a JVM does not — see `modules/demo-js`, which solves this same model in a
 browser.

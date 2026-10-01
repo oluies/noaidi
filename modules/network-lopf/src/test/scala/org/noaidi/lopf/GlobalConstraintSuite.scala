@@ -410,6 +410,30 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     assert(message.contains("StorageUnit") && message.contains("state of charge"), message)
   }
 
+  test("a cyclic emitting fleet agrees with PyPSA, not merely builds") {
+    assume(available, "goldens missing")
+    // The claim the refusal rests on, checked against a solved network rather than against
+    // a reading of upstream's source. `storage-cyclic-co2` is `storage-hvdc` with its
+    // battery carrier at 0.3 and every storage unit cyclic, so PyPSA's `primary_energy` row
+    // is generators-only -- which is the only row this port knows how to build. If that
+    // filter ever differed, the port would build a quietly different row and return a
+    // cheaper objective, and until this fixture existed nothing would have failed.
+    //
+    // Every other golden gives its battery carrier 0.0, so none of them can tell. The cap
+    // binds here (mu = -417.44), which is what makes the agreement evidence rather than a
+    // comparison of two unconstrained optima.
+    val units = network("storage-cyclic-co2").require("StorageUnit")
+    assert(units.ids.nonEmpty && units.ids.forall(Storage.isCyclic(units, _)),
+      "this fixture no longer has an all-cyclic storage fleet")
+    assertEqualsDouble(
+      network("storage-cyclic-co2").require("Carrier").float("co2_emissions", "battery"),
+      0.3, 1e-9, "the battery carrier no longer emits, so the fixture proves nothing")
+    val mu = results("storage-cyclic-co2")("optimize")("global_constraint_mu")("co2_limit").num
+    assert(math.abs(mu) > 1e-9, s"the cap does not bind in PyPSA's answer (mu = $mu)")
+
+    agrees("storage-cyclic-co2"): Unit
+  }
+
   test("a cyclic emitting unit still builds, because PyPSA charges it nothing either") {
     assume(available, "goldens missing")
     // The other side of the refusal above, and the case the first version of it broke.

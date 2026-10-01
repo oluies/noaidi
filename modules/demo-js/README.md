@@ -86,6 +86,33 @@ Otherwise: `VectorKernels.scala` is excluded (`jdk.incubator.vector`, already be
 `MpsReader.fromFile` link out as unreachable — a browser fetches over HTTP, which is what the
 page does, and `Schema.fromJson` then parses the schema with the same code the JVM uses.
 
+## Cross-compilation, and what is actually checked
+
+`sbt crossJs` is the whole JavaScript half in one command. It does two different jobs and
+both are needed:
+
+- **`testFull` on the suites that can cross-compile** — 138 from `prima-core`, 20 from
+  `prima-mps`, **158 in total**, the same sources the JVM runs. This is what says the two
+  platforms give the same *answers*, which linking cannot.
+- **`fullLinkJS` on everything else** — linking is what fails on a JVM-only class the
+  reachability analysis cannot drop. Compiling alone does not; that is how the classpath
+  resource in `StandardTypes` was found.
+
+`testFull` rather than `test`, because under sbt 2 `test` is incremental and will report
+success having run nothing — written with `test` first and it printed `Passed: Total 0`
+twice. CI asserts a floor on the count for the same reason.
+
+Two modules run no tests on JavaScript and the reasons differ. `prima-model`'s only suite
+compares Prima against ojAlgo, a Java solver, so it has nothing to cross-run; the build
+deliberately does *not* point its test sources at an empty set, because a project that runs
+zero tests and reports success is worse than one that visibly has none. `network-pf` and
+`network-lopf` read fixtures from `reference/goldens`, which a browser has no filesystem to
+reach — porting those would mean bundling the fixtures, and the demo already exercises the
+same code end to end.
+
+`KernelsSuite` is excluded on JavaScript because it names the SIMD backend, which is the one
+file the compile excludes.
+
 ## Which modules are ported
 
 | ported | not ported, and why |

@@ -221,13 +221,24 @@ jobs:
       # `fullLinkJS` rather than `compile`: compiling only proves the sources are
       # valid Scala, while linking is what fails on a JVM-only class that the
       # reachability analysis cannot drop. That is the property being guarded.
-      # `fullLinkJS` on the demo covers prima-core, network-model, network-pf and
-      # network-lopf, because it depends on all four. `primaModelJs` and `primaMpsJs` are
-      # ported but nothing links them, so they are compiled explicitly -- otherwise a
-      # `java.nio.file` reaching either one would go unnoticed.
-      - name: Link the Scala.js demo
+      # The JavaScript half: the suites that can cross-compile, then a link of everything
+      # else. Linking is what fails on a JVM-only class the reachability analysis cannot
+      # drop -- compiling alone does not -- and the suites are what say the two platforms
+      # give the same answers rather than merely both building.
+      #
+      # The count is asserted for the same reason the JVM one is: a Scala.js test project
+      # whose sources stopped being found runs nothing and reports success.
+      - name: Cross-compile and test on Scala.js
         run: |
-          sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; demoJs/fullLinkJS; primaModelJs/compile; primaMpsJs/compile'
+          set -euo pipefail
+          sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; crossJs' 2>&1 | tee sbt-js.log
+          total=$(grep -oE 'Passed: Total [0-9]+' sbt-js.log | grep -oE '[0-9]+' | paste -sd+ - | bc)
+          echo "Scala.js tests run: ${total:-0}"
+          if [ "${total:-0}" -lt 150 ]; then
+            echo "::error::Only ${total:-0} Scala.js tests ran, below the floor of 150."
+            exit 1
+          fi
+          echo "$total tests passed on Scala.js" >> "$GITHUB_STEP_SUMMARY"
 
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only

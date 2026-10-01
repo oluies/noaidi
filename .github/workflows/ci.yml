@@ -221,8 +221,13 @@ jobs:
       # `fullLinkJS` rather than `compile`: compiling only proves the sources are
       # valid Scala, while linking is what fails on a JVM-only class that the
       # reachability analysis cannot drop. That is the property being guarded.
+      # `fullLinkJS` on the demo covers prima-core, network-model, network-pf and
+      # network-lopf, because it depends on all four. `primaModelJs` and `primaMpsJs` are
+      # ported but nothing links them, so they are compiled explicitly -- otherwise a
+      # `java.nio.file` reaching either one would go unnoticed.
       - name: Link the Scala.js demo
-        run: sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; demoJs/fullLinkJS'
+        run: |
+          sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; demoJs/fullLinkJS; primaModelJs/compile; primaMpsJs/compile'
 
       # prima-cyfra is not aggregated into root, because running it needs a
       # Vulkan stack no runner is guaranteed to have. Compiling it needs only

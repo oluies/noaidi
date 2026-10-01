@@ -214,11 +214,10 @@ object StandardTypes:
   /** The shipped library as a component table, parsed against the caller's schema. */
   private[network] def resource(component: String, schema: Schema): ComponentTable =
     val spec = schema(component)
-    val path = s"/org/noaidi/network/standard_types/${spec.listName}.csv"
-    val text = Option(getClass.getResourceAsStream(path))
-      .map(stream => scala.util.Using.resource(stream)(s => new String(s.readAllBytes, "UTF-8")))
-      .getOrElse(throw new IllegalStateException(s"the standard type library $path is missing"))
-    CsvReader.table(text, spec)
+    // Through [[StandardTypeLibrary]] rather than reading the resource here, because that
+    // read is the only part of this module that has to differ between the JVM and a
+    // browser. See that file for why the split is where it is.
+    CsvReader.table(StandardTypeLibrary.text(spec.listName), spec)
 
   private def lineLibrary(network: Network): Map[String, LineSpec] =
     merged(network, "LineType").map { (name, table) =>

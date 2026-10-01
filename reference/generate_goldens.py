@@ -102,7 +102,7 @@ def ac_dc_txvolume():
     Volume is `sum(length * s_nom_opt)` over the extendable branches of the named carrier,
     which is why the lengths above had to be invented -- PyPSA's example ships zeros.
 
-    The cap costs a great deal: the objective moves from -3,474,256.04 to -1,522,312.46, a
+    The cap costs a great deal: the objective moves from -3,474,256.04 to -1,522,164.75, a
     56% spread. That is deliberate and is the same argument `ac-dc-co2` makes. A limit that
     merely touched the optimum would be reproduced exactly by an implementation that never
     built the row.
@@ -117,8 +117,9 @@ def ac_dc_txvolume_exact():
     free optimum for it to do so. Below it the two senses agree -- a binding cap sits exactly
     on its constant either way -- and a port that read `==` as `<=` would pass.
 
-    At twice the free volume they disagree completely: `==` builds 1,266,680 and `<=` builds
-    633,340, because `<=` is simply slack there. The objectives differ by only 8e-6 relative,
+    At the constant below -- 1,266,000, rounded down from twice the free volume's
+    1,266,680.32 -- they disagree completely: `==` builds 1,266,000 and `<=` builds 633,340,
+    because `<=` is simply slack there. The objectives differ by only 8e-6 relative,
     so it is the *capacities* that carry this one, which is why the suite asserts them.
     """
     return _ac_dc_tx("transmission_volume_expansion_limit", "==", 1_266_000.0)
@@ -144,6 +145,30 @@ def ac_dc_txcost():
     is pinned is the objective and that total, which is what `GlobalConstraintSuite` asserts.
     """
     return _ac_dc_tx("transmission_expansion_cost_limit", ">=", 4_800.0)
+
+
+def storage_cyclic_co2():
+    """`storage-hvdc` with an EMITTING battery carrier and every storage unit cyclic.
+
+    The fixture for a claim the port makes and could not previously check. PyPSA charges a
+    `primary_energy` cap against non-cyclic storage only -- it filters
+    `not cyclic_state_of_charge` and `not e_cyclic`, because a cyclic unit returns to its
+    starting level and has no net primary energy to charge. So where every emitting unit is
+    cyclic, PyPSA's row is generators-only, which is the only row this port knows how to
+    build, and the two should agree exactly.
+
+    Without this, the port admitted such a network on the strength of reading upstream's
+    source, and nothing would have noticed if that filter ever differed: the answer would
+    quietly be a cheaper one computed from a different row. Every other golden gives its
+    battery carrier 0.0 emissions, so none of them can tell.
+
+    The cap binds -- mu is -417.44 -- which is what makes the agreement worth asserting
+    rather than a comparison of two unconstrained optima.
+    """
+    n = pypsa.examples.storage_hvdc()
+    n.storage_units["cyclic_state_of_charge"] = True
+    n.carriers.loc["battery", "co2_emissions"] = 0.3
+    return n
 
 
 def ac_dc_co2():
@@ -1196,6 +1221,7 @@ NETWORKS = {
     "ac-dc-txvolume-exact": ac_dc_txvolume_exact,
     "ac-dc-txcost": ac_dc_txcost,
     "storage-hvdc": pypsa.examples.storage_hvdc,
+    "storage-cyclic-co2": storage_cyclic_co2,
     # The first realistic-scale network: 585 buses, 852 lines, 96 transformers,
     # 1423 generators over 24 snapshots. It is also the only bundled PyPSA
     # example that is not a capacity-expansion problem -- nothing is extendable,

@@ -410,6 +410,127 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     assert(message.contains("StorageUnit") && message.contains("state of charge"), message)
   }
 
+  test("a cyclic emitting fleet agrees with PyPSA, not merely builds") {
+    assume(available, "goldens missing")
+    // The claim the refusal rests on, checked against a solved network rather than against
+    // a reading of upstream's source. `storage-cyclic-co2` is `storage-hvdc` with its
+    // battery carrier at 0.3 and every storage unit cyclic, so PyPSA's `primary_energy` row
+    // is generators-only -- which is the only row this port knows how to build. If that
+    // filter ever differed, the port would build a quietly different row and return a
+    // cheaper objective, and until this fixture existed nothing would have failed.
+    //
+    // Every other golden gives its battery carrier 0.0, so none of them can tell. The cap
+    // binds here (mu = -417.44), which is what makes the agreement evidence rather than a
+    // comparison of two unconstrained optima.
+    val units = network("storage-cyclic-co2").require("StorageUnit")
+    assert(units.ids.nonEmpty && units.ids.forall(Storage.isCyclic(units, _)),
+      "this fixture no longer has an all-cyclic storage fleet")
+    assertEqualsDouble(
+      network("storage-cyclic-co2").require("Carrier").float("co2_emissions", "battery"),
+      0.3, 1e-9, "the battery carrier no longer emits, so the fixture proves nothing")
+    val mu = results("storage-cyclic-co2")("optimize")("global_constraint_mu")("co2_limit").num
+    assert(math.abs(mu) > 1e-9, s"the cap does not bind in PyPSA's answer (mu = $mu)")
+
+    agrees("storage-cyclic-co2"): Unit
+  }
+
+  test("a cyclic emitting unit still builds, because PyPSA charges it nothing either") {
+    assume(available, "goldens missing")
+    // The other side of the refusal above, and the case the first version of it broke.
+    // PyPSA filters `not cyclic_state_of_charge` and `not e_cyclic`: a cyclic unit returns
+    // to its starting level and has no net primary energy to charge. For one of those the
+    // generators-only row this port builds IS PyPSA's row, so refusing it would reject a
+    // network that used to build and agree.
+    //
+    // `storage-hvdc` has both kinds, which is what makes it able to tell them apart:
+    // Storage 2 and Storage 4 are cyclic, the rest are not.
+    val units = network("storage-hvdc").require("StorageUnit")
+    val cyclic    = units.ids.filter(Storage.isCyclic(units, _))
+    val nonCyclic = units.ids.filterNot(Storage.isCyclic(units, _))
+    assert(cyclic.nonEmpty && nonCyclic.nonEmpty,
+      s"this fixture no longer has both kinds: cyclic=$cyclic nonCyclic=$nonCyclic")
+
+    // Every emitting unit cyclic: builds, because PyPSA builds the same row.
+    val cyclicOnly = copiedWith(
+      goldens.resolve("networks").resolve("storage-hvdc"),
+      "storage-hvdc",
+      "carriers.csv" -> "name,co2_emissions\ngas,0.24\nwind,0.0\nbattery,0.3\n",
+      "storage_units.csv" -> allCyclic,
+    )
+    Lopf.build(cyclicOnly): Unit
+
+    // And with the non-cyclic ones left alone it is refused, naming one of them.
+    val mixed = copiedWith(
+      goldens.resolve("networks").resolve("storage-hvdc"),
+      "storage-hvdc",
+      "carriers.csv" -> "name,co2_emissions\ngas,0.24\nwind,0.0\nbattery,0.3\n",
+    )
+    val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(mixed)).getMessage
+    assert(nonCyclic.exists(id => message.contains(id)),
+      s"the refusal named no non-cyclic unit: $message")
+    assert(!cyclic.exists(id => message.contains(id)),
+      s"the refusal named a cyclic unit, which PyPSA charges nothing: $message")
+  }
+
+  /** `storage-hvdc`'s storage table with every unit made cyclic. */
+  private def allCyclic: String =
+    val text = java.nio.file.Files.readString(
+      goldens.resolve("networks").resolve("storage-hvdc").resolve("storage_units.csv"))
+    setColumn(text, "cyclic_state_of_charge", (_, _) => "True")
+
+  test("a Store's cyclicity is read from e_cyclic, not from a StorageUnit's column") {
+    assume(available, "goldens missing")
+    // The Store half of the same guard, and it needs its own case: a mutation swapping
+    // `Stores.isCyclic` for `Storage.isCyclic` survived every other test here, because no
+    // golden ships a Store with an emitting carrier. The two read different columns --
+    // `e_cyclic` against `cyclic_state_of_charge` -- and only a Store can tell them apart.
+    //
+    // `store-bank` has both kinds (`swing` is cyclic, `tank` and `grow` are not) and no
+    // carriers at all, so the carrier column and the cap are added here.
+    val withCarriers = copiedWith(
+      goldens.resolve("networks").resolve("store-bank"),
+      "store-bank",
+      "carriers.csv" -> "name,co2_emissions\nheat,0.3\n",
+      "stores.csv" -> setColumn(
+        java.nio.file.Files.readString(
+          goldens.resolve("networks").resolve("store-bank").resolve("stores.csv")),
+        "carrier", (_, _) => "heat"),
+      "global_constraints.csv" ->
+        ("name,type,carrier_attribute,sense,constant\n" +
+          "co2_limit,primary_energy,co2_emissions,<=,1000.0\n"),
+    )
+    val stores = withCarriers.require("Store")
+    assert(stores.ids.exists(Stores.isCyclic(stores, _)) &&
+      stores.ids.exists(!Stores.isCyclic(stores, _)),
+      "this fixture no longer has both cyclic and non-cyclic stores")
+
+    // The non-cyclic ones are charged by PyPSA and not by this port, so it refuses and names
+    // them -- and does not name the cyclic one.
+    val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(withCarriers)).getMessage
+    stores.ids.foreach { id =>
+      if Stores.isCyclic(stores, id) then
+        assert(!message.contains(s"'$id'"), s"named the cyclic store '$id': $message")
+      else
+        assert(message.contains(s"'$id'"), s"did not name the non-cyclic store '$id': $message")
+    }
+  }
+
+  test("a non-finite constant is refused rather than dying inside the builder") {
+    assume(available, "goldens missing")
+    // The right-hand side had no guard while the branch weights did. Reproduced on all
+    // three senses before the fix: `IllegalArgumentException: constraint has empty range
+    // [NaN, NaN]`, naming neither the constraint nor the column.
+    Seq("<=", ">=", "==").foreach { sense =>
+      val nan = mutate("ac-dc-co2", "global_constraints.csv", text =>
+        setColumn(setColumn(text, "constant",
+          (id, current) => if id == "co2_limit" then "nan" else current),
+          "sense", (id, current) => if id == "co2_limit" then sense else current))
+      val message = intercept[Lopf.UnsupportedNetwork](Lopf.build(nan)).getMessage
+      assert(message.contains("co2_limit") && message.contains("non-finite"),
+        s"$sense: $message")
+    }
+  }
+
   test("a non-finite transmission weight is refused rather than reaching the matrix") {
     assume(available, "goldens missing")
     // A NaN `length` becomes a NaN coefficient and surfaces far away as an anonymous row,

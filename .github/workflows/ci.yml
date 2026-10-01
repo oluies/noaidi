@@ -231,7 +231,7 @@ jobs:
       # Once, not once per JDK. The emitted JavaScript and its results do not depend
       # on the host JVM, so the second matrix leg would link and run the suites
       # again for no signal -- which was cheap when this step only linked and is
-      # not now that it runs 158 tests.
+      # not now that it runs 182 tests.
       - name: Cross-compile and test on Scala.js
         if: matrix.java == '25'
         run: |
@@ -248,9 +248,15 @@ jobs:
           counts=$(.github/scripts/count_tests.sh sbt-js.log)
           eval "$counts"
           echo "Scala.js tests run: $total ($suites from per-suite lines, $summary from the summary)"
-          # 158 today: 138 from prima-core and 20 from prima-mps. A floor rather
+          # 182 today: 162 from prima-core and 20 from prima-mps. A floor rather
           # than an exact count, for the reason the aggregate step gives.
-          MINIMUM_JS_TESTS=150
+          #
+          # 175 and not 150. At 150 the guard did not protect the property it was
+          # raised for: reverting to excluding all of `KernelsSuite.scala` drops the
+          # 24 `ScalaKernelsSuite`/`Float32KernelsSuite` cases -- the kernel contract
+          # and the `Math.fround` float32 path -- leaving 158, which cleared the old
+          # floor. Re-anchor when the suite grows.
+          MINIMUM_JS_TESTS=175
           if [ "$total" -lt "$MINIMUM_JS_TESTS" ]; then
             echo "::error::Only $total Scala.js tests ran, below the floor of $MINIMUM_JS_TESTS -- either the suite shrank or something stopped running."
             exit 1

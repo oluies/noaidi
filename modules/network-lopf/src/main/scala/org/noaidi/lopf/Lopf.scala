@@ -730,9 +730,19 @@ object Lopf:
       // cyclic) and escaped only because its battery carrier reads 0.0.
       val emittingStorage = IndexedSeq("StorageUnit", "Store").flatMap { component =>
         network.table(component).toIndexedSeq.flatMap { table =>
-          val cyclic =
-            if component == "StorageUnit" then Storage.isCyclic(table, _: String)
-            else Stores.isCyclic(table, _: String)
+          // Matched exhaustively rather than defaulting through an `else`. The two
+          // predicates read different columns -- `cyclic_state_of_charge` against
+          // `e_cyclic` -- so a third component added to the list above would silently get
+          // Store semantics, read a column it does not have, and come back not-cyclic for
+          // every entity, over-refusing instead of failing visibly.
+          val cyclic: String => Boolean = component match
+            case "StorageUnit" => Storage.isCyclic(table, _)
+            case "Store"       => Stores.isCyclic(table, _)
+            case other =>
+              throw new UnsupportedNetwork(
+                s"no cyclicity predicate for component '$other' in the primary_energy " +
+                  "storage scan; adding one to that list has to choose a predicate."
+              )
           table.ids.filter(unit =>
             !cyclic(unit) &&
               carrierAttribute(network, table.string("carrier", unit), attribute) != 0.0)
@@ -908,11 +918,6 @@ object Lopf:
               "here it would silently drop every term and report a cheaper optimum."
           )
 
-        // A row over nothing is not satisfied, it is a claim about components that are not
-        // there -- and the senses differ on what that means. `<=` over no terms is
-        // `0 <= constant`, vacuous for a non-negative cap and therefore harmless; `>=` and
-        // `==` over no terms are claims that can be false, and dropping those silently is
-        // how a carrier typo turns a binding requirement into an unconstrained run.
         // The right-hand side, guarded for the same reason the branch weights are. A NaN
         // reaches `LpBuilder.constraint`, whose `require(lo <= hi)` is false for NaN, and
         // the build dies as "constraint has empty range [NaN, NaN]" -- naming neither the
@@ -931,6 +936,11 @@ object Lopf:
             s"global constraint '$id' has sense '$sense'; PyPSA writes '<=', '>=' or '=='"
           )
 
+        // A row over nothing is not satisfied, it is a claim about components that are not
+        // there -- and the senses differ on what that means. `<=` over no terms is
+        // `0 <= constant`, vacuous for a non-negative cap and therefore harmless; `>=` and
+        // `==` over no terms are claims that can be false, and dropping those silently is
+        // how a carrier typo turns a binding requirement into an unconstrained run.
         if terms.isEmpty then
           if sense != "<=" || constant < 0.0 then
             throw new UnsupportedNetwork(

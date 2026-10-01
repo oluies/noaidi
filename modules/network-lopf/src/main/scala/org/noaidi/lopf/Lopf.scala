@@ -700,14 +700,241 @@ object Lopf:
     // original, which `Sclopf` refuses to proceed past.
     BidLadder.constrain(network, snapshots, columns, declareLate, builder, ladder)
 
-    // Here too, and for a different reason from the two above: `Stability` emits no
-    // equality at all -- three inequalities per online unit and one per requirement -- so
-    // the row-index identity `Sclopf` depends on cannot be broken by where it sits. It is
-    // here anyway, with the other families that allocate columns late, because that keeps
-    // one place in this function where an optional family appears; and the invariant is
-    // asserted in its suite rather than assumed, since "emits no equality" is a property
-    // of the code and not of the signature.
+    /** The left-hand side of a `primary_energy` cap: emissions-weighted generation.
+      *
+      * Which carrier column is charged is data, not a constant. Hardcoding `co2_emissions`
+      * silently reads the wrong column -- or, since a missing column reads as zero, drops
+      * every term and then drops the row.
+      */
+    def primaryEnergy(attribute: String): Seq[(Int, Double)] =
+      // PyPSA's `define_primary_energy_limit` also charges StorageUnit and Store carriers
+      // that carry a non-zero intensity -- a non-cyclic unit through `state_of_charge`
+      // against its initial level, a store through `e`. This port builds neither, and under
+      // `<=` that only loosened the cap, which is why it went unnoticed: every golden gives
+      // its battery carrier 0.0 emissions.
+      //
+      // `>=` and `==` remove that excuse. A missing left-hand-side term in an equality is an
+      // error with no defensible sign, and in a floor it is satisfied by terms that should
+      // not count towards it. So the omission is refused rather than left to loosen or
+      // tighten silently, and the refusal covers `<=` too -- a cap that is wrong in the safe
+      // direction is still wrong, and nothing here can say by how much.
+      val emittingStorage = IndexedSeq("StorageUnit", "Store").flatMap { component =>
+        network.table(component).toIndexedSeq.flatMap { table =>
+          table.ids.filter(unit =>
+            carrierAttribute(network, table.string("carrier", unit), attribute) != 0.0)
+            .map(unit => s"$component '$unit'")
+        }
+      }
+      if emittingStorage.nonEmpty then
+        throw new UnsupportedNetwork(
+          s"a primary_energy constraint charges '$attribute', and " +
+            emittingStorage.mkString(", ") + " carries a non-zero value for it. PyPSA " +
+            "charges storage against that cap through its state of charge and this port " +
+            "sums generators only, so the row it would build is not the row PyPSA builds."
+        )
+
+      // Emissions are per unit of *primary energy*, so a generator's output is divided by
+      // its efficiency before being charged.
+      //
+      // Weighted by the `generators` column, not `objective`. PyPSA uses a different
+      // weighting for the emissions sum than for cost, and they are separate columns of
+      // snapshots.csv that a representative-period study sets apart on purpose. Every
+      // fixture holds both at 1.0, so no comparison here can see the difference -- which is
+      // exactly why it has to be read rather than assumed.
+      snapshots.flatMap { t =>
+        // `years`, not `objective`, on the period half. PyPSA scales an emissions sum by
+        // how many years the period stands for -- it is a quantity of gas, not a cost to
+        // discount -- while every other per-period factor in this builder is the objective
+        // weighting. Two columns of one small file that are easy to swap.
+        val weight = network.weighting("generators", t) *
+          network.periodOf(t).map(network.periodWeighting("years", _)).getOrElse(1.0)
+        generators.flatMap { g =>
+          g.ids.flatMap { gid =>
+            val intensity  = carrierAttribute(network, g.string("carrier", gid), attribute)
+            val efficiency = g.valueAt("efficiency", gid, t)
+            if intensity == 0.0 || efficiency == 0.0 then None
+            else Some((columns((g.spec.name, gid, t)), intensity / efficiency * weight))
+          }
+        }
+      }
+
+    /** The left-hand side of a transmission expansion limit.
+      *
+      * `sum of weight(branch) * capacity(branch)` over the '''extendable''' branches whose
+      * carrier the constraint names, where `weight` is `length` for a volume limit and
+      * `capital_cost` for a cost one. The two types differ in that attribute and in nothing
+      * else, which is why they share a builder rather than being written twice.
+      *
+      * Only `Line` and `Link`, which is PyPSA's own scope: a transmission limit is about the
+      * wires, and a generator's capacity is not transmission however it is carriered.
+      *
+      * `capital_cost` raw, not [[Expansion.periodizedCost]], so a network setting `fom_cost`
+      * has a cost limit that disagrees with its own objective about what a branch costs to
+      * build. That is upstream's behaviour -- `define_transmission_expansion_cost_limit`
+      * weights by `c.capital_cost` -- and this is a port, so it is reproduced rather than
+      * corrected. PyPSA additionally scales by a per-period weighting, which is unreachable
+      * here: expansion across investment periods is a refused gap.
+      *
+      * Non-extendable branches contribute nothing, and that is not an omission. Their
+      * capacity is a constant, so including them would compare a fixed number against the
+      * right-hand side -- PyPSA limits what is '''built''', not what exists.
+      */
+    def transmissionLimit(
+        id: String, carrierList: String, weightAttribute: String): Seq[(Int, Double)] =
+      // A comma-separated list, as PyPSA writes it, with brackets stripped and each entry
+      // trimmed. PyPSA applies `re.sub("[\\[\\]\\(\\)]", "", s)` per entry for a
+      // reason: the field is commonly written as a Python list literal, so `"[AC, DC]"` is
+      // an ordinary thing to find in a file. Splitting that without stripping yields
+      // `"[AC"` and `"DC]"`, which match nothing -- and under `<=` with a non-negative
+      // constant that is accepted as vacuous, so the port would return a cheaper objective
+      // than PyPSA for a row PyPSA builds and binds.
+      val carriers = carrierList
+        .split(",").map(_.filterNot("[]()".contains(_)).trim).filter(_.nonEmpty).toSet
+      IndexedSeq("Line", "Link").flatMap { component =>
+        network.table(component).toIndexedSeq.flatMap { table =>
+          table.ids.filter { branch =>
+            Expansion.isExtendable(table, branch) &&
+              carriers.contains(table.string("carrier", branch))
+          }.map { branch =>
+            // Refused rather than emitted. A NaN `length` or `capital_cost` becomes a NaN
+            // coefficient in the constraint matrix and surfaces hundreds of lines away as an
+            // anonymous row, which is the failure `TerminalValue` and `Stability` already
+            // refuse by name. `Expansion.periodizedCost` substitutes zero instead, and that
+            // is right for an objective -- a cost nobody can price is not a cost -- and
+            // wrong here, where dropping a branch from a limit silently changes what the
+            // limit means.
+            val weight = table.float(weightAttribute, branch)
+            if !weight.isFinite then
+              throw new UnsupportedNetwork(
+                s"global constraint '$id' weights $component '$branch' by " +
+                  s"'$weightAttribute', " +
+                  s"which is $weight. A non-finite weight cannot be a coefficient."
+              )
+            columns((Expansion.capacityKey(component), branch, Expansion.NoSnapshot)) -> weight
+          }
+        }
+      }
+
+    // Global constraints -- an emissions cap, typically. Ignoring one is not
+    // conservative: it drops a restriction, so the answer comes out cheaper than
+    // the real network's, and the "objective is a lower bound on PyPSA's" test
+    // that guarded the Kirchhoff work would have passed for exactly that reason.
+    // A dropped constraint and a missing constraint are indistinguishable to an
+    // inequality.
+    //
+    // Emitted HERE, between the last equality and the first inequality, rather than at the
+    // end of this builder where it used to sit. A constraint whose sense is `==` is an
+    // equality, and an equality emitted after any inequality takes a standard-form index
+    // that differs from its original -- which `Sclopf.build` refuses to proceed past. While
+    // only `<=` was supported the old placement was safe; the moment `==` became legal it
+    // stopped being, and `ac-dc-co2` is a network `SclopfSuite` already runs.
+    network.table("GlobalConstraint").foreach { constraints =>
+      // Equalities first, then everything else -- and this is a second ordering rule on top
+      // of where the block sits, not the same one twice.
+      //
+      // Moving the block between the last equality and the first inequality is necessary and
+      // was not sufficient: inside it the constraints were walked in file order, so a
+      // network carrying a `<=` cap ahead of an `==` target emitted an inequality and then
+      // an equality, and `build()` swapped them. Measured on `ac-dc-txvolume-exact`, which
+      // inherits `ac-dc-meshed`'s `co2_limit` and adds an `==` of its own: original row 110
+      // mapped to `Negated(111)` and 111 to `Direct(110)`.
+      //
+      // Sorting on the sense rather than reordering the file keeps the refusals and the
+      // messages in file order, which is what a reader of an error expects.
+      val ordered = constraints.ids.sortBy(id => if constraints.string("sense", id) == "==" then 0 else 1)
+      ordered.foreach { id =>
+        val sense     = constraints.string("sense", id)
+        val constant  = constraints.float("constant", id)
+        val kind      = constraints.string("type", id)
+        val attribute = constraints.string("carrier_attribute", id)
+
+        // `type` selects an entirely different left-hand side in PyPSA. Assuming one would
+        // take an `operational_limit` capping a carrier's *energy* and build it as an
+        // emissions-weighted sum over every emitting generator: a different constraint
+        // wearing the same right-hand side, returning Optimal.
+        val terms = kind match
+          case "primary_energy"                      => primaryEnergy(attribute)
+          case "transmission_volume_expansion_limit" =>
+            transmissionLimit(id, attribute, "length")
+          case "transmission_expansion_cost_limit"   =>
+            transmissionLimit(id, attribute, "capital_cost")
+          case other =>
+            throw new UnsupportedNetwork(
+              s"global constraint '$id' has type '$other'; this port implements " +
+                "primary_energy, transmission_volume_expansion_limit and " +
+                "transmission_expansion_cost_limit"
+            )
+
+        // A named column that is not there at all is an error whatever the sense, and that
+        // is separate from the emptiness branch below.
+        //
+        // `carrierAttribute` returns 0.0 both for "this carrier's value is zero" and for
+        // "that column does not exist", so a misspelled `carrier_attribute` dropped every
+        // term, dropped the row, and returned the unconstrained -- cheaper -- optimum.
+        // PyPSA indexes the column directly and raises `KeyError`. The first version of this
+        // guard accepted it under `<=`, and the suite had a test pinning that as correct,
+        // which is how a silent divergence acquires a certificate.
+        //
+        // Only the absent case. A column that exists and is all zero is PyPSA's own
+        // skip-the-constraint path, and is left alone.
+        if kind == "primary_energy" && !network.table("Carrier")
+            .exists(t => t.spec.attribute(attribute).isDefined || t.static.contains(attribute))
+        then
+          throw new UnsupportedNetwork(
+            s"global constraint '$id' charges '$attribute', which no Carrier column " +
+              "defines. PyPSA raises on that rather than building a row over nothing; " +
+              "here it would silently drop every term and report a cheaper optimum."
+          )
+
+        // A row over nothing is not satisfied, it is a claim about components that are not
+        // there -- and the senses differ on what that means. `<=` over no terms is
+        // `0 <= constant`, vacuous for a non-negative cap and therefore harmless; `>=` and
+        // `==` over no terms are claims that can be false, and dropping those silently is
+        // how a carrier typo turns a binding requirement into an unconstrained run.
+        // The sense is validated before the emptiness branch below, so an unsupported sense
+        // over an empty left-hand side reports the sense rather than "a claim about
+        // nothing" -- which named the wrong problem and sent the reader to the wrong column.
+        if !Set("<=", ">=", "==").contains(sense) then
+          throw new UnsupportedNetwork(
+            s"global constraint '$id' has sense '$sense'; PyPSA writes '<=', '>=' or '=='"
+          )
+
+        if terms.isEmpty then
+          if sense != "<=" || constant < 0.0 then
+            throw new UnsupportedNetwork(
+              s"global constraint '$id' of type '$kind' matches no component, so " +
+                s"'$sense $constant' is a claim about nothing. Its carrier_attribute is " +
+                s"'$attribute'."
+            )
+          else ()
+        else
+          sense match
+            case "<=" => builder.lessThan(terms, constant)
+            case ">=" => builder.greaterThan(terms, constant)
+            case "==" => builder.equalityConstraint(terms, constant)
+            // Unreachable: the sense was validated above. Spelled out rather than left to a
+            // `MatchError`, which would name neither the constraint nor the column.
+            case other =>
+              throw new UnsupportedNetwork(
+                s"global constraint '$id' has sense '$other'; PyPSA writes '<=', '>=' or '=='"
+              )
+      }
+    }
+
+    // Last of the families, and that ordering is now load-bearing rather than incidental.
+    // `Stability` emits only inequalities, and the global-constraint block above emits an
+    // equality whenever a constraint's sense is `==`. Every equality has to precede every
+    // inequality or `Sclopf.build` refuses the model, so the block goes above this call and
+    // not below it.
+    //
+    // The comment here used to say the opposite -- that because `Stability` emits no
+    // equality its position could not matter. That was true of `Stability` in isolation and
+    // false of the pair: with a `==` cap and a stability config, original rows 110-113 of
+    // `ac-dc-txvolume-exact` came back misindexed. `Stability`'s own suite could not see it
+    // and neither could `GlobalConstraintSuite`, because each builds without the other.
     Stability.constrain(network, snapshots, columns, declareLate, builder, stability)
+
+
 
     // Capacity coupling, two rows per extendable entity per snapshot. This is
     // where an expansion model differs from a dispatch one: the operational
@@ -778,68 +1005,6 @@ object Lopf:
       EnergySum.constrain(table, network, snapshots, (id, t) => columns((component, id, t)), builder)
     }
 
-    // Global constraints -- an emissions cap, typically. Ignoring one is not
-    // conservative: it drops a restriction, so the answer comes out cheaper than
-    // the real network's, and the "objective is a lower bound on PyPSA's" test
-    // that guarded the Kirchhoff work would have passed for exactly that reason.
-    // A dropped constraint and a missing constraint are indistinguishable to an
-    // inequality.
-    network.table("GlobalConstraint").foreach { constraints =>
-      constraints.ids.foreach { id =>
-        val sense    = constraints.string("sense", id)
-        val constant = constraints.float("constant", id)
-
-        // `type` selects an entirely different left-hand side in PyPSA --
-        // primary_energy, tech_capacity_expansion_limit and operational_limit are
-        // three separate builders. Assuming the first would take an
-        // `operational_limit` capping one carrier's *energy* and build it as an
-        // emissions-weighted sum over every emitting generator: a different
-        // constraint wearing the same right-hand side, returning Optimal.
-        val kind = constraints.string("type", id)
-        if kind != "primary_energy" then
-          throw new UnsupportedNetwork(
-            s"global constraint '$id' has type '$kind'; only 'primary_energy' is implemented"
-          )
-        if sense != "<=" then
-          throw new UnsupportedNetwork(
-            s"global constraint '$id' has sense '$sense'; only '<=' is implemented"
-          )
-
-        // Which carrier column is charged is data, not a constant. Hardcoding
-        // `co2_emissions` silently reads the wrong column -- or, since a missing
-        // column reads as zero, drops every term and then drops the row.
-        val attribute = constraints.string("carrier_attribute", id)
-
-        // Emissions are per unit of *primary energy*, so a generator's output is
-        // divided by its efficiency before being charged.
-        //
-        // Weighted by the `generators` column, not `objective`. PyPSA uses a
-        // different weighting for the emissions sum than for cost, and they are
-        // separate columns of snapshots.csv that a representative-period study
-        // sets apart on purpose. Every fixture holds both at 1.0, so no
-        // comparison here can see the difference -- which is exactly why it has to
-        // be read rather than assumed.
-        val terms = snapshots.flatMap { t =>
-          // `years`, not `objective`, on the period half. PyPSA scales an
-          // emissions sum by how many years the period stands for -- it is a
-          // quantity of gas, not a cost to discount -- while every other
-          // per-period factor in this builder is the objective weighting. Two
-          // columns of one small file that are easy to swap.
-          val weight = network.weighting("generators", t) *
-            network.periodOf(t).map(network.periodWeighting("years", _)).getOrElse(1.0)
-          generators.flatMap { g =>
-            g.ids.flatMap { gid =>
-              val intensity  = carrierAttribute(network, g.string("carrier", gid), attribute)
-              val efficiency = g.valueAt("efficiency", gid, t)
-              if intensity == 0.0 || efficiency == 0.0 then None
-              else Some((columns((g.spec.name, gid, t)), intensity / efficiency * weight))
-            }
-          }
-        }
-
-        if terms.nonEmpty then builder.lessThan(terms, constant)
-      }
-    }
 
     // Last, and deliberately: these are operational limits laid over a finished
     // dispatch problem, which is where PyPSA puts them too -- an

@@ -73,6 +73,79 @@ def ac_dc_dispatch():
     return n
 
 
+# `ac-dc-meshed` ships every line at `length = 0`, so a volume limit over it is the row
+# `0 <= constant` -- satisfied by anything, and indistinguishable from no row at all. These
+# lengths exist so the constraint has a left-hand side; the values are arbitrary but fixed,
+# because a limit measured against a random length is a fixture nobody can reason about.
+TX_LENGTHS = [120.0, 80.0, 200.0, 150.0, 60.0, 90.0, 110.0]
+
+# What `ac-dc-meshed` builds when nothing limits it, measured and recorded here so the
+# constants below can be read as what they are: fractions and multiples of a free optimum.
+#   sum(length * s_nom_opt)       = 633_340.16
+#   sum(capital_cost * s_nom_opt) =     609.63
+TX_FREE_VOLUME = 633_340.16
+TX_FREE_COST = 609.63
+
+
+def _ac_dc_tx(kind, sense, constant):
+    """`ac-dc-meshed` with a transmission expansion limit that binds."""
+    n = pypsa.examples.ac_dc_meshed()
+    n.lines["length"] = TX_LENGTHS
+    n.add("GlobalConstraint", "tx_limit", type=kind, carrier_attribute="AC",
+          sense=sense, constant=constant)
+    return n
+
+
+def ac_dc_txvolume():
+    """A transmission *volume* limit at 60% of what the network would build freely.
+
+    Volume is `sum(length * s_nom_opt)` over the extendable branches of the named carrier,
+    which is why the lengths above had to be invented -- PyPSA's example ships zeros.
+
+    The cap costs a great deal: the objective moves from -3,474,256.04 to -1,522,312.46, a
+    56% spread. That is deliberate and is the same argument `ac-dc-co2` makes. A limit that
+    merely touched the optimum would be reproduced exactly by an implementation that never
+    built the row.
+    """
+    return _ac_dc_tx("transmission_volume_expansion_limit", "<=", 380_000.0)
+
+
+def ac_dc_txvolume_exact():
+    """The same limit at `==`, set ABOVE the free optimum so the sense is what decides.
+
+    This is the fixture that separates `==` from `<=`, and the constant has to be above the
+    free optimum for it to do so. Below it the two senses agree -- a binding cap sits exactly
+    on its constant either way -- and a port that read `==` as `<=` would pass.
+
+    At twice the free volume they disagree completely: `==` builds 1,266,680 and `<=` builds
+    633,340, because `<=` is simply slack there. The objectives differ by only 8e-6 relative,
+    so it is the *capacities* that carry this one, which is why the suite asserts them.
+    """
+    return _ac_dc_tx("transmission_volume_expansion_limit", "==", 1_266_000.0)
+
+
+def ac_dc_txcost():
+    """A transmission *cost* limit at `>=`: build at least this much, by capital cost.
+
+    The other left-hand side -- `sum(capital_cost * s_nom_opt)` rather than length-weighted --
+    and the other sense. A floor rather than a cap is a real policy instrument, and it is
+    also the only way to make `>=` bind on this network.
+
+    It moves the objective by 1.2e-3 relative, which is above the 1e-6 the suites compare at
+    but far from the volume cap's 56%. The reason is structural: forcing more transmission
+    costs only `capital_cost` per MW and those are 0.009-0.2, against an objective dominated
+    by a -3.47M sunk-capital term.
+
+    ⚠️ The per-line capacities here are DEGENERATE and a port must not assert them. The
+    constraint weights by the same `capital_cost` the objective charges, so every line trades
+    one unit of cost for one unit of constraint and the LP is indifferent to which it builds:
+    HiGHS simplex puts 21,982 on line 6, its interior point puts 76,382 on line 2, and the
+    two agree on the objective to 1e-8 and on the cost-weighted total to four decimals. What
+    is pinned is the objective and that total, which is what `GlobalConstraintSuite` asserts.
+    """
+    return _ac_dc_tx("transmission_expansion_cost_limit", ">=", 4_800.0)
+
+
 def ac_dc_co2():
     """`ac-dc-dispatch` with a CO2 cap that actually restricts the dispatch.
 
@@ -160,6 +233,9 @@ KNOWN_UNSUPPORTED = {
     ("ac-dc-meshed", "pf"): "PyPSA raises AttributeError inside its own sub-network handling",
     ("ac-dc-dispatch", "pf"): "same as ac-dc-meshed, from which it is derived",
     ("ac-dc-co2", "pf"): "same as ac-dc-meshed, from which it is derived",
+    ("ac-dc-txvolume", "pf"): "same as ac-dc-meshed, from which it is derived",
+    ("ac-dc-txvolume-exact", "pf"): "same as ac-dc-meshed, from which it is derived",
+    ("ac-dc-txcost", "pf"): "same as ac-dc-meshed, from which it is derived",
 }
 
 def unit_commitment():
@@ -1116,6 +1192,9 @@ NETWORKS = {
     "ac-pf-pv": ac_pf_pv,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
+    "ac-dc-txvolume": ac_dc_txvolume,
+    "ac-dc-txvolume-exact": ac_dc_txvolume_exact,
+    "ac-dc-txcost": ac_dc_txcost,
     "storage-hvdc": pypsa.examples.storage_hvdc,
     # The first realistic-scale network: 585 buses, 852 lines, 96 transformers,
     # 1423 generators over 24 snapshots. It is also the only bundled PyPSA

@@ -1,0 +1,3 @@
+name,type,carrier_attribute,sense,constant
+co2_limit,primary_energy,co2_emissions,<=,1000.0
+tx_limit,transmission_volume_expansion_limit,AC,<=,380000.0

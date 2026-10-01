@@ -126,6 +126,18 @@ lazy val primaCoreJs = project
     name := "prima-core-js",
     Compile / unmanagedSourceDirectories := Seq((primaCore / Compile / scalaSource).value),
     Compile / unmanagedSources / excludeFilter := HiddenFileFilter || "VectorKernels.scala",
+    // The same suites, run again on JavaScript. Linking proves the code compiles and that
+    // no JVM-only class survives the reachability analysis; it says nothing about whether
+    // the answers agree. These say that, and they are the reason this is cross-compilation
+    // rather than a second build that happens to typecheck.
+    Test / unmanagedSourceDirectories := Seq((primaCore / Test / scalaSource).value),
+    // Only the SIMD suites, which name `jdk.incubator.vector`. They were split out of
+    // `KernelsSuite.scala` for this: excluding that whole file took `ScalaKernelsSuite` and
+    // `Float32KernelsSuite` with it, which is the kernel contract itself -- and the float32
+    // path is the code most likely to differ on a platform where `Float` arithmetic goes
+    // through `Math.fround`, so it is the last thing that should have been dropped from a
+    // run whose stated purpose is whether the answers agree.
+    Test / unmanagedSources / excludeFilter := HiddenFileFilter || "VectorKernelsSuite.scala",
   )
 
 lazy val networkModelJs = project
@@ -212,6 +224,11 @@ lazy val primaModelJs = project
   .settings(
     name := "prima-model-js",
     Compile / unmanagedSourceDirectories := Seq((primaModel / Compile / scalaSource).value),
+    // No test sources, and deliberately not an empty set of them: this module's only suite
+    // compares Prima against ojAlgo, which is a Java solver and cannot cross-compile.
+    // Pointing `Test / unmanagedSourceDirectories` at it and excluding the file would leave
+    // a project that runs zero tests and reports success, which is the failure mode the
+    // build already warns about for `test` under sbt 2.
   )
 
 // `MpsReader.fromFile` is the only `java.nio.file` here and `fromString` is beside it, so
@@ -224,6 +241,7 @@ lazy val primaMpsJs = project
   .settings(
     name := "prima-mps-js",
     Compile / unmanagedSourceDirectories := Seq((primaMps / Compile / scalaSource).value),
+    Test / unmanagedSourceDirectories := Seq((primaMps / Test / scalaSource).value),
   )
 
 // Four modules are deliberately not here, and none of them for a language reason:
@@ -238,6 +256,29 @@ lazy val primaMpsJs = project
 // `prima-zio` could be ported -- ZIO cross-publishes and Scala.js implements the
 // `AtomicBoolean` it uses -- and is left out because nothing in the demo is effectful and
 // it would be weight for its own sake.
+
+// One entry point for the JavaScript half, so a change that breaks it is one command away
+// rather than four.
+//
+// `demoJs/fullLinkJS` covers `primaCoreJs`, `networkModelJs`, `networkPfJs` and
+// `networkLopfJs`, because it depends on all four -- linking is what fails on a JVM-only
+// class the reachability analysis cannot drop, and compiling alone does not. The alias used
+// to name `networkPfJs/compile` and `networkLopfJs/compile` as well, with a comment saying
+// they were there because nothing linked them. Both were already linked transitively, so the
+// entries were redundant and the reason given for them was wrong.
+//
+// `primaModelJs/compile` stays, and it is the one genuine gap: nothing links that project,
+// and linking it alone would prove nothing either, since the reachability analysis starts
+// from a main or an export and a library has neither. It is compile-checked only.
+//
+// `testFull` and not `test`, for the reason stated beside `commonSettings`: under sbt 2
+// `test` is incremental and reports success having run nothing. Written with `test` first,
+// and it printed "Passed: Total 0" twice -- which is the whole argument for the count
+// assertion in CI, since that is what noticed.
+addCommandAlias(
+  "crossJs",
+  "primaCoreJs/testFull; primaMpsJs/testFull; primaModelJs/compile; demoJs/fullLinkJS",
+)
 
 // The demo itself: a page that builds a network from what the sliders say, turns it into a
 // linear program through the real `Lopf`, and solves it with Prima -- in the browser, with

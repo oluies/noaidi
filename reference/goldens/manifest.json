@@ -1240,6 +1240,1077 @@
     }
    ]
   },
+  "ac-dc-txcost": {
+   "components": {
+    "Bus": {
+     "count": 9,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "x",
+      "y",
+      "carrier",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "varying": {}
+    },
+    "Carrier": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "co2_emissions",
+      "color",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "co2_emissions",
+      "color",
+      "nice_name",
+      "max_growth",
+      "max_relative_growth",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "p_nom_extendable",
+      "p_nom_min",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "efficiency"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {
+      "p_max_pu": [
+       "Manchester Wind",
+       "Frankfurt Wind",
+       "Norway Wind"
+      ]
+     }
+    },
+    "GlobalConstraint": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "type",
+      "carrier_attribute",
+      "sense",
+      "constant"
+     ],
+     "in_memory_columns": [
+      "type",
+      "investment_period",
+      "bus",
+      "carrier_attribute",
+      "sense",
+      "constant",
+      "mu"
+     ],
+     "varying": {}
+    },
+    "Line": {
+     "count": 7,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "x",
+      "r",
+      "s_nom",
+      "s_nom_extendable",
+      "capital_cost",
+      "length",
+      "carrier",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "x",
+      "r",
+      "g",
+      "b",
+      "s_nom",
+      "s_nom_mod",
+      "s_nom_extendable",
+      "s_nom_min",
+      "s_nom_max",
+      "s_nom_set",
+      "s_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "active",
+      "build_year",
+      "lifetime",
+      "length",
+      "carrier",
+      "terrain_factor",
+      "num_parallel",
+      "v_ang_min",
+      "v_ang_max",
+      "sub_network",
+      "x_pu",
+      "r_pu",
+      "g_pu",
+      "b_pu",
+      "x_pu_eff",
+      "r_pu_eff",
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Link": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "carrier",
+      "p_nom",
+      "p_nom_extendable",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "carrier",
+      "efficiency",
+      "active",
+      "build_year",
+      "lifetime",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_set",
+      "p_init",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "stand_by_cost",
+      "length",
+      "terrain_factor",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "delay",
+      "cyclic_delay",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Load": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "carrier"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "London",
+       "Norwich",
+       "Frankfurt",
+       "Bremen",
+       "Norway",
+       "Manchester"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "multi_period": false,
+   "name": "ac-dc-txcost",
+   "snapshots": [
+    "2015-01-01 00:00:00",
+    "2015-01-01 01:00:00",
+    "2015-01-01 02:00:00",
+    "2015-01-01 03:00:00",
+    "2015-01-01 04:00:00",
+    "2015-01-01 05:00:00",
+    "2015-01-01 06:00:00",
+    "2015-01-01 07:00:00",
+    "2015-01-01 08:00:00",
+    "2015-01-01 09:00:00"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "London",
+      "Manchester",
+      "Norwich"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Manchester"
+    },
+    {
+     "buses": [
+      "Bremen DC",
+      "Norway DC",
+      "Norwich DC"
+     ],
+     "carrier": "DC",
+     "slack_bus": "Norwich DC"
+    },
+    {
+     "buses": [
+      "Bremen",
+      "Frankfurt"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Frankfurt"
+    },
+    {
+     "buses": [
+      "Norway"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Norway"
+    }
+   ]
+  },
+  "ac-dc-txvolume": {
+   "components": {
+    "Bus": {
+     "count": 9,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "x",
+      "y",
+      "carrier",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "varying": {}
+    },
+    "Carrier": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "co2_emissions",
+      "color",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "co2_emissions",
+      "color",
+      "nice_name",
+      "max_growth",
+      "max_relative_growth",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "p_nom_extendable",
+      "p_nom_min",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "efficiency"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {
+      "p_max_pu": [
+       "Manchester Wind",
+       "Frankfurt Wind",
+       "Norway Wind"
+      ]
+     }
+    },
+    "GlobalConstraint": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "type",
+      "carrier_attribute",
+      "sense",
+      "constant"
+     ],
+     "in_memory_columns": [
+      "type",
+      "investment_period",
+      "bus",
+      "carrier_attribute",
+      "sense",
+      "constant",
+      "mu"
+     ],
+     "varying": {}
+    },
+    "Line": {
+     "count": 7,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "x",
+      "r",
+      "s_nom",
+      "s_nom_extendable",
+      "capital_cost",
+      "length",
+      "carrier",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "x",
+      "r",
+      "g",
+      "b",
+      "s_nom",
+      "s_nom_mod",
+      "s_nom_extendable",
+      "s_nom_min",
+      "s_nom_max",
+      "s_nom_set",
+      "s_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "active",
+      "build_year",
+      "lifetime",
+      "length",
+      "carrier",
+      "terrain_factor",
+      "num_parallel",
+      "v_ang_min",
+      "v_ang_max",
+      "sub_network",
+      "x_pu",
+      "r_pu",
+      "g_pu",
+      "b_pu",
+      "x_pu_eff",
+      "r_pu_eff",
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Link": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "carrier",
+      "p_nom",
+      "p_nom_extendable",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "carrier",
+      "efficiency",
+      "active",
+      "build_year",
+      "lifetime",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_set",
+      "p_init",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "stand_by_cost",
+      "length",
+      "terrain_factor",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "delay",
+      "cyclic_delay",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Load": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "carrier"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "London",
+       "Norwich",
+       "Frankfurt",
+       "Bremen",
+       "Norway",
+       "Manchester"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "multi_period": false,
+   "name": "ac-dc-txvolume",
+   "snapshots": [
+    "2015-01-01 00:00:00",
+    "2015-01-01 01:00:00",
+    "2015-01-01 02:00:00",
+    "2015-01-01 03:00:00",
+    "2015-01-01 04:00:00",
+    "2015-01-01 05:00:00",
+    "2015-01-01 06:00:00",
+    "2015-01-01 07:00:00",
+    "2015-01-01 08:00:00",
+    "2015-01-01 09:00:00"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "London",
+      "Manchester",
+      "Norwich"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Manchester"
+    },
+    {
+     "buses": [
+      "Bremen DC",
+      "Norway DC",
+      "Norwich DC"
+     ],
+     "carrier": "DC",
+     "slack_bus": "Norwich DC"
+    },
+    {
+     "buses": [
+      "Bremen",
+      "Frankfurt"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Frankfurt"
+    },
+    {
+     "buses": [
+      "Norway"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Norway"
+    }
+   ]
+  },
+  "ac-dc-txvolume-exact": {
+   "components": {
+    "Bus": {
+     "count": 9,
+     "exported_columns": [
+      "name",
+      "v_nom",
+      "x",
+      "y",
+      "carrier",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "in_memory_columns": [
+      "v_nom",
+      "type",
+      "x",
+      "y",
+      "carrier",
+      "unit",
+      "location",
+      "v_mag_pu_set",
+      "v_mag_pu_min",
+      "v_mag_pu_max",
+      "control",
+      "generator",
+      "sub_network",
+      "country"
+     ],
+     "varying": {}
+    },
+    "Carrier": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "co2_emissions",
+      "color",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "co2_emissions",
+      "color",
+      "nice_name",
+      "max_growth",
+      "max_relative_growth",
+      "marginal_cost",
+      "efficiency",
+      "capital_cost"
+     ],
+     "varying": {}
+    },
+    "Generator": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "control",
+      "p_nom",
+      "p_nom_extendable",
+      "p_nom_min",
+      "carrier",
+      "marginal_cost",
+      "capital_cost",
+      "efficiency"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "control",
+      "type",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_min_pu",
+      "p_max_pu",
+      "p_set",
+      "p_init",
+      "e_sum_min",
+      "e_sum_max",
+      "q_set",
+      "sign",
+      "carrier",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "active",
+      "build_year",
+      "lifetime",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "efficiency",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "stand_by_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "weight",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {
+      "p_max_pu": [
+       "Manchester Wind",
+       "Frankfurt Wind",
+       "Norway Wind"
+      ]
+     }
+    },
+    "GlobalConstraint": {
+     "count": 2,
+     "exported_columns": [
+      "name",
+      "type",
+      "carrier_attribute",
+      "sense",
+      "constant"
+     ],
+     "in_memory_columns": [
+      "type",
+      "investment_period",
+      "bus",
+      "carrier_attribute",
+      "sense",
+      "constant",
+      "mu"
+     ],
+     "varying": {}
+    },
+    "Line": {
+     "count": 7,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "x",
+      "r",
+      "s_nom",
+      "s_nom_extendable",
+      "capital_cost",
+      "length",
+      "carrier",
+      "sub_network"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "x",
+      "r",
+      "g",
+      "b",
+      "s_nom",
+      "s_nom_mod",
+      "s_nom_extendable",
+      "s_nom_min",
+      "s_nom_max",
+      "s_nom_set",
+      "s_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "active",
+      "build_year",
+      "lifetime",
+      "length",
+      "carrier",
+      "terrain_factor",
+      "num_parallel",
+      "v_ang_min",
+      "v_ang_max",
+      "sub_network",
+      "x_pu",
+      "r_pu",
+      "g_pu",
+      "b_pu",
+      "x_pu_eff",
+      "r_pu_eff",
+      "s_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Link": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "bus0",
+      "bus1",
+      "carrier",
+      "p_nom",
+      "p_nom_extendable",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost"
+     ],
+     "in_memory_columns": [
+      "bus0",
+      "bus1",
+      "type",
+      "carrier",
+      "efficiency",
+      "active",
+      "build_year",
+      "lifetime",
+      "p_nom",
+      "p_nom_mod",
+      "p_nom_extendable",
+      "p_nom_min",
+      "p_nom_max",
+      "p_nom_set",
+      "p_set",
+      "p_init",
+      "p_min_pu",
+      "p_max_pu",
+      "capital_cost",
+      "overnight_cost",
+      "discount_rate",
+      "fom_cost",
+      "marginal_cost",
+      "marginal_cost_quadratic",
+      "stand_by_cost",
+      "length",
+      "terrain_factor",
+      "committable",
+      "maintainable",
+      "maintenance_duration",
+      "maintenance_pu",
+      "maintenance_events",
+      "start_up_cost",
+      "shut_down_cost",
+      "min_up_time",
+      "min_down_time",
+      "up_time_before",
+      "down_time_before",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "ramp_limit_start_up",
+      "ramp_limit_shut_down",
+      "delay",
+      "cyclic_delay",
+      "p_nom_opt",
+      "capital_cost_piecewise_opt"
+     ],
+     "varying": {}
+    },
+    "Load": {
+     "count": 6,
+     "exported_columns": [
+      "name",
+      "bus",
+      "carrier"
+     ],
+     "in_memory_columns": [
+      "bus",
+      "carrier",
+      "type",
+      "p_set",
+      "q_set",
+      "sign",
+      "active"
+     ],
+     "varying": {
+      "p_set": [
+       "London",
+       "Norwich",
+       "Frankfurt",
+       "Bremen",
+       "Norway",
+       "Manchester"
+      ]
+     }
+    },
+    "SubNetwork": {
+     "count": 4,
+     "exported_columns": [
+      "name",
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "in_memory_columns": [
+      "carrier",
+      "slack_bus",
+      "obj"
+     ],
+     "varying": {}
+    }
+   },
+   "multi_period": false,
+   "name": "ac-dc-txvolume-exact",
+   "snapshots": [
+    "2015-01-01 00:00:00",
+    "2015-01-01 01:00:00",
+    "2015-01-01 02:00:00",
+    "2015-01-01 03:00:00",
+    "2015-01-01 04:00:00",
+    "2015-01-01 05:00:00",
+    "2015-01-01 06:00:00",
+    "2015-01-01 07:00:00",
+    "2015-01-01 08:00:00",
+    "2015-01-01 09:00:00"
+   ],
+   "sub_networks": [
+    {
+     "buses": [
+      "London",
+      "Manchester",
+      "Norwich"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Manchester"
+    },
+    {
+     "buses": [
+      "Bremen DC",
+      "Norway DC",
+      "Norwich DC"
+     ],
+     "carrier": "DC",
+     "slack_bus": "Norwich DC"
+    },
+    {
+     "buses": [
+      "Bremen",
+      "Frankfurt"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Frankfurt"
+    },
+    {
+     "buses": [
+      "Norway"
+     ],
+     "carrier": "AC",
+     "slack_bus": "Norway"
+    }
+   ]
+  },
   "ac-pf-pv": {
    "components": {
     "Bus": {

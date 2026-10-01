@@ -204,7 +204,7 @@ jobs:
           # gets muted. A floor only fails when coverage goes backwards, which is
           # when someone should look. Raise it when the suite grows enough to be
           # worth re-anchoring; it does not need to track the total.
-          MINIMUM_TESTS=730
+          MINIMUM_TESTS=760
           if [ "$total" -lt "$MINIMUM_TESTS" ]; then
             echo "::error::Only $total tests ran, below the floor of $MINIMUM_TESTS -- either the suite shrank or something stopped running."
             exit 1

@@ -161,12 +161,17 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 
   // Global constraints: PyPSA dispatches on `type` to entirely different
   // builders, so the wrong one is a different constraint wearing the same
-  // right-hand side.
-  refuses("GlobalConstraint type other than primary_energy", "type") {
+  // right-hand side. Three of its types are implemented; the rest are refused by
+  // name, and `operational_limit` is the one to name because it is the one whose
+  // right-hand side looks most like a cap's.
+  refuses("GlobalConstraint type that is not implemented", "operational_limit") {
     mutate("ac-dc-co2", "global_constraints.csv", setColumn(_, "type", "operational_limit"))
   }
-  refuses("GlobalConstraint sense other than <=", "sense") {
-    mutate("ac-dc-co2", "global_constraints.csv", setColumn(_, "sense", ">="))
+  // `>=` and `==` are implemented now, so the gap that remains is a sense PyPSA
+  // does not write at all. Keeping a test for the *implemented* senses here would
+  // put it in the wrong file; `GlobalConstraintSuite` compares those against PyPSA.
+  refuses("GlobalConstraint sense PyPSA does not write", "sense") {
+    mutate("ac-dc-co2", "global_constraints.csv", setColumn(_, "sense", "<"))
   }
 
   // Whole features, refused as networks rather than as attributes.

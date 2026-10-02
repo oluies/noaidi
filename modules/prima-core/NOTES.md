@@ -1722,6 +1722,148 @@ The port needed no change. The weightings were already right — the implementat
 had been reasoned from PyPSA's source rather than from the golden, which is why.
 What was missing was any way to find out.
 
+## Capacity expansion across periods: a refusal that was wrong about why
+
+`Periods.reject` refused every extendable asset on a multi-period network, and the
+reason it gave was:
+
+> capacity expansion across investment periods is not modelled, only dispatch
+> within them -- PyPSA gives each build year its own asset and the choice of
+> *when* to build interacts with the activity window and the discounting
+
+The second half is right. The first half is not, and it is the half that made the
+feature look like a new formulation. PyPSA keeps **one** capacity variable per
+asset. `build_year` is an input on the static frame saying which periods the asset
+exists in, not a decision, and `define_objective` charges the asset's capital once
+per period it exists in:
+
+```python
+cost_weight = (active_ext.groupby("period").any("snapshot") * period_weight).sum("period")
+capex_terms.append((caps_lin * lin_weight * periodic_cost).sum(dim=["name", "period"]))
+```
+
+So the column layout this model already had was the right one, and what was
+missing was a coefficient and three masks. Measured on
+`investment-periods-expansion`: `wind`, active in both periods, is charged
+`120 x (1.0 + 0.5) = 180` per MW; `late`, built in 2040, `60 x 0.5 = 30`.
+
+Two details of the coefficient that are easy to get wrong in opposite directions:
+
+- It is the **period** objective weighting, not `Periods.objectiveWeight`. Capital
+  is charged per period, not per snapshot, so the snapshot weighting does not
+  enter. Multiplying by it would scale capital by however many snapshots the period
+  happens to carry, which on a representative-period study is arbitrary.
+- The sum runs over the periods the **snapshots** carry, not the periods
+  `investment_periods.csv` declares. PyPSA sums over `window.periods`, and it
+  tolerates a declared period no snapshot belongs to -- counting one would charge
+  capital for a period the model does not solve.
+
+### The three masks, and why the column alone is not one of them
+
+An extendable entity's column is declared free and its limits live in two rows
+against the capacity variable. That is why `activeBounds` had never touched it: for
+a fixed-capacity asset the bound *is* the limit, and for an extendable one there
+was no bound to narrow. So the activity window did not reach an extendable asset at
+all, and `late` -- bidding 5 against `old`'s 100 -- would have run through 2030.
+Cheaper than the truth, reporting `Optimal`, which is the shape this module exists
+against.
+
+Pinning the column to `[0, 0]` outside the window is necessary and **not
+sufficient**. The lower capacity row is
+
+```
+p(t) - p_min_pu(t) * p_nom >= 0
+```
+
+and with `p(t)` pinned to zero and a positive `p_min_pu` it reads
+`-p_min_pu * p_nom >= 0`, which forces the **capacity** to zero over the whole
+horizon. A must-run unit absent from one period would therefore not be built at
+all. PyPSA masks both rows with `active`
+(`define_operational_constraints_for_extendables` passes `mask=active` twice), and
+so does this now. The fixture's mutation setting `late`'s `p_min_pu` to 0.5 is
+unchanged at 20,175 under PyPSA and lands on 22,300 without the row mask -- the
+asset not built, 2040 falling back on `old`.
+
+Storage and stores already went through `activeBounds` when extendable, for a
+reason recorded earlier: their columns are bounded below at zero by construction,
+so the extendable case narrows a bound rather than removing one. Only generators,
+passive branches and controllable branches declared a free column.
+
+### `objective_constant` is zero under the flag, and that is PyPSA's
+
+```python
+if n._multi_invest:
+    active_by_period = c.da.active.sel(name=ext_i).groupby("period").any("snapshot")
+    active_weight = (active_by_period * period_weight).sum("period")
+    weighted_cost = active_weight * periodic_cost
+else:
+    active = c.da.active.sel(name=ext_i).any(dim="snapshot")
+    weighted_cost = active * periodic_cost
+
+    terms.append((weighted_cost * nominal).sum(dim=["name"]))
+```
+
+`terms.append` is inside the `else`. The multi-invest branch computes
+`weighted_cost` and discards it, so `n._objective_constant` comes out 0.0 whenever
+`multi_investment_periods` is set. The same network reports 3,000 without the flag
+and 0.0 with it.
+
+It reads like an oversight upstream. Reproducing it is still right: the objective
+is the number a port is compared on, and an implementation that "corrected" it
+would differ from the pinned PyPSA by the sunk capital on every multi-period
+expansion network -- 17,175 against 20,175 here, a plausible figure with a
+plausible-looking total system cost beside it. `Expansion.objectiveConstant` returns
+zero for a multi-period network, which fixes `totalSystemCost` at the same time
+rather than leaving two call sites to agree by hand.
+
+### The fixture
+
+`investment-periods-expansion`: `objective` [1.0, 0.5], one bus, `old` as a 100 MW
+backstop at 100/MWh, `wind` extendable at `capital_cost` 120 with
+`p_nom_max = 60`, and `late` extendable at 60 with `build_year = 2040` and a
+marginal cost of 5. Load 100/100/100/90.
+
+`p_nom_max` is what makes both assets bind. Uncapped, `wind` serves the whole load
+in every period and `late` is built to zero -- a fixture that cannot see `late`'s
+coefficient at all, which is what the mutation lifting the cap to `inf` records
+(18,000, `wind` 100, `late` 0).
+
+Both extendables carry a non-zero `p_nom` -- 20 and 10 -- purely so the objective
+constant is 3,000 rather than 0 and subtracting it is visibly wrong. It is inert in
+the LP, since `p_nom_min` defaults to 0.
+
+PyPSA pays **20,175**, builds `wind` to 60 and `late` to 40, and prices
+`[100, 100, 65, 5]`. The 65 is `5 + 30 / 0.5`: `late`'s bid plus its capital
+coefficient divided back out by the period discount, at the one snapshot where its
+capacity binds. The load drops to 90 at the last snapshot precisely so that the
+capacity does *not* bind there -- on a flat load both 2040 prices are a dual face
+and the two solvers disagreed on them (60/0 against 30/30) while agreeing on
+everything else. As written, simplex and interior-point with crossover and presolve
+off agree on the objective, the capacities, the dispatch and all four prices.
+
+The three mutations were measured, not derived, and the derivation was wrong twice
+before it was: flattening `objective` is 25,150 and not the 25,650 first written
+down, and moving `late`'s build year to 2030 is 10,475 and not 11,850 -- it also
+reverses the answer, building `late` to the full 100 MW and `wind` to zero, because
+`late`'s coefficient becomes 90 against `wind`'s 180.
+
+### What is still refused
+
+`Expansion.reject` is unchanged, and what it refuses really is a different model:
+`overnight_cost`, which PyPSA annuitises over `lifetime` at `discount_rate`, and
+`p_nom_mod`, which makes capacity an integer number of blocks. Both are refused on
+every network, with or without periods; `GapRefusalSuite` now checks the
+composition on the multi-period fixture rather than inferring it from the
+single-period one.
+
+`Carrier.max_growth` is the one expansion feature that exists only because there
+are periods -- a limit on how much of a carrier a period may add -- and it stays
+refused. So do a period-scoped global constraint, per-period storage cycling, a
+ramp-limited asset whose window is not the whole horizon, and a cycled passive
+branch with a window. The last two are the composition hazards this change could
+have walked into: both were already refused for reasons that have nothing to do
+with expansion, and both still are.
+
 ## The AC transformer model, and an assumption that was never made
 
 Off-nominal taps, phase shift and the T model were three separate refusals in the
@@ -2814,7 +2956,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are twenty-seven golden networks and every *network* module, L1 onward, is
+there are twenty-eight golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

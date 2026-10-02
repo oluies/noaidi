@@ -133,15 +133,69 @@ object Expansion:
     val fom     = if table.static.contains("fom_cost") then table.float("fom_cost", id) else 0.0
     (if capital.isFinite then capital else 0.0) + (if fom.isFinite then fom else 0.0)
 
+  /** The factor a capacity's [[periodizedCost]] is multiplied by.
+    *
+    * On a flat index this is 1.0, which is PyPSA's `cost_weight =
+    * active_ext.any(dim="snapshot")` on a network where every extendable entity
+    * is active somewhere -- an inactive one has been dropped before reaching
+    * here.
+    *
+    * On a multi-period index it is the sum of the `objective` weightings of the
+    * periods the asset is active in:
+    *
+    * {{{
+    * cost_weight = (active_ext.groupby("period").any("snapshot") * period_weight).sum("period")
+    * }}}
+    *
+    * Three things follow, and the first is the one that makes multi-period
+    * expansion a weighting rather than a new formulation:
+    *
+    *   - There is still '''one capacity variable per asset'''. PyPSA does not give a
+    *     build year its own column; the `build_year` on the static frame says
+    *     which periods the asset exists in, and the coefficient above charges its
+    *     capital once per such period. So the column layout this model already
+    *     has is the right one.
+    *   - The weighting is the '''period''' objective weighting alone, not
+    *     [[Periods.objectiveWeight]]. Capital is charged per period, not per
+    *     snapshot, so the snapshot weighting does not enter -- multiplying by it
+    *     would scale capital by however many snapshots the period happens to
+    *     carry, which on a representative-period study is an arbitrary number.
+    *   - The sum runs over the periods the '''snapshots''' carry, not the periods
+    *     `investment_periods.csv` declares. PyPSA sums over `window.periods`,
+    *     which is the index, and it tolerates a declared period no snapshot
+    *     belongs to -- counting such a period would charge capital for a period
+    *     the model does not solve.
+    */
+  def costWeight(network: Network, table: ComponentTable, id: String): Double =
+    if !network.isMultiPeriod then 1.0
+    else
+      network.snapshotPeriods.distinct
+        .filter(Periods.activeIn(table, id, _))
+        .map(network.periodWeighting("objective", _))
+        .sum
+
   /** What PyPSA subtracts from the objective: the capital cost of capacity that
     * already exists, over the extendable components only.
+    *
+    * '''Zero on a multi-period network''', which is not an approximation but what
+    * PyPSA does. `define_objective` computes the per-asset `weighted_cost` in both
+    * branches and appends it to `terms` only in the single-period one, so
+    * `n._objective_constant` comes out 0.0 whenever `multi_investment_periods` is
+    * set. Measured on `investment-periods-expansion`: 3,000 without the flag and
+    * 0.0 with it, for the same network. It reads like an oversight upstream, and
+    * reproducing it is still the right call -- the alternative is an objective
+    * that differs from the pinned PyPSA's by the sunk capital on every
+    * multi-period expansion network, which is the one number such a fixture is
+    * compared on.
     */
   def objectiveConstant(network: Network): Double =
-    nominalAttribute.keys.toIndexedSeq.sorted.flatMap { component =>
-      network.table(component).toIndexedSeq.flatMap { table =>
-        extendables(table).map(id => periodizedCost(table, id) * table.float(nominalAttribute(component), id))
-      }
-    }.sum
+    if network.isMultiPeriod then 0.0
+    else
+      nominalAttribute.keys.toIndexedSeq.sorted.flatMap { component =>
+        network.table(component).toIndexedSeq.flatMap { table =>
+          extendables(table).map(id => periodizedCost(table, id) * table.float(nominalAttribute(component), id))
+        }
+      }.sum
 
   /** Refuse the expansion features this model does not build.
     *

@@ -182,8 +182,21 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   // narrower set: the parts whose *formulation* differs rather than merely their
   // weighting. Each is a mutation of the one multi-period fixture, so none of
   // them is unreachable-by-construction.
-  refuses("capacity expansion across investment periods", "extendable") {
-    mutate("investment-periods", "generators.csv", setColumn(_, "p_nom_extendable", "True"))
+  // Capacity expansion across periods was here too, and is not any more: PyPSA
+  // keeps one capacity variable per asset and changes only its objective
+  // coefficient, so it was a weighting and three masks rather than a different
+  // formulation. `investment-periods-expansion` is the fixture, and `LopfSuite`
+  // compares it. What is still refused on top of expansion is refused on every
+  // network, with or without periods -- `overnight_cost` and `p_nom_mod`, above --
+  // but the composition is checked here rather than assumed, since "refused
+  // elsewhere" is the reasoning this suite exists to stop trusting.
+  refuses("an annuitised overnight_cost on a multi-period network", "overnight_cost") {
+    mutate("investment-periods-expansion", "generators.csv",
+           setColumn(_, "overnight_cost", (id, c) => if id == "wind" then "1000.0" else c))
+  }
+  refuses("a modular capacity on a multi-period network", "p_nom_mod") {
+    mutate("investment-periods-expansion", "generators.csv",
+           setColumn(_, "p_nom_mod", (id, m) => if id == "wind" then "10.0" else m))
   }
   refuses("Carrier max_growth between periods", "max_growth") {
     withExtraFile("investment-periods", "carriers.csv", "name,max_growth\nAC,100.0\n")

@@ -141,21 +141,21 @@ object Periods:
         )
     }
 
-    // Capacity expansion across periods is a different model, not this one with
-    // an extra factor: PyPSA gives each build year its own asset and the choice
-    // of *when* to build interacts with the activity window and the discounting.
-    // `Expansion` already refuses `overnight_cost`, which is the annuitised half
-    // of it; this is the rest.
-    Expansion.nominalAttribute.foreach { (component, _) =>
-      network.table(component).foreach { table =>
-        Expansion.extendables(table).headOption.foreach { id =>
-          refuse(
-            s"$component '$id' is extendable on a multi-period network; capacity expansion across " +
-              "investment periods is not modelled, only dispatch within them"
-          )
-        }
-      }
-    }
+    // Capacity expansion across periods used to be refused here, on the stated
+    // grounds that "PyPSA gives each build year its own asset and the choice of
+    // *when* to build interacts with the activity window and the discounting".
+    // The second half is right and the first is not: PyPSA keeps '''one''' capacity
+    // variable per asset and changes only its objective coefficient, to
+    // `periodized_cost` times the sum of the `objective` weightings of the periods
+    // the asset is active in. A build year is an input on the static frame, not a
+    // decision -- which is why this turned out to be a weighting and three masks
+    // rather than a new formulation. See `Expansion.costWeight`.
+    //
+    // What `Expansion` refuses is unchanged and is the part that really is a
+    // different model: `overnight_cost`, which PyPSA annuitises over `lifetime` at
+    // `discount_rate`, and a modular capacity, which is an integer. The growth
+    // limits below are refused too, and they are the one expansion feature that is
+    // specific to having periods at all.
 
     // `max_growth` limits how much of a carrier a period may add, and
     // `max_relative_growth` scales that limit by what the carrier already had.

@@ -209,7 +209,10 @@ object Lopf:
           Expansion.NoSnapshot,
           table.float(s"${attribute}_min", id),
           table.float(s"${attribute}_max", id),
-          Expansion.periodizedCost(table, id),
+          // Weighted by the periods the asset is active in, which on a flat index
+          // is 1.0 and changes nothing. One column per asset either way -- see
+          // `Expansion.costWeight` for why a build year does not get its own.
+          Expansion.periodizedCost(table, id) * Expansion.costWeight(network, table, id),
         ): Unit
       }
     }
@@ -249,7 +252,15 @@ object Lopf:
         g.ids.foreach { id =>
           val cost = g.valueAt("marginal_cost", id, t) * weight
           if extendable(g, id) then
-            declare(g.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
+            // Free when it exists, pinned to zero when it does not. The capacity
+            // rows below carry the real limits, but they are *masked* by the same
+            // window, so without this an extendable unit with a build year
+            // generated freely before it was built -- the silent-under-price
+            // direction, and the reason `Periods.reject` refused the combination
+            // outright until both halves were in place.
+            val (lo, hi) =
+              activeBounds(g, id, t, Double.NegativeInfinity, Double.PositiveInfinity)
+            declare(g.spec.name, id, t, lo, hi, cost): Unit
           else
             val pNom     = g.float("p_nom", id)
             val (lo, hi) = activeBounds(g, id, t, pNom * g.valueAt("p_min_pu", id, t),
@@ -267,7 +278,9 @@ object Lopf:
           // study does not: at the ordinary value of 0.7 a bound of plain `s_nom`
           // lets flows run 43% above the real rating.
           if extendable(branch, id) then
-            declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, 0.0): Unit
+            val (lo, hi) =
+              activeBounds(branch, id, t, Double.NegativeInfinity, Double.PositiveInfinity)
+            declare(branch.spec.name, id, t, lo, hi, 0.0): Unit
           else
             val limit    = branch.float("s_nom", id) * branch.valueAt("s_max_pu", id, t)
             val (lo, hi) = activeBounds(branch, id, t, -limit, limit)
@@ -279,7 +292,9 @@ object Lopf:
         branch.ids.foreach { id =>
           val cost = branch.valueAt("marginal_cost", id, t) * weight
           if extendable(branch, id) then
-            declare(branch.spec.name, id, t, Double.NegativeInfinity, Double.PositiveInfinity, cost): Unit
+            val (lo, hi) =
+              activeBounds(branch, id, t, Double.NegativeInfinity, Double.PositiveInfinity)
+            declare(branch.spec.name, id, t, lo, hi, cost): Unit
           else
             val pNom     = branch.float("p_nom", id)
             val (lo, hi) = activeBounds(branch, id, t, pNom * branch.valueAt("p_min_pu", id, t),
@@ -1006,7 +1021,13 @@ object Lopf:
       val capacity  = Expansion.capacityKey(component)
       ids.foreach { id =>
         val cap = columns((capacity, id, Expansion.NoSnapshot))
-        snapshots.foreach { t =>
+        // Only where the asset exists, which is PyPSA's `mask=active` on both
+        // rows of `define_operational_constraints_for_extendables`. Pinning the
+        // column to zero is not enough on its own: the lower row then reads
+        // `0 - p_min_pu * cap >= 0`, so a must-run unit absent from one period
+        // would force its *capacity* to zero over the whole horizon. The column
+        // bound and this mask are two halves of one thing.
+        snapshots.filter(Periods.activeAt(network, table, id, _)).foreach { t =>
           Expansion.operationalBounds(table, id, t).foreach { (variable, minPu, maxPu) =>
             val column = columns((variable, id, t))
             // `lessThan`/`greaterThan` rather than a range row: the base model's

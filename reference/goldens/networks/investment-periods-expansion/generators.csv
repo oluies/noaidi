@@ -1,0 +1,4 @@
+name,bus,control,p_nom,p_nom_extendable,p_nom_max,marginal_cost,build_year,lifetime,capital_cost
+old,b,Slack,100.0,False,inf,100.0,0,inf,0.0
+wind,b,PQ,20.0,True,60.0,0.0,0,inf,120.0
+late,b,PQ,10.0,True,inf,5.0,2040,30.0,60.0

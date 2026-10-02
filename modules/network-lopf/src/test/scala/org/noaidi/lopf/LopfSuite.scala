@@ -1571,6 +1571,115 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       67000.0, 1e-4, "swapping the two columns changed nothing, so one of them is unread")
   }
 
+  test("capacity is a decision across investment periods, charged per period") {
+    assume(available, "goldens missing")
+    // Refused until now, on the stated grounds that PyPSA "gives each build year
+    // its own asset". It does not: there is one capacity variable per asset and
+    // only its objective coefficient changes, to `periodized_cost` times the sum
+    // of the `objective` weightings of the periods the asset is active in. So
+    // `wind` is charged 120 x (1.0 + 0.5) = 180 per MW and `late`, built in 2040,
+    // 60 x 0.5 = 30.
+    val expected = results("investment-periods-expansion")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool, "the golden was not solved multi-period")
+
+    val n = network("investment-periods-expansion")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 20175.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    // Zero, and PyPSA's own zero rather than this port's choice: `define_objective`
+    // computes the sunk-capital term in both branches and appends it only in the
+    // single-period one. The same network without the flag reports 3,000, so an
+    // implementation that subtracted it would land on 17,175 -- a plausible number
+    // against a plausible-looking total system cost.
+    assertEqualsDouble(expected("objective_constant").num, 0.0, 0.0,
+      "PyPSA's multi-period objective constant is not zero any more")
+    assertEqualsDouble(result.totalSystemCost, target, 1e-6 * target,
+      "the sunk capital is being subtracted on a multi-period network")
+
+    val capacities = expected("nominal_opt")("Generator").obj
+    capacities.foreach { (id, built) =>
+      assertEqualsDouble(result.capacity("Generator", id), built.num, 1e-4, s"capacity of $id")
+    }
+    // Named rather than only swept, because the sweep passes on a port that got
+    // both coefficients wrong in compensating directions.
+    assertEqualsDouble(result.capacity("Generator", "wind"), 60.0, 1e-4, "wind at its p_nom_max")
+    assertEqualsDouble(result.capacity("Generator", "late"), 40.0, 1e-4, "late at the 2040 peak")
+
+    val p      = expected("generator_p")
+    val prices = expected("bus_marginal_price")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      assertEqualsDouble(result.marginalPrice("b", t), frameValue(prices, t, "b"), 1e-4,
+        s"marginal price at snapshot $t")
+    }
+
+    // The activity window, on a column that had never been through it. An
+    // extendable column is declared free and its limits live in rows against the
+    // capacity variable, so `activeBounds` did not touch it; `late` bids 5 against
+    // `old`'s 100, so left unmasked it would have run through 2030 as well and the
+    // objective would have come out *below* PyPSA's.
+    assertEqualsDouble(result.dispatch("Generator", "late", 0), 0.0, 1e-6,
+      "the extendable unit is generating before its build year")
+    assertEqualsDouble(result.dispatch("Generator", "late", 1), 0.0, 1e-6,
+      "the extendable unit is generating before its build year")
+  }
+
+  test("each period's weight is charged once, for the periods the asset exists in") {
+    assume(available, "goldens missing")
+    // Three ways to get the capital coefficient wrong, each measured against PyPSA
+    // rather than derived: the port's own arithmetic is what is under test.
+    def solved(file: String, edit: String => String): Double =
+      val r = Lopf.solve(mutate("investment-periods-expansion", file, edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // Undiscounting 2040 raises `wind`'s coefficient from 180 to 240 and `late`'s
+    // from 30 to 60, and undiscounts 2040's operating cost with it. PyPSA: 25,150.
+    assertEqualsDouble(
+      solved("investment_periods.csv", setColumn(_, "objective", (_, _) => "1.0")),
+      25150.0, 1e-3, "the capital cost is not carrying the period weighting")
+
+    // Moving `late`'s build year back to 2030 makes it active in both periods, so
+    // its coefficient becomes 60 x 1.5 = 90 against `wind`'s 180 -- and it may now
+    // run in 2030, where it undercuts `old`. The answer reverses: `wind` is built
+    // to zero and `late` to the full 100 MW. PyPSA: 10,475. Which is the point of
+    // asserting the objective of a *mutation* rather than only reasoning about the
+    // coefficient -- the arithmetic here was wrong twice before being measured.
+    assertEqualsDouble(
+      solved("generators.csv",
+             setColumn(_, "build_year", (id, y) => if id == "late" then "2030" else y)),
+      10475.0, 1e-3, "the build year is not deciding which periods the capital is charged for")
+
+    // And lifting `wind`'s cap lets it serve the whole load in every period, which
+    // retires `late` and `old` entirely. PyPSA: 18,000 -- the fixture's cap is what
+    // makes both coefficients observable at once, so this is the check that the cap
+    // is read rather than a round number nobody relies on.
+    assertEqualsDouble(
+      solved("generators.csv",
+             setColumn(_, "p_nom_max", (id, m) => if id == "wind" then "inf" else m)),
+      18000.0, 1e-3, "p_nom_max is not bounding the capacity column")
+
+    // A must-run extendable with a build year, which is the case that needs the
+    // capacity *rows* masked and not only the column. The lower row is
+    // `p - p_min_pu * p_nom >= 0`; left unmasked at a snapshot where `p` is pinned
+    // to zero it reads `-0.5 * p_nom >= 0` and forces `late`'s capacity to zero
+    // over the whole horizon, so nothing is built and 2040 falls back on `old` for
+    // 22,300. PyPSA, which masks both rows, is unchanged at 20,175 -- `late` already
+    // runs at 40 and 30 against a capacity of 40, well above its floor of 20.
+    assertEqualsDouble(
+      solved("generators.csv",
+             setColumn(_, "p_min_pu", (id, m) => if id == "late" then "0.5" else m)),
+      20175.0, 1e-3, "the capacity rows are not masked by the activity window")
+  }
+
   test("an ordinary carriers.csv is not read as a growth limit") {
     assume(available, "goldens missing")
     // `max_relative_growth` defaults to *0.0*, which is finite -- so a refusal

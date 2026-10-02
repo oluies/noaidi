@@ -1470,6 +1470,107 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       "the nodal price is not being divided by the period weighting")
   }
 
+  test("both period weightings bind, on a fixture where neither is 1.0") {
+    assume(available, "goldens missing")
+    // The test above derives 16,500 by hand, on a mutation of a fixture whose
+    // weights are both 1.0. That is the weak shape this port keeps finding:
+    // PyPSA was never asked the question, so agreement was asserted against
+    // arithmetic rather than measured.
+    //
+    // `investment-periods-discounted` asks it. `objective` is [1.0, 0.6] and
+    // `years` is [10, 5], and the fixture is solved with
+    // `multi_investment_periods=True` -- which matters, because PyPSA gates the
+    // two weightings on that flag and gates the *activity window* on the snapshot
+    // index instead. A multi-period network solved without the flag masks assets
+    // by build year and charges every period undiscounted; this port applies the
+    // weightings whenever the index has periods, which is PyPSA's flagged
+    // behaviour and now has a golden that can tell.
+    val expected = results("investment-periods-discounted")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool,
+      "the golden was not solved with multi_investment_periods, so it cannot check the weightings")
+
+    val n = network("investment-periods-discounted")
+    assertEqualsDouble(n.periodWeighting("objective", "2040"), 0.6, 0.0, "objective weighting")
+    assertEqualsDouble(n.periodWeighting("years", "2030"), 10.0, 0.0, "years weighting")
+
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 11100.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val p      = expected("generator_p")
+    val prices = expected("bus_marginal_price")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      // Unique here, and carrying both weightings at once: 2030's first price is
+      // 98 = 20 + 7.8 x 10, the gas bid plus the CO2 dual times that period's
+      // `years`, while 2040's first is 89 = 24 + 7.8 x 5 after the 0.6 discount
+      // has been divided back out. There is no accessor for a global
+      // constraint's own multiplier, so this is where it is checked -- and it is
+      // checked against both columns rather than either alone.
+      assertEqualsDouble(result.marginalPrice("b", t), frameValue(prices, t, "b"), 1e-4,
+        s"marginal price at snapshot $t")
+    }
+
+    // Abatement lands at 2030's *second* snapshot and nowhere else, which is the
+    // part a port that swapped the two columns gets wrong: 2040 is discounted and
+    // so looks cheaper to abate in, but 2030 stands for twice as many years, so
+    // each MWh displaced there buys twice the budget. Asserted separately from
+    // the frame comparison because the frame comparison passes on an
+    // implementation that abated the right *quantity* in the wrong period only if
+    // PyPSA happened to agree, and the point is that it does not.
+    assertEqualsDouble(result.dispatch("Generator", "clean", 1), 50.0, 1e-4,
+      "the abatement is not at 2030's second snapshot")
+    Seq(0, 2, 3).foreach { t =>
+      assertEqualsDouble(result.dispatch("Generator", "clean", t), 0.0, 1e-4,
+        s"something is being abated at snapshot $t")
+    }
+  }
+
+  test("the two weighting columns are not interchangeable") {
+    assume(available, "goldens missing")
+    // Each column removed in turn, against PyPSA solved the same way. Both
+    // numbers are measured, not derived: `reference/generate_goldens.py` grew the
+    // fixture precisely because every hand-derived expectation in this file for
+    // the multi-period path was unverifiable.
+    def solved(file: String, edit: String => String): Double =
+      val r = Lopf.solve(mutate("investment-periods-discounted", file, edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // `years` flattened to 1.0 in both periods. The CO2 cap is a primary-energy
+    // constraint, so its sum carries `years` and nothing else; unweighted,
+    // emissions come to 400 against a cap of 2,500 and the cap stops binding
+    // altogether -- gas runs flat out for 7,200. A port that scaled the emissions
+    // sum by `objective` instead would get a cap that still binds.
+    assertEqualsDouble(
+      solved("investment_periods.csv", setColumn(_, "years", (_, _) => "1.0")),
+      7200.0, 1e-4, "the emissions sum is not carrying the `years` weighting")
+
+    // `objective` flattened. The abatement is unchanged -- which period is
+    // cheapest to abate in is set by `years` against the *ratio* of the two, and
+    // undiscounting 2040 raises its cost without changing that ordering -- so the
+    // objective moves by exactly 2040's undiscounted share: 13,100.
+    assertEqualsDouble(
+      solved("investment_periods.csv", setColumn(_, "objective", (_, _) => "1.0")),
+      13100.0, 1e-4, "the costs are not carrying the `objective` weighting")
+
+    // And swapped outright, which is the mistake the two columns invite. 67,000,
+    // an order of magnitude out, because `years` of 10 and 5 become cost
+    // multipliers.
+    assertEqualsDouble(
+      solved("investment_periods.csv", text =>
+        setColumn(setColumn(text, "objective", (p, _) => if p == "2030" then "10.0" else "5.0"),
+                  "years", (p, _) => if p == "2030" then "1.0" else "0.6")),
+      67000.0, 1e-4, "swapping the two columns changed nothing, so one of them is unread")
+  }
+
   test("an ordinary carriers.csv is not read as a growth limit") {
     assume(available, "goldens missing")
     // `max_relative_growth` defaults to *0.0*, which is finite -- so a refusal

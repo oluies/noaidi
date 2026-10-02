@@ -215,6 +215,7 @@
     []
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "cheap": 200.0,

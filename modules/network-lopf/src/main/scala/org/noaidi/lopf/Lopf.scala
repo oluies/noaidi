@@ -770,6 +770,13 @@ object Lopf:
         // how many years the period stands for -- it is a quantity of gas, not a cost to
         // discount -- while every other per-period factor in this builder is the objective
         // weighting. Two columns of one small file that are easy to swap.
+        //
+        // Nothing checked this until `investment-periods-discounted`: no fixture had both
+        // periods and a global constraint, so the only multi-period network here reached
+        // this line with a `years` of 1.0 and no emissions row to scale. That fixture's cap
+        // is slack unweighted and binding weighted, so swapping the columns is now an
+        // order of magnitude rather than a no-op. See `Periods.objectiveWeight` for the
+        // other half: PyPSA applies *neither* column unless the solve was told to.
         val weight = network.weighting("generators", t) *
           network.periodOf(t).map(network.periodWeighting("years", _)).getOrElse(1.0)
         generators.flatMap { g =>

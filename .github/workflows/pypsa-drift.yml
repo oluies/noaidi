@@ -107,8 +107,8 @@ jobs:
         run: |
           set -euo pipefail
           # `manifest.json`, not the results directory. A generation that dies
-          # partway still leaves a `results/` holding twenty-two files that look
-          # exactly like a complete set -- measured, by running the generator
+          # partway still leaves a `results/` holding a file per network, which
+          # looks exactly like a complete set -- measured, by running the generator
           # against PyPSA 1.2.4, where it raises on a 1.3.0-only attribute after
           # writing every result. Guarding on the directory let that through and
           # compared answers from a run that never finished. The manifest is

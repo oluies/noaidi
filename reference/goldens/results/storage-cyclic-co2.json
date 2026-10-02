@@ -1213,6 +1213,7 @@
     ]
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "Gas 0": 350.0,

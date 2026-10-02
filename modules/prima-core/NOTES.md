@@ -1623,6 +1623,105 @@ corner. `investment-periods` is single-bus because it is the one fixture, not
 because branches are unusual — which is exactly why the gap cases are mutations
 of it that add the second bus rather than a note that nothing exercises it.
 
+## The two period weightings, and a flag the generator never passed
+
+`investment-periods` was built to prove that periods change *which assets exist*,
+and it does. What it cannot prove is anything about the two weighting columns
+beside the period label, because it holds both at 1.0 — `objective` 1.0 and 1.0,
+`years` 10 and 10 against a network with no global constraint to sum. Reading
+either column, swapping them, or ignoring both gives 17,000.
+
+That was known and written down: the section above says of the nodal price that
+"it also carries the period weighting, which is 1.0 on this fixture and so cannot
+be checked by it", and `LopfSuite` follows with a mutation that halves 2040's
+`objective` and asserts 16,500. The number is right — PyPSA solved the same
+mutation gives exactly 16,500 — but it was *derived*, not measured, and the
+fixture it mutates was never solved by PyPSA in the mode where the column does
+anything.
+
+### What PyPSA actually gates on
+
+Two things, two signals, and the port had collapsed them into one:
+
+| | gated on | set by |
+|---|---|---|
+| activity window (`build_year`, `lifetime`) | `has_investment_periods` | the snapshot index being `(period, timestep)` |
+| `objective` discount on every cost | `n._multi_invest` | `optimize(multi_investment_periods=True)` |
+| `years` on a primary-energy sum | `n._multi_invest` | the same |
+
+`get_activity_mask` branches on the first (`components/descriptors.py`), while
+`define_objective` and `define_primary_energy_limit` both open with `if
+n._multi_invest:` (`optimization/optimize.py`, `optimization/global_constraints.py`).
+So PyPSA will happily mask a network by build year and then charge every period
+undiscounted — and that is what `generate_goldens.py` had been asking for, since
+it passed no flag anywhere. Measured on the fixture, with 2040's `objective` set
+to 0.5:
+
+```
+multi=False   objective = 17000     the weighting is not applied
+multi=True    objective = 16500     it is
+```
+
+Both modes mask `new` out of 2030; both give 17,000 at unit weights. Which is why
+the golden was correct, the port agreed with it, and neither fact meant anything
+about the weighting.
+
+### The choice this port has to make, and now defends
+
+There is no `multi_investment_periods` argument here: noaidi reads a file and
+solves it. The `_multi_invest` field in `network.csv` is not the answer — it is a
+residue of whatever the last solve was told, and PyPSA writes 0 into it for a
+network exported before it was solved, which is every network in `goldens/`. The
+netCDF reader already says so, in a comment explaining why the *index* is detected
+by shape rather than by that flag.
+
+So the port applies the weightings whenever the snapshot index carries periods,
+which is PyPSA's flagged behaviour, and `generate_goldens.py` now solves its
+multi-period networks with the flag set — recorded as `multi_investment_periods`
+in each results file, because it is a solve option and nothing in the exported
+network records it. Passing it changed `investment-periods` not at all, which is
+the fixture's whole problem stated as a diff.
+
+### `investment-periods-discounted`
+
+`objective` [1.0, 0.6], `years` [10, 5], one bus, two generators and a CO2 cap.
+Both columns bind and they bind on different things:
+
+- `gas` is cheapest at every snapshot, so without the cap it runs flat out for
+  **7,200**. The cap is a primary-energy constraint, so its sum carries `years`:
+  weighted, emissions are 3,000 against a cap of 2,500; unweighted they are 400
+  and the cap is slack. Flattening `years` alone therefore returns the 7,200.
+- Abatement is cheapest where `(clean − mc) · objective / years` is smallest,
+  which is **2030's second snapshot**, not 2040's — 2040 is discounted and so
+  looks cheaper, but 2030 stands for twice as many years, so each MWh displaced
+  there buys twice the budget. A port that swapped the columns abates in the
+  other period.
+- PyPSA pays **11,100** with 50 MW of `clean` at that one snapshot, and the cap's
+  shadow price is **−7.8**. Flattening `objective` alone gives 13,100; swapping
+  the two columns gives **67,000**.
+
+The nodal prices check the dual, which has no accessor of its own: 98 at 2030's
+first snapshot is `20 + 7.8 × 10`, the gas bid plus the multiplier times that
+period's `years`, and 89 at 2040's first is `24 + 7.8 × 5` after the 0.6 discount
+has been divided back out. One number per snapshot carrying both columns and the
+price recovery's division, which is three things that have to agree.
+
+Deliberately interior. The abatement is 50 MW of a possible 100 at a single
+snapshot, so the vertex is unique: `marginal_cost` rises across the horizon
+(20/22/24/26) precisely so that no two snapshots cost the same to abate at — on a
+flat cost the 100 MWh splits arbitrarily between 2030's two snapshots and the
+dispatch is a face. Simplex and interior-point with crossover and presolve off
+agree to the digit, which is the determinacy probe this directory applies to every
+fixture whose answer could be a vertex of a face.
+
+Nothing in it is extendable and no asset has a build year. That is not an
+oversight: `investment-periods` is the fixture for the activity window, and mixing
+the two would make a failure here ambiguous between them.
+
+The port needed no change. The weightings were already right — the implementation
+had been reasoned from PyPSA's source rather than from the golden, which is why.
+What was missing was any way to find out.
+
 ## The AC transformer model, and an assumption that was never made
 
 Off-nominal taps, phase shift and the T model were three separate refusals in the
@@ -2715,7 +2814,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are twenty-two golden networks and every *network* module, L1 onward, is
+there are twenty-seven golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

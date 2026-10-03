@@ -1,0 +1,2 @@
+name,bus,e_nom,e_initial,e_cyclic_per_period,marginal_cost,marginal_cost_storage
+st,b,60.0,30.0,True,1.0,0.01

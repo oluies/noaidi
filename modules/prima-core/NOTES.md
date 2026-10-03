@@ -1966,6 +1966,112 @@ collapsing into one.
 `tech_capacity_expansion_limit` is the one of PyPSA's five types still refused, and
 the refusal test now names it instead of `operational_limit`.
 
+## Per-period cycling: four flags, one precedence, two call sites
+
+`cyclic_state_of_charge_per_period` and `state_of_charge_initial_per_period` were
+refused together, along with their `Store` spellings, and that refusal had already been
+through one correction: it originally listed two of the four relevant flags, which reads
+as if the other two were handled.
+
+PyPSA treats an asset as per-period when **either** per-period flag is set, and then has
+a precedence between all four:
+
+| flags | what the period's first snapshot reaches back to |
+|---|---|
+| per-period cyclic | that **period's** last snapshot |
+| per-period initial alone | nothing; the initial level enters the right-hand side, once **per period** |
+| both per-period flags | cyclic wins, the initial level is ignored (upstream warns) |
+| per-period plus horizon-wide cyclic | per-period wins (upstream warns) |
+
+`Cycling.previous` is the one place that decides it, because the storage-unit and store
+balances both need the answer and the two going out of step is not visible in either
+one's own fixture.
+
+### Why this is a chain and not a mask
+
+The rows are emitted over an asset's **active** snapshots, so `active(i - 1)` is the
+previous snapshot the asset existed at, not `t - 1`. That is PyPSA's
+`soc.where(active).ffill(...).roll(snapshot=1).ffill(...)`.
+
+On a per-period asset the period's first snapshot and the asset's first active snapshot
+in that period are the same thing, because activity is decided per period — an asset
+active in a period is active at every snapshot of it. PyPSA builds its masks from the
+window's period starts rather than from the asset's activity, and the two coincide for
+that reason. Worth knowing before anyone makes `Periods.activeIn` vary within a period.
+
+### The fixtures, and the price profile that makes them say anything
+
+`storage-per-period` and `store-per-period`: two periods of three snapshots, **one**
+asset each, and a gas price that is cheap once inside the first period and dear at every
+snapshot of the second.
+
+That profile is the whole design. A flatter one empties the asset at the period boundary
+anyway, so a horizon-wide wrap and a per-period wrap produce the identical answer and
+the fixture distinguishes nothing — which is what the first version of the store fixture
+did: 19,501.2 for both. With 2040 dear throughout, a horizon-wide cycle wants to carry
+energy **across** the boundary and a per-period cycle cannot.
+
+One asset rather than several, also by design. The first version had three storage units
+and a store on one bus, and PyPSA's own two solvers disagreed about which of them did
+the shifting — the units were substitutes and the split between them was a face. The
+flags are exercised by mutating the single asset instead.
+
+| reading | storage unit | store |
+|---|---|---|
+| cyclic per period | **32,280.8** | **30,801.2** |
+| initial per period | 26,411.0 | 26,961.2 |
+| both | 32,280.8 | 30,801.2 |
+| horizon-wide cyclic | 30,482.8 | 29,301.8 |
+| neither | 27,992.8 | 27,831.8 |
+
+`marginal_cost_storage` is 0.01 and that is load-bearing: a cycle fixes the level only
+up to a constant, so without a price on holding energy the trajectory is a face. With
+one the level is pushed down until it touches zero and the vertex is unique.
+Interior-point still lands 1e-4 above simplex on the two horizon-wide cases, which is
+its own convergence tolerance — the trajectories agree exactly.
+
+Mutation-checked five ways, each failing at least two tests: ignoring the per-period
+branch (27,992.8), wrapping to the horizon's last snapshot instead of the period's
+(30,322.0), not resetting at a period start under the initial flag (27,992.8), inverting
+the precedence (26,411.0), and gating on the cyclic flag alone rather than on either
+(27,992.8).
+
+### The one place a per-period flag changes a row's shape
+
+Everything above changes **which snapshot** a chain reaches back to.
+`define_operational_limit` is the exception, and the case only became reachable once
+these flags stopped being refused. It splits non-cyclic assets in two:
+
+- `sus_continuous` takes one final level over the whole horizon — what
+  `OperationalLimit` builds
+- `sus_per_period` takes the final level of **every** period and sums them against a
+  per-period weighting
+
+An asset restarting from its initial level each period depletes once per period, so one
+term is the wrong *number* of terms rather than the wrong coefficient. Refused.
+
+It is checked **before** the `NotImplementedError` the same function raises, because
+upstream's test for that reads `sus_continuous` and a per-period-initial asset is never
+in it. The first version here had them the other way round, which named the wrong cause
+for an asset setting both.
+
+And that `NotImplementedError` turned out to be wider than its own description suggests.
+Upstream's test is `period_weighting.ne(1).any()` — each period's `years` against **1**,
+not against the other periods'. So a horizon of two ten-year periods raises just as
+readily as a horizon of a ten and a five:
+
+```
+years=[10, 10] non-cyclic -> NotImplementedError: Found non-cyclic storage units with continuous depletion...
+years=[1, 1]   non-cyclic -> ok/optimal obj=27992.8
+years=[1, 1]   per-period -> ok/optimal obj=26411.0
+years=[10, 10] cyclic     -> ok/optimal obj=30482.8
+```
+
+Measured, because the name "unequal weightings" invites the other reading and the first
+version of the comment here used it. The refusal test needed `years` of 1 in both
+periods for exactly this reason — otherwise the weighting refusal fires first and the
+test passes while checking the wrong thing.
+
 ## Growth limits, and a rule that is not what its name says
 
 `Carrier.max_growth` is the one expansion feature that exists **only** because there
@@ -3411,7 +3517,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are thirty-two golden networks and every *network* module, L1 onward, is
+there are thirty-four golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

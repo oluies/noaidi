@@ -52,9 +52,20 @@ import org.noaidi.network.*
   * ==What is refused==
   *
   * PyPSA raises `NotImplementedError` for a non-cyclic unit whose state of charge runs
-  * continuously across periods weighted unequally — "the operational constraint will be
-  * inconsistent" — and names the three ways out. That raise is reproduced rather than worked
-  * around: the alternative is a row whose own author says it means nothing.
+  * continuously across periods whose `years` weighting is anything but 1 — "the operational
+  * constraint will be inconsistent" — and names the three ways out. That raise is reproduced
+  * rather than worked around: the alternative is a row whose own author says it means
+  * nothing. Two ten-year periods trip it, because upstream's test is `ne(1)` and not "the
+  * periods differ from each other".
+  *
+  * The other refusal is the one per-period cycling flag that changes this term's '''shape'''.
+  * `define_operational_limit` splits non-cyclic assets in two: `sus_continuous` takes one
+  * final level over the whole horizon, which is what this builds, while `sus_per_period`
+  * takes the final level of '''every''' period and sums them against a per-period weighting. An
+  * asset restarting from its initial level each period depletes once per period, so one term
+  * is the wrong number of terms rather than the wrong coefficient. It is checked '''before'''
+  * the weighting refusal, because upstream's weighting test reads `sus_continuous` and such
+  * an asset is never in it.
   */
 object OperationalLimit:
 
@@ -91,8 +102,13 @@ object OperationalLimit:
           }
       }
 
-    // The condition PyPSA states and raises on, checked once rather than per unit: the
-    // message is about the network and not about one asset.
+    // The condition PyPSA states and raises on, checked once rather than per unit: it is
+    // about the network and not about one asset.
+    //
+    // Named for what it means rather than for what it reads like. `ne(1)` is upstream's
+    // test, so each period's `years` is compared against 1.0 and not against the other
+    // periods': a horizon of two ten-year periods trips this just as readily as a horizon of
+    // a ten and a five. Measured, because the name invites the other reading.
     lazy val unequalPeriodWeights: Boolean =
       network.isMultiPeriod &&
         network.snapshotPeriods.distinct.exists(p => network.periodWeighting("years", p) != 1.0)
@@ -103,9 +119,9 @@ object OperationalLimit:
 
     val depletion =
       IndexedSeq(
-        ("StorageUnit", Storage.SoC, "state_of_charge_initial"),
-        ("Store", Stores.Energy, "e_initial"),
-      ).flatMap { (component, variable, initial) =>
+        ("StorageUnit", Storage.SoC, "state_of_charge_initial", "state_of_charge_initial_per_period"),
+        ("Store", Stores.Energy, "e_initial", "e_initial_per_period"),
+      ).flatMap { (component, variable, initial, perPeriodInitial) =>
         network.table(component).toIndexedSeq.flatMap { table =>
           // Matched exhaustively rather than defaulting, for the reason the emissions sum
           // gives: the two predicates read different columns, so a third component added to
@@ -124,15 +140,47 @@ object OperationalLimit:
             table.ids
               .filter(unit => table.string("carrier", unit) == carrier && !cyclic(unit))
               .flatMap { unit =>
+                // The one cycling flag that changes this term's SHAPE rather than its
+                // value. PyPSA splits non-cyclic assets into two branches here:
+                // `sus_continuous`, which takes one final level over the whole horizon --
+                // what this builds -- and `sus_per_period`, which takes the final level of
+                // EVERY period and sums them against a per-period weighting. An asset that
+                // restarts from its initial level each period depletes once per period, so
+                // one term is the wrong number of terms rather than the wrong coefficient.
+                //
+                // Refused rather than approximated. The per-period cycling flags are built
+                // now -- see `Cycling` -- so this is reachable, which it was not while they
+                // were refused outright.
+                if Cycling.flag(table, perPeriodInitial, unit) && network.isMultiPeriod then
+                  refuse(
+                    s"global constraint '$id' caps carrier '$carrier', and $component " +
+                      s"'$unit' sets $perPeriodInitial. PyPSA then measures its depletion " +
+                      "once per investment period and weights each by that period's years, " +
+                      "which is a different number of terms from the single final level " +
+                      "built here -- not a different coefficient on the same one."
+                  )
+                // And PyPSA's own NotImplementedError, which applies to the continuous
+                // branch alone. The order matters: upstream tests
+                // `if not sus_continuous.empty and period_weighting.ne(1).any()`, so a unit
+                // that restarts each period never reaches it -- it is in the other branch.
+                // Checked after the refusal above for that reason, and the first version
+                // here had them the other way round, which named the wrong cause for an
+                // asset that set both.
+                //
+                // `ne(1)`, not "the periods differ from each other": a horizon of two
+                // ten-year periods trips it just as readily as a horizon of a ten and a
+                // five, which is why the check compares each weighting against 1.0 rather
+                // than against its neighbour. Measured -- years [10, 10] raises and years
+                // [1, 1] solves.
                 if unequalPeriodWeights then
                   refuse(
                     s"global constraint '$id' caps carrier '$carrier', and $component " +
-                      s"'$unit' is non-cyclic while the investment periods carry unequal " +
-                      "`years` weightings. PyPSA raises NotImplementedError on exactly " +
+                      s"'$unit' is non-cyclic while an investment period carries a `years` " +
+                      "weighting other than 1. PyPSA raises NotImplementedError on exactly " +
                       "this -- a state of charge running continuously across periods of " +
-                      "different lengths has no consistent net depletion -- and names the " +
-                      "ways out: make the unit cyclic, set the per-period initial level, " +
-                      "or weight the periods equally."
+                      "unequal length has no consistent net depletion -- and names the ways " +
+                      "out: make the unit cyclic, set the per-period initial level, or give " +
+                      "every period a years weighting of 1."
                   )
                 val level = table.float(initial, unit)
                 if !level.isFinite then

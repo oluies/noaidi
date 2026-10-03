@@ -1,0 +1,2 @@
+name,bus,p_nom,marginal_cost,marginal_cost_storage,state_of_charge_initial,cyclic_state_of_charge_per_period,max_hours
+su,b,40.0,1.0,0.01,50.0,True,2.0

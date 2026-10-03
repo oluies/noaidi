@@ -215,11 +215,34 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     mutate("growth-limit", "carriers.csv",
            setColumn(_, "max_relative_growth", (id, v) => if id == "wind" then "inf" else v))
   }
-  refuses("per-period storage cycling", "cyclic_state_of_charge_per_period") {
-    withExtraFile(
-      "investment-periods",
-      "storage_units.csv",
-      "name,bus,p_nom,max_hours,cyclic_state_of_charge_per_period\ns,b,10.0,4.0,True\n",
+  // Per-period storage cycling was here and is built now -- `storage-per-period`
+  // and `store-per-period` are the fixtures, and `LopfSuite` compares all four
+  // readings of the four flags.
+  //
+  // What replaces it is the one place a per-period flag changes a row's SHAPE
+  // rather than which snapshot its chain reaches back to, and the case only became
+  // reachable when those flags stopped being refused. PyPSA's
+  // `define_operational_limit` splits non-cyclic assets in two: `sus_continuous`
+  // takes one final level over the whole horizon, while `sus_per_period` takes the
+  // final level of every period and sums them against a per-period weighting. An
+  // asset restarting from its initial level each period depletes once per period,
+  // so one term is the wrong number of terms rather than the wrong coefficient.
+  refuses("a per-period initial level under an operational limit",
+          "state_of_charge_initial_per_period") {
+    withFiles(
+      "storage-per-period",
+      "storage_units.csv" ->
+        ("name,bus,carrier,p_nom,max_hours,marginal_cost,marginal_cost_storage," +
+          "state_of_charge_initial,state_of_charge_initial_per_period\n" +
+          "su,b,hydro,40.0,2.0,1.0,0.01,50.0,True\n"),
+      "carriers.csv"         -> "name\nhydro\n",
+      // `years` of 1 in both periods, because PyPSA's OTHER refusal here --
+      // NotImplementedError for a continuous depletion across periods weighted
+      // anything but 1 -- fires first otherwise, and this case is about the flag.
+      "investment_periods.csv" -> "period,objective,years\n2030,1.0,1\n2040,1.0,1\n",
+      "global_constraints.csv" ->
+        ("name,type,carrier_attribute,sense,constant\n" +
+          "budget,operational_limit,hydro,<=,500.0\n"),
     )
   }
   refuses("a snapshot in an undeclared period", "does not declare") {

@@ -862,12 +862,15 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
   }
 
   // Every refusal `Stores.reject` makes, none of which `store-bank` reaches --
-  // it sets no set point, no per-period flag, no quadratic cost and a legal
-  // standing loss, so deleting the whole body would leave the suite green.
+  // it sets no set point, no quadratic cost and a legal standing loss, so
+  // deleting the whole body would leave the suite green.
+  //
+  // `e_cyclic_per_period` used to be in this list and is not any more: it is
+  // built, and `store-per-period` is the fixture. What remains here is the set
+  // this port genuinely does not model.
   Seq(
     ("e_set", "50.0", "e_set"),
     ("p_set", "10.0", "p_set"),
-    ("e_cyclic_per_period", "True", "per_period"),
     ("marginal_cost_quadratic", "0.5", "quadratic"),
     ("standing_loss", "1.5", "standing_loss"),
   ).foreach { (attribute, value, phrase) =>
@@ -1803,6 +1806,143 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assertEqualsDouble(withGrowth.objective, 19400.0, 1e-3,
       "a growth limit is being built on a network with no investment periods")
     assertEqualsDouble(withGrowth.capacity("Generator", "windA"), 80.0, 1e-4, "windA is being held back")
+  }
+
+  test("a reservoir closes its cycle at each period's end") {
+    assume(available, "goldens missing")
+    // `cyclic_state_of_charge_per_period` and `state_of_charge_initial_per_period` were
+    // refused together, and that refusal had already been through one correction: it
+    // originally listed two of the four relevant flags, which reads as if the other two were
+    // handled. PyPSA treats an asset as per-period when EITHER per-period flag is set, and
+    // then has a precedence between all four -- see `Cycling`, which is the one place that
+    // decides it for both the storage-unit and the store balance.
+    val expected = results("storage-per-period")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool, "the golden was not solved multi-period")
+
+    val n      = network("storage-per-period")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 32280.8, 1e-6 * 32280.8, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val soc = expected("storage_state_of_charge")
+    val p   = expected("storage_p")
+    n.snapshots.indices.foreach { t =>
+      assertEqualsDouble(result.stateOfCharge("su", t), frameValue(soc, t, "su"), 1e-3,
+        s"the level at snapshot $t")
+      assertEqualsDouble(result.dispatch("StorageUnit", "su", t), frameValue(p, t, "su"), 1e-3,
+        s"the net injection at snapshot $t")
+    }
+
+    // The cycle closes twice, once per period: the level returns to zero at the end of each
+    // rather than carrying anything across the boundary. A horizon-wide wrap on the same
+    // network holds 80 at the first period's last snapshot, which is what the next test
+    // measures.
+    assertEqualsDouble(result.stateOfCharge("su", 2), 0.0, 1e-3, "2030 does not close its cycle")
+    assertEqualsDouble(result.stateOfCharge("su", 5), 0.0, 1e-3, "2040 does not close its cycle")
+  }
+
+  test("the four cycling flags, and the precedence between them") {
+    assume(available, "goldens missing")
+    // Each reading on the same single unit, against PyPSA solved the same way. One unit
+    // rather than four, because an earlier version of this fixture had three storage units
+    // and a store and PyPSA's own two solvers disagreed about which of them did the
+    // shifting -- the flags are exercised by mutating one asset instead of by giving each
+    // its own.
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("storage-per-period", "storage_units.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    def flags(cp: String, ip: String, whole: String): String => String = text =>
+      setColumn(
+        setColumn(
+          setColumn(text, "cyclic_state_of_charge_per_period", (_, _) => cp),
+          "state_of_charge_initial_per_period", (_, _) => ip),
+        "cyclic_state_of_charge", (_, _) => whole)
+
+    // Per-period INITIAL instead: each period starts from `state_of_charge_initial`, so the
+    // 50 enters the right-hand side twice rather than once, and the unit may end each period
+    // empty rather than where it began. PyPSA: 26,411.
+    assertEqualsDouble(solved(flags("False", "True", "False")), 26411.0, 1e-2,
+      "state_of_charge_initial_per_period is not starting each period from the initial level")
+
+    // Both set. The cyclic flag wins and the initial level is ignored, so this must land on
+    // the base answer exactly. PyPSA warns about the conflict rather than refusing, and the
+    // two answers being equal is the only way to see which one it resolved to.
+    assertEqualsDouble(solved(flags("True", "True", "False")), 32280.8, 1e-2,
+      "per-period cyclic does not take precedence over per-period initial")
+
+    // Horizon-wide cyclic, which is the reading the refusal said was "only the horizon-wide
+    // cycle is modelled". It is a different answer: the unit carries energy across the
+    // period boundary, which is what the 2040 prices make worth doing and what the
+    // per-period wrap forbids. PyPSA: 30,482.8.
+    assertEqualsDouble(solved(flags("False", "False", "True")), 30482.8, 1e-1,
+      "the horizon-wide cycle is not distinguishable from the per-period one")
+
+    // And neither flag: one initial level for the whole horizon, no wrap at all. PyPSA:
+    // 27,992.8.
+    assertEqualsDouble(solved(flags("False", "False", "False")), 27992.8, 1e-1,
+      "a unit with no cycling flag is not reading its single initial level")
+
+    // Per-period cyclic also OVERRIDES the horizon-wide flag, which is the fourth edge of
+    // the precedence and the one with no fixture of its own: both set gives the per-period
+    // answer, not the horizon-wide one.
+    assertEqualsDouble(solved(flags("True", "False", "True")), 32280.8, 1e-2,
+      "per-period cyclic does not override the horizon-wide flag")
+  }
+
+  test("a store's four cycling flags are the same four, spelled differently") {
+    assume(available, "goldens missing")
+    // `e_cyclic_per_period` and `e_initial_per_period` against
+    // `cyclic_state_of_charge_per_period` and `state_of_charge_initial_per_period`. The chain
+    // logic is shared, so what this catches is a wiring mistake at the store's call site
+    // rather than a different rule -- and it is here because this suite had a refusal test
+    // for `e_cyclic_per_period` that had to be replaced by something.
+    val expected = results("store-per-period")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("store-per-period")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 30801.2, 1e-6 * 30801.2, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val e = expected("store_e")
+    n.snapshots.indices.foreach { t =>
+      assertEqualsDouble(result.energy("st", t), frameValue(e, t, "st"), 1e-3,
+        s"the store's level at snapshot $t")
+    }
+
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("store-per-period", "stores.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    def flags(cp: String, ip: String, whole: String): String => String = text =>
+      setColumn(
+        setColumn(
+          setColumn(text, "e_cyclic_per_period", (_, _) => cp),
+          "e_initial_per_period", (_, _) => ip),
+        "e_cyclic", (_, _) => whole)
+
+    assertEqualsDouble(solved(flags("False", "True", "False")), 26961.2, 1e-2,
+      "e_initial_per_period is not starting each period from e_initial")
+    assertEqualsDouble(solved(flags("True", "True", "False")), 30801.2, 1e-2,
+      "e_cyclic_per_period does not take precedence")
+    // The horizon-wide case is the one worth looking at: `e` reaches 60 at the first period's
+    // last snapshot and is carried across the boundary, which the per-period wrap forbids.
+    // A flatter price profile emptied the store at the boundary anyway and made the two
+    // readings identical -- which is what the first version of this fixture did.
+    assertEqualsDouble(solved(flags("False", "False", "True")), 29301.8, 1e-1,
+      "the horizon-wide cycle is not distinguishable from the per-period one")
+    assertEqualsDouble(solved(flags("False", "False", "False")), 27831.8, 1e-1,
+      "a store with no cycling flag is not reading its single e_initial")
   }
 
   test("an ordinary carriers.csv is not read as a growth limit") {

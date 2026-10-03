@@ -1244,6 +1244,107 @@ def growth_limit():
     return n
 
 
+def _per_period_prices(n):
+    """A gas price that is cheap once inside the first period and dear throughout the second.
+
+    Shared by the two per-period cycling fixtures, and the shape is what makes them say
+    anything. With a flat-ish profile a store empties at each period's end anyway, so a
+    horizon-wide wrap and a per-period wrap produce the identical answer and the fixture
+    distinguishes nothing -- which is what the first version of these did. Here 2040 is dear
+    at every snapshot, so a horizon-wide cycle wants to carry energy ACROSS the boundary and a
+    per-period cycle cannot.
+    """
+    n.add("Generator", "gas", bus="b", p_nom=300.0,
+          marginal_cost=[50.0, 5.0, 55.0, 80.0, 70.0, 90.0])
+    n.add("Load", "d", bus="b", p_set=[100.0] * 6)
+
+
+def _two_periods(n):
+    """Two periods of three snapshots, both weightings flat."""
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(3)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["objective"] = [1.0, 1.0]
+    n.investment_period_weightings["years"] = [10, 10]
+    n.add("Bus", "b", v_nom=110.0)
+
+
+def storage_per_period():
+    """A reservoir that closes its cycle at each period's end, which was refused.
+
+    `cyclic_state_of_charge_per_period` and `state_of_charge_initial_per_period` were refused
+    together, and the refusal had already been through one correction: it originally listed
+    two of the four relevant flags, which reads as if the other two were handled. PyPSA treats
+    an asset as per-period when **either** per-period flag is set, and then has a precedence
+    between all four that `Cycling` now carries:
+
+      - per-period cyclic wraps to that **period's** last snapshot
+      - per-period initial alone starts each period from `state_of_charge_initial`, so the
+        initial level enters the right-hand side once per period rather than once per horizon
+      - both set: cyclic wins and the initial level is ignored (upstream warns)
+      - being per-period at all overrides the horizon-wide `cyclic_state_of_charge`
+
+    One storage unit, so the four readings cannot be told apart by substituting one asset for
+    another -- an earlier version of this fixture had three units and a store, and simplex and
+    interior-point disagreed about which of them did the shifting. The flags are exercised by
+    mutating this one unit instead, and all four readings give a different objective:
+
+        cyclic per period      32,280.8    <- what the fixture ships
+        initial per period     26,411.0
+        both                   32,280.8    <- cyclic wins
+        horizon-wide cyclic    30,482.8
+        neither                27,992.8
+
+    `marginal_cost_storage` is 0.01 and that is load-bearing. A cycle fixes the level only up
+    to a constant, so without a price on holding energy the trajectory is a face; with one the
+    level is pushed down until it touches zero and the vertex is unique. Interior-point still
+    lands 1e-4 above the simplex answer on the two horizon-wide cases, which is its own
+    convergence tolerance rather than a second vertex -- the trajectories agree exactly.
+    """
+    n = pypsa.Network()
+    _two_periods(n)
+    n.add("StorageUnit", "su", bus="b", p_nom=40.0, max_hours=2.0,
+          cyclic_state_of_charge_per_period=True,
+          state_of_charge_initial=50.0,
+          marginal_cost=1.0, marginal_cost_storage=0.01)
+    _per_period_prices(n)
+    return n
+
+
+def store_per_period():
+    """The same four flags on a `Store`, which spells all of them differently.
+
+    `e_cyclic_per_period` and `e_initial_per_period` against
+    `cyclic_state_of_charge_per_period` and `state_of_charge_initial_per_period`. The chain
+    logic is shared -- see `Cycling` -- so what this fixture catches is a wiring mistake at
+    the store's call site rather than a different rule, and it is here because `LopfSuite`
+    had a refusal test for `e_cyclic_per_period` that had to be replaced by something.
+
+    A store has no efficiencies, no inflow and no power rating, so its balance is the shorter
+    one and its `p` is signed. The five readings:
+
+        cyclic per period      30,801.2    <- what the fixture ships
+        initial per period     26,961.2
+        both                   30,801.2    <- cyclic wins
+        horizon-wide cyclic    29,301.8
+        neither                27,831.8
+
+    The horizon-wide case is the one worth looking at: `e` reaches 60 at the first period's
+    last snapshot and is carried across the boundary, which is exactly what the per-period
+    wrap forbids. A first version of this fixture had a flatter price profile, and there the
+    store emptied at the boundary anyway -- horizon-wide and per-period produced the identical
+    answer and the fixture proved nothing.
+    """
+    n = pypsa.Network()
+    _two_periods(n)
+    n.add("Store", "st", bus="b", e_nom=60.0, e_cyclic_per_period=True,
+          e_initial=30.0, marginal_cost=1.0, marginal_cost_storage=0.01)
+    _per_period_prices(n)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1652,6 +1753,8 @@ NETWORKS = {
     "tech-capacity-limit": tech_capacity_limit,
     "period-scoped-constraints": period_scoped_constraints,
     "growth-limit": growth_limit,
+    "storage-per-period": storage_per_period,
+    "store-per-period": store_per_period,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1703,6 +1806,8 @@ MULTI_INVEST = frozenset({
     "investment-periods-expansion",
     "period-scoped-constraints",
     "growth-limit",
+    "storage-per-period",
+    "store-per-period",
 })
 
 

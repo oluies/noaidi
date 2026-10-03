@@ -540,7 +540,14 @@ object Lopf:
           terms += ((columns((Storage.Store, id, t)), -eh * effStore(t)))
           terms += ((columns((Storage.Spill, id, t)), eh))
 
-          val previous = if i > 0 then Some(active(i - 1)) else if cyclic then Some(active.last) else None
+          // Four flags, one answer -- see `Cycling.previous`. `None` means the chain starts
+          // here and the initial level moves to the right-hand side, which on a per-period
+          // unit happens once per period rather than once per horizon.
+          val previous = Cycling.previous(
+            network, active, i, cyclic,
+            Cycling.flag(s, "cyclic_state_of_charge_per_period", id),
+            Cycling.flag(s, "state_of_charge_initial_per_period", id),
+          )
           previous.foreach(p => terms += ((columns((Storage.SoC, id, p)), -effStand)))
 
           // Inflow is a rate, so it is energy only after multiplying by the
@@ -673,7 +680,11 @@ object Lopf:
           terms += ((columns((Stores.Energy, id, t)), 1.0))
           terms += ((columns((Stores.Power, id, t)), eh))
 
-          val previous = if i > 0 then Some(active(i - 1)) else if cyclic then Some(active.last) else None
+          val previous = Cycling.previous(
+            network, active, i, cyclic,
+            Cycling.flag(store, "e_cyclic_per_period", id),
+            Cycling.flag(store, "e_initial_per_period", id),
+          )
           previous.foreach(p => terms += ((columns((Stores.Energy, id, p)), -effStand)))
 
           builder.equalityConstraint(terms.toSeq, if previous.isEmpty then initial else 0.0)

@@ -718,3 +718,95 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
              setColumn(_, "state_of_charge_initial", (id, v) => if id == "res" then "600.0" else v)),
       2800.0, 1e-3, "the cap is on the absolute level rather than on the depletion")
   }
+
+  test("a tech_capacity_expansion_limit caps buildable capacity, per carrier and per bus") {
+    assume(available, "goldens missing")
+    // The fifth and last type `global_constraints.py` dispatches on, and the last one left
+    // here rather than the hardest: its left-hand side is one coefficient of 1.0 per capacity
+    // column, with no weighting and no snapshot index. What it needed was capacity to be a
+    // decision at all.
+    //
+    // `carrier_attribute` names a CARRIER on this type, not a column of `carriers.csv` --
+    // the same field means `co2_emissions` on `primary_energy` and `hydro` on
+    // `operational_limit`. And `bus` is optional: `wind_total`'s is the empty string in the
+    // exported CSV rather than an absent column, which is the shape PyPSA's own
+    // `glc.get("bus") or None` exists for.
+    val expected = results("tech-capacity-limit")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("tech-capacity-limit")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 19400.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    expected("nominal_opt").obj.foreach { (component, built) =>
+      built.obj.foreach { (id, capacity) =>
+        assertEqualsDouble(result.capacity(component, id), capacity.num, 1e-4,
+          s"capacity of $component '$id'")
+      }
+    }
+    // Named as well as swept. `windB` at exactly its bus cap of 40 and `windA` at the
+    // remaining 80 of the network-wide 120 is the arrangement both caps bind in; `solarA` at
+    // its own `p_nom_max` of 50 is the carrier filter, since a port that counted every
+    // extendable would have 120 to share between three assets rather than two.
+    assertEqualsDouble(result.capacity("Generator", "windB"), 40.0, 1e-4, "windB at its bus cap")
+    assertEqualsDouble(result.capacity("Generator", "windA"), 80.0, 1e-4, "windA at the remainder")
+    assertEqualsDouble(result.capacity("Generator", "solarA"), 50.0, 1e-4,
+      "solarA is being counted against a wind cap")
+
+    val p = expected("generator_p")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      assertEqualsDouble(result.dispatch("Line", "AB", t),
+        frameValue(expected("line_p0"), t, "AB"), 1e-4, s"line flow at snapshot $t")
+    }
+  }
+
+  test("moving the bus scope moves which asset the cap counts") {
+    assume(available, "goldens missing")
+    // The whole content of the `bus` column, checked by moving it. Scoped to B the cap holds
+    // `windB` to 40 and the network-wide 120 goes to `windA`; scoped to A it holds `windA` to
+    // 40 -- and because `windB` is worth more per MW and now has no cap of its own, the
+    // answer reverses entirely: `windB` takes all 120 and `windA` is built to zero. PyPSA:
+    // 18,600. A port that read the constraint's bus against the wrong end, or ignored it,
+    // lands on neither number.
+    val moved = Lopf.solve(
+      mutate("tech-capacity-limit", "global_constraints.csv",
+             setColumn(_, "bus", (id, b) => if id == "wind_at_b" then "A" else b)),
+      params,
+    )
+    assertEquals(moved.status, SolveStatus.Optimal, s"${moved.solution}")
+    assertEqualsDouble(moved.objective, 18600.0, 1e-3, "the bus scope is not selecting assets")
+    assertEqualsDouble(moved.capacity("Generator", "windB"), 120.0, 1e-4, "windB unbounded by bus")
+    assertEqualsDouble(moved.capacity("Generator", "windA"), 0.0, 1e-4, "windA at its bus cap")
+
+    // And the constant, tightened by 20. The bus cap still binds at 40, so the 20 comes off
+    // `windA` alone: 60 and 40 rather than 80 and 40. PyPSA: 19,800.
+    val tighter = Lopf.solve(
+      mutate("tech-capacity-limit", "global_constraints.csv",
+             setColumn(_, "constant", (id, c) => if id == "wind_total" then "100.0" else c)),
+      params,
+    )
+    assertEquals(tighter.status, SolveStatus.Optimal, s"${tighter.solution}")
+    assertEqualsDouble(tighter.objective, 19800.0, 1e-3, "the cap's constant is not being read")
+    assertEqualsDouble(tighter.capacity("Generator", "windA"), 60.0, 1e-4, "windA at the new remainder")
+
+    // A bus the network does not have is refused rather than matched by nothing. PyPSA raises
+    // a KeyError selecting it; here the scope would match no asset, the row would be dropped
+    // as vacuous under `<=`, and a cap on buildable capacity would silently not apply -- the
+    // cheaper direction, reported as Optimal.
+    val failure = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(
+        mutate("tech-capacity-limit", "global_constraints.csv",
+               setColumn(_, "bus", (id, b) => if id == "wind_at_b" then "C" else b))
+      )
+    }
+    assert(failure.getMessage.contains("'C'"),
+      s"the refusal does not name the missing bus: ${failure.getMessage}")
+  }

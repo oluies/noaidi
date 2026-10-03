@@ -1966,6 +1966,100 @@ collapsing into one.
 `tech_capacity_expansion_limit` is the one of PyPSA's five types still refused, and
 the refusal test now names it instead of `operational_limit`.
 
+## `tech_capacity_expansion_limit`, and all five types built
+
+The fifth and last type `global_constraints.py` dispatches on, and the last one left
+here rather than the hardest. Its left-hand side is one coefficient of 1.0 per
+capacity column — no weighting, no snapshot index, no constant:
+
+```
+Σ_a nominal(a)    extendable assets whose carrier matches, at the named bus if there is one
+```
+
+It could not have been built before the two changes underneath it. It needs capacity
+to be a decision, and on a multi-period network it needs the activity window, because
+PyPSA passes the constraint's `investment_period` into `filter_by_active_assets`.
+
+### Three columns, and the one that is not a carrier attribute
+
+- **`carrier_attribute` names a carrier on this type.** The same field means
+  `co2_emissions` on `primary_energy` — a column of `carriers.csv` — and `hydro` on
+  `operational_limit` — a carrier. PyPSA reads one field two ways. So a
+  `carrier_attribute` of `co2_emissions` here matches nothing rather than charging
+  emissions, and the name is actively misleading about which of the two it is.
+- **`bus` is optional, and blank is absent.** PyPSA's `glc.get("bus") or None` treats
+  the empty string as no scope, which matters because a CSV round-trip writes an unset
+  `bus` as `""` rather than omitting the column — `wind_total` in the exported fixture
+  is exactly that. A netCDF round-trip can deliver the literal string `nan`, so both
+  are read as absent.
+- **A branch counts at its `bus0` only.** A cap at one bus counts a line leaving it and
+  not the same line arriving. Asymmetric, and upstream's. Selected through `Role` rather
+  than by component name, for the reason `Lopf.build` selects its tables that way:
+  `Process` is already a second controllable branch and lands on `bus0` without being
+  named.
+
+A bus the network does not have is refused. PyPSA raises a `KeyError` selecting it;
+here the scope would match no asset, the row would be dropped as vacuous under `<=`,
+and a cap on buildable capacity would silently not apply.
+
+### Capacity, not expansion, despite the name
+
+The left-hand side is the capacity **variable**, which for an extendable asset is the
+whole optimal capacity and not the increment over what the network came with. An asset
+arriving with `p_nom = 100` and extendable counts its full `p_nom_opt`, so a cap of 100
+permits no addition at all rather than 100 of it. That reading is forced: PyPSA sums
+`m[var]`, the same column the objective charges `capital_cost` on, and nothing in the
+row subtracts the existing capacity. Both extendables in the fixture start at
+`p_nom = 0` so this is not what it tests — it is written down because the name invites
+the other reading.
+
+### The fixture, and why it is linear on purpose
+
+`tech-capacity-limit`: two buses, a fixed line rated far above anything that crosses
+it, `gas` at 80, and three extendables with zero marginal cost. The caps keep renewable
+output below the load at both snapshots, so each MW of capacity displaces gas at a
+**constant** rate and its net value is constant: `windA` +20/MW, `windB` +30/MW,
+`solarA` +20/MW.
+
+That is the point. With constant net values the problem is linear in the capacities and
+nothing but the caps bounds them, which is the only arrangement where both caps bind at
+once and the answer is still a point:
+
+- `windB` is worth most per MW, so it fills its bus cap of 40 first
+- `windA` takes the remaining 80 of the network-wide 120
+- `solarA` is a different carrier, so neither cap touches it and it builds to its
+  `p_nom_max` of 50
+
+`p_nom_max` on `solarA` is load-bearing in a way the caps are not: at a constant +20/MW
+with no cap and no limit its capacity is unbounded. And it is what makes the carrier
+filter observable, because a port that counted every extendable would have 120 to share
+between three assets rather than two.
+
+PyPSA pays **19,400**, with shadow prices of −20 on the total and −10 at the bus, and
+the two solvers agree on the objective, all three capacities, every dispatch and the
+line flow.
+
+Moving the bus scope from B to A reverses the answer rather than shifting it: `windA` is
+held to 40, `windB` has no cap of its own and is worth more per MW, so it takes all 120
+and `windA` is built to zero. PyPSA: 18,600. Tightening the total to 100 takes the 20
+off `windA` alone, since the bus cap still binds: 19,800.
+
+Mutation-checked three ways: dropping the carrier filter gives 20,400, dropping the bus
+filter 21,000, and treating a blank `bus` as a literal match rather than as absent
+19,200. The `bus0` rule for branches is **not** covered — no extendable branch here
+carries a matching carrier — and that is a gap in the fixture rather than in the code.
+
+### The refusal test, rewritten twice
+
+`GapRefusalSuite`'s "type that is not implemented" case has now been rewritten twice as
+the type it named got built: first `operational_limit`, then
+`tech_capacity_expansion_limit`. All five are built, so the type it names is
+deliberately one PyPSA does not have. `co2_budget` is the shape of the mistake — a
+plausible name for an emissions cap, which a reader would expect to behave like
+`primary_energy` and which a port falling through to a default would build as whatever
+its last case happened to be. The refusal has to name the string it did not recognise,
+because the value is almost always a typo for one of the five.
+
 ## All four families at once, which was a note rather than a test
 
 `SclopfFamiliesSuite` had cases for each family alone, for two together, and for
@@ -3102,7 +3196,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are twenty-nine golden networks and every *network* module, L1 onward, is
+there are thirty golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

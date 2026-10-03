@@ -1,0 +1,3 @@
+name,v_nom,carrier,control,generator,sub_network
+A,110.0,AC,Slack,gas,0
+B,110.0,AC,PQ,,0

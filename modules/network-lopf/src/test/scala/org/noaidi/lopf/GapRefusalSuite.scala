@@ -161,15 +161,19 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
 
   // Global constraints: PyPSA dispatches on `type` to entirely different
   // builders, so the wrong one is a different constraint wearing the same
-  // right-hand side. This used to name `operational_limit`, chosen because its
-  // right-hand side looks most like a cap's -- and it is built now, so the type
-  // named here is the one PyPSA has that this does not:
-  // `tech_capacity_expansion_limit`, which caps a carrier's installed capacity at
-  // a bus rather than its output over the horizon. Those are the five types
-  // `global_constraints.py` dispatches on, four of them built.
-  refuses("GlobalConstraint type that is not implemented", "tech_capacity_expansion_limit") {
-    mutate("ac-dc-co2", "global_constraints.csv",
-           setColumn(_, "type", "tech_capacity_expansion_limit"))
+  // right-hand side. This test has now been rewritten twice as the types it named
+  // got built -- first `operational_limit`, then `tech_capacity_expansion_limit` --
+  // and all five that `global_constraints.py` dispatches on are built, so there is
+  // no real type left to name.
+  //
+  // It is still worth a test, and the type it names is deliberately one PyPSA does
+  // not have. `co2_budget` is the shape of the mistake: a plausible name for a cap
+  // on emissions, which a reader would expect to behave like `primary_energy` and
+  // which a port that fell through to a default would build as whatever its last
+  // case happened to be. The refusal has to name the string it did not recognise,
+  // because the value is almost always a typo for one of the five.
+  refuses("GlobalConstraint type that is not implemented", "co2_budget") {
+    mutate("ac-dc-co2", "global_constraints.csv", setColumn(_, "type", "co2_budget"))
   }
   // `>=` and `==` are implemented now, so the gap that remains is a sense PyPSA
   // does not write at all. Keeping a test for the *implemented* senses here would

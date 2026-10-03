@@ -1911,8 +1911,18 @@ outside the activity window, so reading the literal last snapshot would charge t
 depletion as though the unit had emptied itself on retirement. The last **active**
 snapshot is where the fill lands.
 
-Nothing tests that yet: `operational-limit` is single-period, so the two readings
-coincide on it. Recorded here as a gap in the fixture rather than in the code.
+`operational-limit` cannot test that, being single-period: the two readings coincide on
+it. `operational-limit-retired` can, and does. Its reservoir has `build_year = 2030` and
+`lifetime = 10`, so its last active snapshot is the second of four; it holds 40 there
+against an initial 60, so its depletion is 20 and `ror` may produce 80 MWh against a
+limit of 100. Read at the horizon's end the depletion would be the full 60 and `ror`
+would be held to 40 — PyPSA pays 20,500 and the wrong reading lands on 21,240.
+
+`ror` exists in that fixture so the left-hand side has a variable part under **both**
+readings. Without it the wrong reading is simply infeasible for any limit below the
+initial level, which is a weaker thing to measure than two answers. And `years` is 1 in
+both periods because `define_operational_limit` raises `NotImplementedError` otherwise —
+see below on why two equal ten-year periods are not exempt from that.
 
 ### The refusal that is PyPSA's own
 
@@ -2367,8 +2377,20 @@ off `windA` alone, since the bus cap still binds: 19,800.
 
 Mutation-checked three ways: dropping the carrier filter gives 20,400, dropping the bus
 filter 21,000, and treating a blank `bus` as a literal match rather than as absent
-19,200. The `bus0` rule for branches is **not** covered — no extendable branch here
-carries a matching carrier — and that is a gap in the fixture rather than in the code.
+19,200.
+
+The `bus0` rule for branches was not covered at first — no extendable branch in the
+fixture carried a matching carrier — and that was recorded here as a gap in the fixture.
+It is covered now, by a mutation that needs **two** files changed at once: `AB` made
+extendable with the capped carrier, and the network-wide cap slackened so the only
+question left is which assets the bus-scoped one sees. Scoped to B, the line's `bus1`,
+the line is not in the cap and `windA` takes 90; scoped to A, its `bus0`, the line takes
+the entire 40 and `windA` is built to zero. 19,240 against 18,640, and reading the branch
+at `bus1` fails it.
+
+That mutation is also why `CsvFixtures` grew `mutateAll`: `mutate` returns a `Network`, so
+two of them cannot be composed, and either edit alone leaves a network where the rule is
+invisible.
 
 ### The refusal test, rewritten twice
 
@@ -3517,7 +3539,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are thirty-four golden networks and every *network* module, L1 onward, is
+there are thirty-five golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

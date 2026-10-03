@@ -1345,6 +1345,64 @@ def store_per_period():
     return n
 
 
+def operational_limit_retired():
+    """An `operational_limit` whose reservoir retires before the horizon ends.
+
+    `OperationalLimit` takes a non-cyclic asset's net depletion as `-soc(last) + initial`,
+    and `last` is the last snapshot the asset **exists at** rather than the last snapshot of
+    the horizon. PyPSA writes that as `soc.ffill("snapshot").isel(snapshot=-1)`, and the
+    forward fill is the whole of it: an asset absent from the final period has no variable
+    there, so without the fill the term would be missing rather than the last level the asset
+    actually held.
+
+    Here the column exists at every snapshot and is pinned to `[0, 0]` outside the activity
+    window, so reading the literal last snapshot gives `-0 + initial` -- charging the
+    depletion as though the unit had emptied itself on retirement, which is a **tighter** cap
+    than PyPSA builds.
+
+    `operational-limit` could not see that, being single-period: the two readings coincide on
+    it, and NOTES recorded the omission as a gap in the fixture rather than in the code. This
+    is that fixture.
+
+    `res` has `build_year = 2030` and `lifetime = 10`, so it is active in 2030 alone and its
+    last active snapshot is the second of four. It starts at 60 and PyPSA leaves it at 40
+    there, so its depletion is 20 and the cap's left-hand side is `sum(ror) + 20 = 100`
+    against a limit of 100. Read at the horizon's end instead the term would be 60, so `ror`
+    would be held to 40 MWh rather than 80 and the answer would be dearer.
+
+    `years` is 1 in both periods, and that is not cosmetic: `define_operational_limit` raises
+    `NotImplementedError` for a non-cyclic asset with continuous depletion whenever any
+    period's `years` is anything but 1 -- upstream tests `ne(1)`, not whether the periods
+    differ from each other, so two ten-year periods would raise just as readily.
+
+    `ror` exists so the left-hand side has a variable part under **both** readings. Without
+    it the wrong reading is simply infeasible for any limit below the initial level, which is
+    a weaker thing to measure than two answers.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(2)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["objective"] = [1.0, 1.0]
+    n.investment_period_weightings["years"] = [1, 1]
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Carrier", "hydro")
+    # Rising, so there is a strictly cheapest snapshot to displace at and the answer is a
+    # point rather than a face.
+    n.add("Generator", "gas", bus="b", p_nom=300.0, marginal_cost=[50.0, 60.0, 80.0, 90.0])
+    n.add("Generator", "ror", bus="b", carrier="hydro", p_nom=30.0, marginal_cost=2.0)
+    n.add("StorageUnit", "res", bus="b", carrier="hydro", p_nom=40.0, max_hours=2.0,
+          state_of_charge_initial=60.0, marginal_cost=1.0,
+          build_year=2030, lifetime=10)
+    n.add("Load", "d", bus="b", p_set=[100.0] * 4)
+    n.add("GlobalConstraint", "budget", type="operational_limit",
+          carrier_attribute="hydro", sense="<=", constant=100.0)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1755,6 +1813,7 @@ NETWORKS = {
     "growth-limit": growth_limit,
     "storage-per-period": storage_per_period,
     "store-per-period": store_per_period,
+    "operational-limit-retired": operational_limit_retired,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1808,6 +1867,7 @@ MULTI_INVEST = frozenset({
     "growth-limit",
     "storage-per-period",
     "store-per-period",
+    "operational-limit-retired",
 })
 
 

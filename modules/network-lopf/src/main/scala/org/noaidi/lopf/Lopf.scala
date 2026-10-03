@@ -902,17 +902,27 @@ object Lopf:
         // take an `operational_limit` capping a carrier's *energy* and build it as an
         // emissions-weighted sum over every emitting generator: a different constraint
         // wearing the same right-hand side, returning Optimal.
-        val terms = kind match
-          case "primary_energy"                      => primaryEnergy(attribute)
+        // `operational_limit` carries a constant on its LEFT-hand side -- the initial
+        // storage levels its depletion is measured from -- and `LpBuilder` takes terms and a
+        // bound with nowhere to put one. So the match yields the constant alongside the
+        // terms and the right-hand side below subtracts it. The other three types have no
+        // left constant and return zero, which is the same row.
+        val (terms, leftConstant) = kind match
+          case "primary_energy"                      => (primaryEnergy(attribute), 0.0)
+          case "operational_limit"                   =>
+            OperationalLimit.terms(
+              network, snapshots, columns, id, attribute,
+              message => throw new UnsupportedNetwork(message),
+            )
           case "transmission_volume_expansion_limit" =>
-            transmissionLimit(id, attribute, "length")
+            (transmissionLimit(id, attribute, "length"), 0.0)
           case "transmission_expansion_cost_limit"   =>
-            transmissionLimit(id, attribute, "capital_cost")
+            (transmissionLimit(id, attribute, "capital_cost"), 0.0)
           case other =>
             throw new UnsupportedNetwork(
               s"global constraint '$id' has type '$other'; this port implements " +
-                "primary_energy, transmission_volume_expansion_limit and " +
-                "transmission_expansion_cost_limit"
+                "primary_energy, operational_limit, transmission_volume_expansion_limit " +
+                "and transmission_expansion_cost_limit"
             )
 
         // A named column that is not there at all is an error whatever the sense, and that
@@ -963,19 +973,34 @@ object Lopf:
         // `0 <= constant`, vacuous for a non-negative cap and therefore harmless; `>=` and
         // `==` over no terms are claims that can be false, and dropping those silently is
         // how a carrier typo turns a binding requirement into an unconstrained run.
+        // Moved to the right, which is where a left-hand constant belongs. Computed after
+        // the finiteness guard on `constant` above so that a NaN right-hand side is still
+        // reported as the right-hand side rather than as a storage level.
+        val bound = constant - leftConstant
+
+        //
+        // Tested on `bound` and not on `constant`, because with a left-hand constant the row
+        // over no terms is `0 sense bound`. An `operational_limit` whose only matching asset
+        // is a storage unit active at no snapshot has no terms and a non-zero constant, and
+        // judging its vacuity by the file's right-hand side would drop a cap that the
+        // initial level already violates -- the cheaper-than-the-truth direction.
         if terms.isEmpty then
-          if sense != "<=" || constant < 0.0 then
+          if sense != "<=" || bound < 0.0 then
             throw new UnsupportedNetwork(
               s"global constraint '$id' of type '$kind' matches no component, so " +
-                s"'$sense $constant' is a claim about nothing. Its carrier_attribute is " +
-                s"'$attribute'."
+                s"'$sense $bound' is a claim about nothing. Its carrier_attribute is " +
+                s"'$attribute'" +
+                (if leftConstant != 0.0 then
+                   s", and the $leftConstant on its left-hand side came from an asset " +
+                     "that exists at no snapshot."
+                 else ".")
             )
           else ()
         else
           sense match
-            case "<=" => builder.lessThan(terms, constant)
-            case ">=" => builder.greaterThan(terms, constant)
-            case "==" => builder.equalityConstraint(terms, constant)
+            case "<=" => builder.lessThan(terms, bound)
+            case ">=" => builder.greaterThan(terms, bound)
+            case "==" => builder.equalityConstraint(terms, bound)
             // Unreachable: the sense was validated above. Spelled out rather than left to a
             // `MatchError`, which would name neither the constraint nor the column.
             case other =>

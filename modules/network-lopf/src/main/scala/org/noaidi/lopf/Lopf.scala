@@ -721,7 +721,7 @@ object Lopf:
       * silently reads the wrong column -- or, since a missing column reads as zero, drops
       * every term and then drops the row.
       */
-    def primaryEnergy(attribute: String): Seq[(Int, Double)] =
+    def primaryEnergy(attribute: String, scope: IndexedSeq[Int]): Seq[(Int, Double)] =
       // PyPSA's `define_primary_energy_limit` also charges StorageUnit and Store carriers
       // that carry a non-zero intensity -- a non-cyclic unit through `state_of_charge`
       // against its initial level, a store through `e`. This port builds neither, and under
@@ -780,7 +780,10 @@ object Lopf:
       // snapshots.csv that a representative-period study sets apart on purpose. Every
       // fixture holds both at 1.0, so no comparison here can see the difference -- which is
       // exactly why it has to be read rather than assumed.
-      snapshots.flatMap { t =>
+      // `scope`, not `snapshots`: a constraint carrying an `investment_period` sums over that
+      // period's snapshots alone, which is PyPSA's `period_sns = sns[period_of == period]`.
+      // Unscoped it is the whole horizon and the two are the same thing.
+      scope.flatMap { t =>
         // `years`, not `objective`, on the period half. PyPSA scales an emissions sum by
         // how many years the period stands for -- it is a quantity of gas, not a cost to
         // discount -- while every other per-period factor in this builder is the objective
@@ -826,7 +829,11 @@ object Lopf:
       * right-hand side -- PyPSA limits what is '''built''', not what exists.
       */
     def transmissionLimit(
-        id: String, carrierList: String, weightAttribute: String): Seq[(Int, Double)] =
+        id: String,
+        carrierList: String,
+        weightAttribute: String,
+        scope: Option[String],
+    ): Seq[(Int, Double)] =
       // A comma-separated list, as PyPSA writes it, with brackets stripped and each entry
       // trimmed. PyPSA applies `re.sub("[\\[\\]\\(\\)]", "", s)` per entry for a
       // reason: the field is commonly written as a Python list literal, so `"[AC, DC]"` is
@@ -840,7 +847,22 @@ object Lopf:
         network.table(component).toIndexedSeq.flatMap { table =>
           table.ids.filter { branch =>
             Expansion.isExtendable(table, branch) &&
-              carriers.contains(table.string("carrier", branch))
+              carriers.contains(table.string("carrier", branch)) &&
+              // PyPSA's `filter_by_active_assets(ext_i, period_filter)`, where
+              // `period_filter` is the constraint's own period when it has one and
+              // otherwise *every* period the snapshots carry -- and a list of periods means
+              // "active in any of them". So an unscoped limit on a multi-period network
+              // still drops a branch that exists in no period at all, which is not the same
+              // as the unfiltered reading `tech_capacity_expansion_limit` uses for its own
+              // unscoped case. The two differ only on an asset active in no declared
+              // period, which no sane network carries; they are written apart anyway,
+              // because "indistinguishable on the fixtures" is how the last three
+              // divergences got in.
+              (scope match
+                case Some(period) => Periods.activeIn(table, branch, period)
+                case None         =>
+                  !network.isMultiPeriod ||
+                    network.snapshotPeriods.distinct.exists(Periods.activeIn(table, branch, _)))
           }.map { branch =>
             // Refused rather than emitted. A NaN `length` or `capital_cost` becomes a NaN
             // coefficient in the constraint matrix and surfaces hundreds of lines away as an
@@ -891,12 +913,67 @@ object Lopf:
       // second is reported first. Validating everything in file order and emitting in a
       // second pass would restore it, at the cost of two walks for a diagnostic ordering no
       // test depends on -- so the behaviour stands and the comment now describes it.
-      val ordered = constraints.ids.sortBy(id => if constraints.string("sense", id) == "==" then 0 else 1)
+      // A constraint's own `investment_period`, as a NUMBER.
+      //
+      // `investment_period` is a Float column in the schema and `ComponentTable.string`
+      // throws `IllegalArgumentException` on a numeric column, so reading it as text is not a
+      // style choice -- it is the defect the refusal this replaces actually had. That refusal
+      // called `constraints.string("investment_period", id)`, which meant a genuinely scoped
+      // constraint died with "investment_period is Float, not a string" rather than with the
+      // refusal's own message, naming neither the constraint nor the gap. It still stopped
+      // the build, so the failure was loud rather than silent, and nothing tested it either
+      // way: no fixture had both periods and a scoped constraint.
+      //
+      // NaN is unscoped, which is PyPSA's own `np.isnan(glc.investment_period)`, and is also
+      // what an absent column reads as through the schema default.
+      def rawScope(id: String): Option[Double] =
+        val raw = constraints.float("investment_period", id)
+        if raw.isNaN then None else Some(raw)
+
+      // Resolved against the periods the SNAPSHOTS carry, by value rather than by spelling.
+      // A CSV round-trip writes this column as `2040.0` while `investment_periods.csv` writes
+      // the period as `2040`, so matching the two as text matches nothing -- every scoped
+      // constraint would be skipped as naming an absent period and the answer would come out
+      // cheaper. The label returned is the network's own spelling, which is what
+      // `Periods.activeIn` and `periodOf` compare against.
+      def resolveScope(raw: Double): Option[String] =
+        network.snapshotPeriods.distinct.find(_.trim.toDoubleOption.contains(raw))
+
+      // A scope on a network with no periods is refused, and that is PyPSA's own behaviour
+      // rather than a choice: both `define_primary_energy_limit` and
+      // `define_operational_limit` read `periods`, which is bound only inside
+      // `if n._multi_invest`, so the solve dies with
+      // `UnboundLocalError: cannot access local variable 'periods'`. Measured, not inferred.
+      constraints.ids.foreach { id =>
+        rawScope(id).foreach { raw =>
+          if !network.isMultiPeriod then
+            throw new UnsupportedNetwork(
+              s"global constraint '$id' is scoped to investment period '$raw', but the " +
+                "network's snapshots carry no periods. PyPSA raises UnboundLocalError on " +
+                "exactly this, having bound its period index only under " +
+                "multi_investment_periods, so there is no answer to agree with."
+            )
+        }
+      }
+
+      // Skipped entirely, not built over nothing. PyPSA's `elif glc.investment_period in
+      // periods: ... else: continue` -- a constraint naming a period the horizon does not
+      // cover contributes no row at all, which is a different outcome from the empty
+      // left-hand side the emptiness branch below handles: that one refuses `>=` and `==`,
+      // and this one must not, because upstream builds nothing either way.
+      val inHorizon = constraints.ids.filter(id => rawScope(id).forall(resolveScope(_).isDefined))
+
+      val ordered = inHorizon.sortBy(id => if constraints.string("sense", id) == "==" then 0 else 1)
       ordered.foreach { id =>
         val sense     = constraints.string("sense", id)
         val constant  = constraints.float("constant", id)
         val kind      = constraints.string("type", id)
         val attribute = constraints.string("carrier_attribute", id)
+        val scope     = rawScope(id).flatMap(resolveScope)
+        // The snapshots a scoped row sums over, which is the whole horizon when unscoped.
+        val scopedSnapshots: IndexedSeq[Int] = scope match
+          case None         => snapshots.toIndexedSeq
+          case Some(period) => snapshots.filter(t => network.periodOf(t).contains(period)).toIndexedSeq
 
         // `type` selects an entirely different left-hand side in PyPSA. Assuming one would
         // take an `operational_limit` capping a carrier's *energy* and build it as an
@@ -908,25 +985,26 @@ object Lopf:
         // terms and the right-hand side below subtracts it. The other three types have no
         // left constant and return zero, which is the same row.
         val (terms, leftConstant) = kind match
-          case "primary_energy"                      => (primaryEnergy(attribute), 0.0)
+          case "primary_energy"                      => (primaryEnergy(attribute, scopedSnapshots), 0.0)
           case "operational_limit"                   =>
             OperationalLimit.terms(
-              network, snapshots, columns, id, attribute,
+              network, scopedSnapshots, columns, id, attribute,
               message => throw new UnsupportedNetwork(message),
             )
           case "transmission_volume_expansion_limit" =>
-            (transmissionLimit(id, attribute, "length"), 0.0)
+            (transmissionLimit(id, attribute, "length", scope), 0.0)
           case "transmission_expansion_cost_limit"   =>
-            (transmissionLimit(id, attribute, "capital_cost"), 0.0)
+            (transmissionLimit(id, attribute, "capital_cost", scope), 0.0)
           case "tech_capacity_expansion_limit"       =>
             // The `bus` column is optional and read as absent when blank: a CSV round-trip
             // writes an unset `bus` as the empty string rather than leaving the column out,
             // and PyPSA's own `glc.get("bus") or None` treats it the same way. A literal
             // "nan" arrives the same way from a netCDF round-trip.
-            val scope =
+            val busColumn =
               if constraints.static.contains("bus") then constraints.string("bus", id).trim
               else ""
-            val named = if scope.isEmpty || scope.toLowerCase == "nan" then "" else scope
+            val named =
+              if busColumn.isEmpty || busColumn.toLowerCase == "nan" then "" else busColumn
             if named.nonEmpty && !network.table("Bus").exists(_.ids.contains(named)) then
               throw new UnsupportedNetwork(
                 s"global constraint '$id' is scoped to bus '$named', which the network does " +
@@ -934,7 +1012,7 @@ object Lopf:
                   "match nothing, the row would be dropped and a cap on buildable capacity " +
                   "would silently not apply."
               )
-            (TechCapacityLimit.terms(network, columns, attribute, named), 0.0)
+            (TechCapacityLimit.terms(network, columns, attribute, named, scope), 0.0)
           case other =>
             throw new UnsupportedNetwork(
               s"global constraint '$id' has type '$other'; this port implements " +

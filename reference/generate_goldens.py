@@ -1098,6 +1098,79 @@ def tech_capacity_limit():
     return n
 
 
+def period_scoped_constraints():
+    """A CO2 budget per investment period, which was refused as having no defensible sign.
+
+    `investment_period` on a global constraint restricts it to one period. It was refused
+    here, and the refusal's reasoning was right as far as it went: read as horizon-wide, a
+    cap meant for 2040 alone is **tighter** than the network states and makes the answer
+    dearer, while read as a cap per period rather than in total it is looser. Neither
+    direction is defensible, so refusing beat guessing.
+
+    What was missing was that there is nothing to guess. PyPSA does three separate things
+    with the column, and none of them is the same as the others:
+
+      - `primary_energy` and `operational_limit` sum over **that period's snapshots alone**
+        (`period_sns = sns[period_of == period]`)
+      - the three capacity types filter their **assets** by activity in that period, and
+        their *unscoped* cases disagree with each other: a transmission limit passes every
+        period the snapshots carry, so "active in any", while
+        `tech_capacity_expansion_limit` passes `None`, so the `active` flag alone with build
+        year and lifetime ignored
+      - a scope naming a period the horizon does not cover builds **no row at all**, which
+        is not the same as a row over an empty left-hand side
+
+    And a scope on a network whose snapshots carry no periods is a crash upstream, not a
+    behaviour: `periods` is bound only inside `if n._multi_invest`, so the solve dies with
+    `UnboundLocalError: cannot access local variable 'periods'`. Measured on both
+    snapshot-summing types.
+
+    This fixture is the first of those three. Two caps, one per period, both binding:
+
+      - `years` is [10, 5], so an identical MWh of gas costs ten emission units in 2030 and
+        five in 2040. The caps are 1,500 against an unscoped 2,000 and 600 against an
+        unscoped 1,000, so each period has to abate and neither can borrow from the other.
+      - `gas` rises 10/12/14/16 across the horizon, so within each period there is a strictly
+        cheapest snapshot to abate at and the answer is a point rather than a face. 2030
+        abates 50 MW at its second snapshot and 2040 abates 80 at its second.
+      - The shadow prices come out -7.8 and -14.8 -- `(90 - 12) / 10` and `(90 - 16) / 5` --
+        which is what says the two rows carry their own period's `years` and not each other's.
+
+    PyPSA pays **15,020**. A port that applied either cap to the whole horizon, or summed
+    both periods into one row, lands nowhere near it: horizon-wide emissions are 3,000
+    against the tighter of the two constants.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(2)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    # `objective` flat on purpose. `investment-periods-discounted` is the fixture for the
+    # discount factor; here the only per-period weighting that should move anything is
+    # `years`, so holding the other at 1.0 keeps a failure unambiguous between them.
+    n.investment_period_weightings["objective"] = [1.0, 1.0]
+    n.investment_period_weightings["years"] = [10, 5]
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Carrier", "gas", co2_emissions=1.0)
+    n.add("Carrier", "clean")
+    # `efficiency` 1.0 against `co2_emissions` 1.0 makes a tonne per MWh of electricity, so
+    # the caps can be read off the dispatch without dividing.
+    n.add("Generator", "gas", bus="b", carrier="gas", p_nom=200.0, efficiency=1.0,
+          marginal_cost=[10.0, 12.0, 14.0, 16.0])
+    n.add("Generator", "clean", bus="b", carrier="clean", p_nom=200.0, marginal_cost=90.0)
+    n.add("Load", "d", bus="b", p_set=[100.0] * 4)
+
+    n.add("GlobalConstraint", "co2_2030", type="primary_energy",
+          carrier_attribute="co2_emissions", sense="<=", constant=1500.0,
+          investment_period=2030)
+    n.add("GlobalConstraint", "co2_2040", type="primary_energy",
+          carrier_attribute="co2_emissions", sense="<=", constant=600.0,
+          investment_period=2040)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1504,6 +1577,7 @@ NETWORKS = {
     "investment-periods-expansion": investment_periods_expansion,
     "operational-limit": operational_limit,
     "tech-capacity-limit": tech_capacity_limit,
+    "period-scoped-constraints": period_scoped_constraints,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1553,6 +1627,7 @@ MULTI_INVEST = frozenset({
     "investment-periods",
     "investment-periods-discounted",
     "investment-periods-expansion",
+    "period-scoped-constraints",
 })
 
 

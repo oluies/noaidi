@@ -1,0 +1,3 @@
+name,bus,control,p_nom,carrier,marginal_cost
+gas,b,Slack,200.0,gas,0.0
+clean,b,PQ,200.0,clean,90.0

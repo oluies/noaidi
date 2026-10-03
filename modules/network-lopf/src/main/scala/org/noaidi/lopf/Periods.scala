@@ -188,27 +188,33 @@ object Periods:
         }
     }
 
-    // A global constraint scoped to one period. This one was *ruled safe* in the
-    // schema sweep on the grounds that a multi-period network was refused
-    // outright, which stopped being true in this change -- so it is the ledger
-    // entry that turned into a gap the moment the refusal above narrowed.
+    // A global constraint scoped to one period is built now, in `Lopf.build`'s
+    // global-constraint block, and the refusal that used to sit here is gone. The
+    // reasoning it gave for refusing was sound and is worth keeping: left unread,
+    // a cap meant for 2040 alone would be applied to the whole horizon, which is
+    // '''tighter''' than the network states and makes the answer dearer, or -- read
+    // the other way, as a cap per period rather than in total -- looser. Neither
+    // direction has a defensible sign.
     //
-    // Left unread it is not conservative: a CO2 cap meant for 2040 alone would
-    // be applied to the whole horizon, which is a *tighter* constraint than the
-    // network states and makes the answer dearer, or -- read the other way, as a
-    // cap per period rather than in total -- looser. Neither has a defensible
-    // sign, and PyPSA builds a separate row per scoped period.
-    network.table("GlobalConstraint").foreach { constraints =>
-      constraints.ids.foreach { id =>
-        if declares(constraints, "investment_period") then
-          val scope = constraints.string("investment_period", id).trim
-          if scope.nonEmpty && scope.toLowerCase != "nan" then
-            refuse(
-              s"global constraint '$id' is scoped to investment period '$scope'; only a " +
-                "horizon-wide constraint is built here, which would apply its cap to every period"
-            )
-      }
-    }
+    // What replaces it is three separate behaviours, each of which is PyPSA's and
+    // none of which is the same as the others:
+    //
+    //   - the snapshot-summing types, `primary_energy` and `operational_limit`,
+    //     sum over that period's snapshots alone
+    //   - the capacity types filter their assets by activity in that period, and
+    //     their '''unscoped''' cases disagree with each other about what to do on a
+    //     multi-period network -- see the comments at each
+    //   - a scope naming a period the horizon does not cover makes '''no row at
+    //     all''', which is not the same as a row over an empty left-hand side
+    //
+    // The scope is resolved numerically rather than by string, because
+    // `investment_period` is a float column: a CSV round-trip writes `2040.0`
+    // where `investment_periods.csv` writes `2040`.
+    //
+    // A scope on a network whose snapshots carry no periods is still refused, and
+    // that refusal lives beside the others in `Lopf.build` because it is about the
+    // constraint rather than about the periods. PyPSA raises `UnboundLocalError`
+    // there, having bound its period index only under `multi_investment_periods`.
 
     // Two row families are built once over the whole horizon rather than once
     // per period, so an asset whose activity window is not the whole horizon

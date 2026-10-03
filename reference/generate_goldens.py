@@ -947,6 +947,81 @@ def investment_periods_expansion():
     return n
 
 
+def operational_limit():
+    """A cap on a carrier's energy, which is a different row from a cap on its emissions.
+
+    `operational_limit` was the type the global-constraint refusal named as its own
+    justification: assuming `type` would "take an `operational_limit` capping a carrier's
+    *energy* and build it as an emissions-weighted sum over every emitting generator -- a
+    different constraint wearing the same right-hand side, returning Optimal". It is built
+    now, and this is the fixture that says what it is.
+
+    `define_operational_limit`'s left-hand side has three parts, and the fixture makes all
+    three observable at once:
+
+      - **Generation of the named carrier, weighted by `snapshot_weightings.generators`.**
+        This is the first fixture anywhere here whose three snapshot weightings are not all
+        equal: `generators` is 3.0 while `objective` and `stores` stay 1.0. Every other
+        golden holds them equal, so until now no comparison could tell which column a sum
+        read. With `objective` in its place the cap's left-hand side comes to 360 against a
+        limit of 680 and stops binding altogether.
+      - **The net depletion of a non-cyclic storage unit, as one variable plus a constant.**
+        `res` starts at 500 and ends at 300, so it contributes `-soc(last) + 500 = 200`. Read
+        as `sum_t p_dispatch` instead it would be the same number here only by accident; the
+        mutation that lets `res` refill makes the two differ.
+      - **Nothing at all for a cyclic unit.** `pump` carries the same `hydro` carrier and is
+        cyclic, so PyPSA filters it out, and `marginal_cost_storage = 0.01` is what makes that
+        checkable. Not by tightening the cap: a port that included `pump` would add
+        `-soc(pump, last) + 20`, and the LP can drive that to zero by holding the unit charged
+        at the last snapshot. What that costs is the storage price, so the objective comes out
+        2,800.8 rather than 2,800. At the attribute's default of zero the lever is free, the
+        term goes to exactly zero, and including a cyclic unit is invisible. The 0.01 also
+        pins the level, which is why the dispatch is determinate at all -- a cyclic unit with
+        no flow and no storage price has a state of charge free to sit anywhere in its band.
+
+    And `gas` runs, 40 MW at the first snapshot, so a port that summed every generator
+    instead of the named carrier's would reach 800 rather than 680.
+
+    PyPSA pays **2,800** with `ror` at [60, 50, 40, 10] against a profile allowing
+    [60, 50, 40, 30]. The cap is met by cutting `ror` at the snapshot where replacing it is
+    cheapest and by letting `res` carry more, and it is *partial* at the last snapshot --
+    10 of an available 30 -- which is what makes the shadow price of -3.0 a point rather
+    than an interval. The cap was swept for that: at 720 and at 660 the answer sits on a
+    corner and simplex and interior-point disagree about the dispatch, while at 680 they
+    agree on the objective, every dispatch, the state of charge and all four nodal prices.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    # Explicit on all three, and not only on the one that matters. Leaving `objective` and
+    # `stores` implicit would make the fixture's point -- that the three are different
+    # columns -- depend on a default rather than state it.
+    n.snapshot_weightings.loc[:, "objective"] = 1.0
+    n.snapshot_weightings.loc[:, "stores"] = 1.0
+    n.snapshot_weightings.loc[:, "generators"] = 3.0
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Carrier", "hydro")
+    n.add("Carrier", "gas")
+    # Run-of-river: a rising marginal cost and a falling availability, so each snapshot is a
+    # distinct place to cut and the cheapest cut is unique.
+    n.add("Generator", "ror", bus="b", carrier="hydro", p_nom=100.0,
+          marginal_cost=[1.0, 2.0, 3.0, 4.0], p_max_pu=[0.6, 0.5, 0.4, 0.3])
+    # 12 at the first snapshot and far above `res` afterwards, so gas runs under the cap and
+    # only there. A gas price above `res`'s everywhere would leave gas off and the carrier
+    # filter unobservable.
+    n.add("Generator", "gas", bus="b", carrier="gas", p_nom=300.0,
+          marginal_cost=[12.0, 20.0, 22.0, 24.0])
+    n.add("StorageUnit", "res", bus="b", carrier="hydro", p_nom=120.0, max_hours=10.0,
+          state_of_charge_initial=500.0, marginal_cost=10.0)
+    n.add("StorageUnit", "pump", bus="b", carrier="hydro", p_nom=20.0, max_hours=1.0,
+          cyclic_state_of_charge=True, state_of_charge_initial=20.0,
+          marginal_cost=30.0, marginal_cost_storage=0.01)
+    n.add("Load", "d", bus="b", p_set=[100.0] * 4)
+    n.add("GlobalConstraint", "hydro_budget", type="operational_limit",
+          carrier_attribute="hydro", sense="<=", constant=680.0)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1351,6 +1426,7 @@ NETWORKS = {
     "investment-periods": investment_periods,
     "investment-periods-discounted": investment_periods_discounted,
     "investment-periods-expansion": investment_periods_expansion,
+    "operational-limit": operational_limit,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,

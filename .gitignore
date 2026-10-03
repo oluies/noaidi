@@ -13,8 +13,13 @@ project/project/
 # roborev snapshots
 /.roborev/
 
-# Pinned PyPSA reference environment — recreated with uv, not committed
+# Pinned PyPSA reference environments — recreated with uv, not committed.
+# Two of them, on two Pythons: `reference/.venv` is 3.13 with pandas 3.0.5 and is what
+# `goldens/manifest.json` records, while `reference/nordpsa/.venv` is 3.11 with pandas 3.0.6
+# and is what `nordpsa/*.json` record. Regenerating either from the other venv rewrites a
+# recorded version for no change in any number.
 reference/.venv/
+reference/nordpsa/.venv/
 
 # Claude Code local settings
 .claude/

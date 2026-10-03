@@ -1,0 +1,3 @@
+name,type,bus,carrier_attribute,sense,constant
+wind_total,tech_capacity_expansion_limit,,wind,<=,120.0
+wind_at_b,tech_capacity_expansion_limit,B,wind,<=,40.0

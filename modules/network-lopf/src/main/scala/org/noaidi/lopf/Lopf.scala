@@ -918,11 +918,28 @@ object Lopf:
             (transmissionLimit(id, attribute, "length"), 0.0)
           case "transmission_expansion_cost_limit"   =>
             (transmissionLimit(id, attribute, "capital_cost"), 0.0)
+          case "tech_capacity_expansion_limit"       =>
+            // The `bus` column is optional and read as absent when blank: a CSV round-trip
+            // writes an unset `bus` as the empty string rather than leaving the column out,
+            // and PyPSA's own `glc.get("bus") or None` treats it the same way. A literal
+            // "nan" arrives the same way from a netCDF round-trip.
+            val scope =
+              if constraints.static.contains("bus") then constraints.string("bus", id).trim
+              else ""
+            val named = if scope.isEmpty || scope.toLowerCase == "nan" then "" else scope
+            if named.nonEmpty && !network.table("Bus").exists(_.ids.contains(named)) then
+              throw new UnsupportedNetwork(
+                s"global constraint '$id' is scoped to bus '$named', which the network does " +
+                  "not have. PyPSA raises a KeyError selecting it; here the scope would " +
+                  "match nothing, the row would be dropped and a cap on buildable capacity " +
+                  "would silently not apply."
+              )
+            (TechCapacityLimit.terms(network, columns, attribute, named), 0.0)
           case other =>
             throw new UnsupportedNetwork(
               s"global constraint '$id' has type '$other'; this port implements " +
-                "primary_energy, operational_limit, transmission_volume_expansion_limit " +
-                "and transmission_expansion_cost_limit"
+                "primary_energy, operational_limit, tech_capacity_expansion_limit, " +
+                "transmission_volume_expansion_limit and transmission_expansion_cost_limit"
             )
 
         // A named column that is not there at all is an error whatever the sense, and that

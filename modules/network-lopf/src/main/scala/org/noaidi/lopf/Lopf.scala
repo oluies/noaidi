@@ -1105,6 +1105,14 @@ object Lopf:
       }
     }
 
+    // Growth limits, which are inequalities and so belong here rather than inside the block
+    // above: that block emits an equality whenever a constraint's sense is `==`, and every
+    // equality has to precede every inequality or `Sclopf.build` refuses the model. Driven by
+    // `carriers.csv` rather than by a `global_constraints.csv` row, which is why it is a call
+    // of its own and not another `type` in the match.
+    GrowthLimit.constrain(
+      network, columns, builder, message => throw new UnsupportedNetwork(message))
+
     // Last of the families, and that ordering is now load-bearing rather than incidental.
     // `Stability` emits only inequalities, and the global-constraint block above emits an
     // equality whenever a constraint's sense is `==`. Every equality has to precede every

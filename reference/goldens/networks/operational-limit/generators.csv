@@ -1,0 +1,3 @@
+name,bus,control,p_nom,carrier
+ror,b,Slack,100.0,hydro
+gas,b,PQ,300.0,gas

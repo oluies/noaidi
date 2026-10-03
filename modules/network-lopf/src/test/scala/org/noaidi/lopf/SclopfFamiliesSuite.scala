@@ -261,6 +261,69 @@ class SclopfFamiliesSuite extends munit.FunSuite, NordPsaFixtures:
     bothWays("all-three"): Unit
   }
 
+  test("all four families and security at once") {
+    assume(fixtures, "reference/nordpsa sclopf fixtures are not present")
+    // The arrangement nothing covered. `all-three` leaves `stability` out, and `stability`
+    // is the family `Lopf.build` emits LAST and the only one that emits inequalities
+    // exclusively -- so it sits on the far side of the equality/inequality split from the
+    // other three. A copy that got the three equality-emitting families right and put
+    // stability's rows on the wrong side would pass `all-three` and every single-family
+    // case, which is precisely the hole the four-family case closes.
+    //
+    // It was written down as a known gap -- "nothing tests all four families together,
+    // that's where the next instance of the row-ordering defect will hide" -- and left as a
+    // note rather than a test. The defect has appeared four times in this code base, once
+    // in the commit that removed the previous instance, so a note was not enough.
+    bothWays("all-four"): Unit
+  }
+
+  test("the four-family model's rows survive the rebuild too, stability's included") {
+    assume(fixtures, "reference/nordpsa sclopf fixtures are not present")
+    // The invariant asserted above for `all-three`, on the case that actually has every
+    // family's rows in it. Two things here that the `all-three` version cannot see: that
+    // stability's columns are copied, and that adding a family which emits *only*
+    // inequalities does not move any equality's index.
+    val three = Lopf.build(network, familiesOf("all-three"))
+    val four  = Lopf.build(network, familiesOf("all-four"))
+    val secure = Sclopf.build(network, None, familiesOf("all-four"))
+
+    assert(four.problem.numVariables > three.problem.numVariables,
+      "the fourth family added no columns, so `all-four` is `all-three` under another name")
+    assert(four.problem.numConstraints > three.problem.numConstraints,
+      "the fourth family added no rows")
+    // Stability emits inequalities only, so the equality count must be untouched by it.
+    // This is the half of the ordering invariant that is about the *split* rather than
+    // about an index, and it is checkable only by holding two models side by side.
+    assertEquals(four.problem.numEqualities, three.problem.numEqualities,
+      "adding stability changed the equality count, so one of its rows is an equality")
+
+    assert(secure.problem.numConstraints > four.problem.numConstraints,
+      "no security rows were added, so there was no rebuild to survive")
+    assertEquals(secure.problem.numVariables, four.problem.numVariables,
+      "the rebuild changed the column count, so a family's columns were not copied")
+    assertEquals(secure.problem.numEqualities, four.problem.numEqualities,
+      "the rebuild changed the equality count")
+
+    val misindexed = (0 until four.translation.numOriginalRows).filterNot { r =>
+      four.translation.expansionOf(r) match
+        case RowExpansion.Direct(row)  => row == r
+        case RowExpansion.Negated(row) => row == r
+        case _                         => false
+    }
+    assertEquals(misindexed.toList, Nil,
+      "a base row does not map to the standard-form row of the same index")
+
+    network.table("Bus").foreach { buses =>
+      buses.ids.foreach { bus =>
+        network.snapshots.indices.foreach { t =>
+          val row = four.map.balanceRows((bus, t))
+          assert(row < secure.problem.numEqualities,
+            s"$bus's balance row at snapshot $t is no longer an equality after the rebuild")
+        }
+      }
+    }
+  }
+
   // ------------------------------------------------------------------- the invariant itself
 
   test("every family's rows survive the row-by-row rebuild with their index intact") {

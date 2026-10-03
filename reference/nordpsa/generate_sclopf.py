@@ -219,6 +219,23 @@ CASES = {
                             "max_weekly_frac": 0.0},
                   "terminal": {"lambda": 20.0, "profile": [1.0]},
                   "ladder": {"tiers": 3, "width": 36.0}},
+    # All four. `all-three` leaves `stability` out, so until this case existed the ONE
+    # arrangement nothing covered was every family on at once -- and it is the arrangement
+    # where the row-ordering defect has the most room, because `Stability` is the family
+    # emitted LAST in `Lopf.build` and emits inequalities only. A copy that got the three
+    # equality-emitting families right and put stability's rows on the wrong side of the
+    # split would pass `all-three` and every single-family case.
+    #
+    # `scr_min` rather than `ek_system_gws`: grid strength reaches the wind, which is what
+    # the reservoir displaces here, so it interacts with the other three rather than
+    # constraining a disjoint part of the network. Rotational energy forces synchronous
+    # plant online, which on this fixture is the reservoir itself -- so it would partly
+    # duplicate `hydro`'s hourly floor and the case would be weaker than its name.
+    "all-four": {"hydro": {"min_hourly_frac": 0.35, "min_daily_frac": 0.0,
+                           "max_weekly_frac": 0.0},
+                 "terminal": {"lambda": 20.0, "profile": [1.0]},
+                 "ladder": {"tiers": 3, "width": 36.0},
+                 "stability": {"scr_min": 1.0, "exempt": []}},
 }
 
 

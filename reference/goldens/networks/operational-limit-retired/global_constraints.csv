@@ -1,0 +1,2 @@
+name,type,carrier_attribute,sense,constant
+budget,operational_limit,hydro,<=,100.0

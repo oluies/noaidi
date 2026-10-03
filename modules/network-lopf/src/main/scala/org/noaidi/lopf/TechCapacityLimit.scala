@@ -62,6 +62,7 @@ object TechCapacityLimit:
       columns: scala.collection.Map[(String, String, Int), Int],
       carrier: String,
       bus: String,
+      scope: Option[String],
   ): Seq[(Int, Double)] =
     Expansion.nominalAttribute.keys.toIndexedSeq.sorted.flatMap { component =>
       network.table(component).toIndexedSeq.flatMap { table =>
@@ -76,7 +77,16 @@ object TechCapacityLimit:
             .extendables(table)
             .filter { id =>
               table.string("carrier", id) == carrier &&
-                (bus.isEmpty || table.string(port, id) == bus)
+                (bus.isEmpty || table.string(port, id) == bus) &&
+                // PyPSA's `filter_by_active_assets(ext_i, period)`, where `period` is the
+                // constraint's own `investment_period` or `None`. `None` means the `active`
+                // flag alone -- build year and lifetime are *ignored* -- which is not what
+                // the transmission limits do for their unscoped case, where every period the
+                // snapshots carry is passed and the test becomes "active in any of them".
+                // The two differ only on an asset active in no declared period. Written
+                // apart rather than unified, because the unified version would be a guess
+                // about which upstream meant.
+                scope.forall(Periods.activeIn(table, id, _))
             }
             .map(id => columns((Expansion.capacityKey(component), id, Expansion.NoSnapshot)) -> 1.0)
       }

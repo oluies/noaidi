@@ -919,3 +919,97 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
              failure.getMessage.contains("UnboundLocalError"),
       s"the refusal does not say why: ${failure.getMessage}")
   }
+
+  test("a retired reservoir's depletion is read at its last active snapshot") {
+    assume(available, "goldens missing")
+    // `OperationalLimit` takes a non-cyclic asset's depletion as `-soc(last) + initial`, and
+    // `last` is the last snapshot the asset EXISTS at rather than the horizon's. PyPSA writes
+    // that as `soc.ffill("snapshot").isel(snapshot=-1)`; here the column exists everywhere and
+    // is pinned to `[0, 0]` outside the activity window, so reading the literal last snapshot
+    // gives `-0 + initial` and charges the depletion as though the unit had emptied itself on
+    // retirement -- a tighter cap than PyPSA builds.
+    //
+    // `operational-limit` could not see that, being single-period: the two readings coincide
+    // on it, and NOTES recorded the omission as a gap in the fixture rather than in the code.
+    // This closes it.
+    val expected = results("operational-limit-retired")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool, "the golden was not solved multi-period")
+
+    val n      = network("operational-limit-retired")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 20500.0, 1e-6 * 20500.0, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val p   = expected("generator_p")
+    val soc = expected("storage_state_of_charge")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      assertEqualsDouble(result.stateOfCharge("res", t), frameValue(soc, t, "res"), 1e-3,
+        s"the level at snapshot $t")
+    }
+
+    // The two numbers the reading turns on. `res` holds 40 at its last active snapshot, so
+    // its depletion is 20 and `ror` may produce 80 MWh against a limit of 100. Read at the
+    // horizon's end the depletion would be the full 60 and `ror` would be held to 40.
+    assertEqualsDouble(result.stateOfCharge("res", 1), 40.0, 1e-3,
+      "the level at the last active snapshot is not 40, so the depletion is not 20")
+    val rorTotal = n.snapshots.indices.map(result.dispatch("Generator", "ror", _)).sum
+    assertEqualsDouble(rorTotal, 80.0, 1e-3,
+      "the cap is being measured against the horizon's last snapshot rather than the unit's")
+  }
+
+  test("a branch counts at its bus0 and not at its bus1") {
+    assume(available, "goldens missing")
+    // The one rule in `TechCapacityLimit` with no fixture of its own, recorded in NOTES as a
+    // gap: a cap at one bus counts a line LEAVING it and not the same line arriving. PyPSA
+    // places a branch at `bus0`, full stop, and the asymmetry is upstream's.
+    //
+    // Made observable by giving `AB` the capped carrier and a capacity to choose, and by
+    // slackening the network-wide cap so the only question left is which assets the
+    // bus-scoped one sees.
+    def solved(bus: String): LopfResult =
+      val r = Lopf.solve(
+        mutateAll(
+          "tech-capacity-limit",
+          "lines.csv" -> (text =>
+            setColumn(
+              setColumn(
+                setColumn(
+                  setColumn(
+                    setColumn(text, "s_nom_extendable", (_, _) => "True"),
+                    "s_nom", (_, _) => "0.0"),
+                  "s_nom_max", (_, _) => "200.0"),
+                "capital_cost", (_, _) => "1.0"),
+              "carrier", (_, _) => "wind")),
+          "global_constraints.csv" -> (text =>
+            setColumn(
+              setColumn(text, "bus", (id, b) => if id == "wind_at_b" then bus else b),
+              "constant", (id, c) => if id == "wind_total" then "1000.0" else c)),
+        ),
+        params,
+      )
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r
+
+    // Scoped to B, which is the line's `bus1`: the line is NOT in the cap, so the 40 is
+    // `windB`'s alone and `windA` and the line are free. PyPSA: 19,240.
+    val atB = solved("B")
+    assertEqualsDouble(atB.objective, 19240.0, 1e-2, "the branch is being counted at bus1")
+    assertEqualsDouble(atB.capacity("Line", "AB"), 40.0, 1e-3, "the line at B")
+    assertEqualsDouble(atB.capacity("Generator", "windA"), 90.0, 1e-3, "windA at B")
+
+    // Scoped to A, which is the line's `bus0`: the line IS in the cap, and it takes the whole
+    // 40 -- so `windA` is built to zero and `windB`, uncapped, takes 120. PyPSA: 18,640.
+    val atA = solved("A")
+    assertEqualsDouble(atA.objective, 18640.0, 1e-2, "the branch is not being counted at bus0")
+    assertEqualsDouble(atA.capacity("Line", "AB"), 40.0, 1e-3, "the line takes the whole allowance")
+    assertEqualsDouble(atA.capacity("Generator", "windA"), 0.0, 1e-3,
+      "windA is still being built, so the line is not competing for the same allowance")
+  }

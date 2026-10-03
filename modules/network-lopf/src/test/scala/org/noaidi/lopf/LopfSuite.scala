@@ -1680,6 +1680,131 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
       20175.0, 1e-3, "the capacity rows are not masked by the activity window")
   }
 
+  test("a carrier's growth limit caps what one period may add") {
+    assume(available, "goldens missing")
+    // `Carrier.max_growth` is the one expansion feature that exists only because there are
+    // periods: `define_growth_limit` opens with `if not n._multi_invest: return`, because a
+    // growth rate over one period has nothing to be a rate of. It was refused here on the
+    // grounds that growth limits "only bind on an extendable network, which is refused just
+    // above" -- the ledger entry that became a gap the moment expansion across periods
+    // was built.
+    //
+    // `max_growth` is 100 and `max_relative_growth` is 0.5, so the allowances are 100,
+    // 100 + 0.5 x 100 = 150 and 100 + 0.5 x 150 = 175, and all three bind.
+    val expected = results("growth-limit")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool, "the golden was not solved multi-period")
+
+    val n = network("growth-limit")
+    assertEquals(n.snapshotPeriods, IndexedSeq("2030", "2040", "2050"), "snapshot periods")
+
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 212750.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    expected("nominal_opt")("Generator").obj.foreach { (id, built) =>
+      assertEqualsDouble(result.capacity("Generator", id), built.num, 1e-4, s"capacity of $id")
+    }
+    // The three allowances, read off the capacities. Named as well as swept, because the
+    // sweep passes on an implementation that got the relative term's sign right and its
+    // predecessor wrong.
+    assertEqualsDouble(result.capacity("Generator", "w2030"), 100.0, 1e-4, "2030's allowance")
+    assertEqualsDouble(result.capacity("Generator", "w2040"), 150.0, 1e-4, "2040's, plus half of 2030's")
+    assertEqualsDouble(result.capacity("Generator", "w2050"), 175.0, 1e-4, "2050's, plus half of 2040's")
+
+    val p = expected("generator_p")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+    }
+  }
+
+  test("an asset is charged to a period by PyPSA's cumsum, not by its build year") {
+    assume(available, "goldens missing")
+    def solved(file: String, edit: String => String): LopfResult =
+      val r = Lopf.solve(mutate("growth-limit", file, edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r
+
+    // The relative allowance, removed. Every period is back at a flat 100. PyPSA: 246,000.
+    val flat = solved("carriers.csv",
+      setColumn(_, "max_relative_growth", (id, v) => if id == "wind" then "0.0" else v))
+    assertEqualsDouble(flat.objective, 246000.0, 1e-2, "max_relative_growth is not loosening the row")
+    assertEqualsDouble(flat.capacity("Generator", "w2050"), 100.0, 1e-4, "2050 is still getting an allowance")
+
+    // And the part of `define_growth_limit` that is hard to believe from the source. PyPSA
+    // picks the period an asset is charged to with `active.cumsum() == 1` along the period
+    // axis, which is NOT "the first period it is active in": for an asset active in exactly
+    // one period the cumulative count stays at 1 for every later period, so the asset is
+    // charged again to every period after its own.
+    //
+    // A `lifetime` of 10 makes `w2030` active in 2030 alone, so it is charged to all three
+    // rows -- consuming growth budget three times over to produce in one period -- and the
+    // optimum builds NONE of it. PyPSA: 293,500, capacities 0, 100, 150. An implementation
+    // that read "first active period" the obvious way would build 100 of it and land
+    // elsewhere.
+    val retired = solved("generators.csv",
+      setColumn(_, "lifetime", (id, v) => if id == "w2030" then "10" else v))
+    assertEqualsDouble(retired.objective, 293500.0, 1e-2,
+      "the charge is not following PyPSA's cumulative-count rule")
+    assertEqualsDouble(retired.capacity("Generator", "w2030"), 0.0, 1e-4,
+      "the retired unit is still being built, so it is charged to one period only")
+    assertEqualsDouble(retired.capacity("Generator", "w2040"), 100.0, 1e-4, "2040's allowance")
+    assertEqualsDouble(retired.capacity("Generator", "w2050"), 150.0, 1e-4, "2050's allowance")
+
+    // An infinite `max_growth` is the attribute's default and means no row at all, so the
+    // cheapest unit is built to cover the whole load. PyPSA: 18,000 -- two orders of
+    // magnitude below the limited answer, because the limit is what makes the expensive
+    // backstop run.
+    val unlimited = solved("carriers.csv",
+      setColumn(_, "max_growth", (id, v) => if id == "wind" then "inf" else v))
+    assertEqualsDouble(unlimited.objective, 18000.0, 1e-2, "the growth rows are still being built")
+    assertEqualsDouble(unlimited.capacity("Generator", "w2030"), 600.0, 1e-4,
+      "the first unit is not covering the load")
+
+    // A NEGATIVE relative growth rate is clipped at zero, not honoured. PyPSA's
+    // `.clip(min=0)`, and the difference matters: honoured, it would make the row *tighter*
+    // than no relative allowance at all -- an allowance of -50% would subtract from the
+    // absolute limit -- which is not what "no relative limit" means. PyPSA returns exactly
+    // the flat answer, 246,000.
+    val negative = solved("carriers.csv",
+      setColumn(_, "max_relative_growth", (id, v) => if id == "wind" then "-0.5" else v))
+    assertEqualsDouble(negative.objective, 246000.0, 1e-2,
+      "a negative max_relative_growth is not being clipped at zero")
+    assertEqualsDouble(negative.capacity("Generator", "w2040"), 100.0, 1e-4,
+      "the negative rate tightened 2040's allowance")
+  }
+
+  test("a growth limit on a single-period network builds no row") {
+    assume(available, "goldens missing")
+    // `define_growth_limit` opens with `if not n._multi_invest: return`, because a growth
+    // rate over one period has nothing to be a rate of. So the attribute is inert on a flat
+    // index however it is set, and a port that read it anyway would treat the single period
+    // as its own predecessor -- or, with no predecessor, apply the absolute limit as an
+    // ordinary capacity cap, which is `tech_capacity_expansion_limit` wearing the wrong
+    // name.
+    //
+    // `tech-capacity-limit` is the fixture to try it on, because it is the single-period
+    // network here whose capacities are a decision and whose wind carrier is already capped
+    // by something else: a growth row of 10 would bite hard if it were built at all, holding
+    // `windA` and `windB` to 10 between them instead of 80 and 40. PyPSA is unchanged at
+    // 19,400.
+    val withGrowth = Lopf.solve(
+      mutate("tech-capacity-limit", "carriers.csv",
+             text => setColumn(text, "max_growth", (id, v) => if id == "wind" then "10.0" else v)),
+      params,
+    )
+    assertEquals(withGrowth.status, SolveStatus.Optimal, s"${withGrowth.solution}")
+    assertEqualsDouble(withGrowth.objective, 19400.0, 1e-3,
+      "a growth limit is being built on a network with no investment periods")
+    assertEqualsDouble(withGrowth.capacity("Generator", "windA"), 80.0, 1e-4, "windA is being held back")
+  }
+
   test("an ordinary carriers.csv is not read as a growth limit") {
     assume(available, "goldens missing")
     // `max_relative_growth` defaults to *0.0*, which is finite -- so a refusal

@@ -1171,6 +1171,79 @@ def period_scoped_constraints():
     return n
 
 
+def growth_limit():
+    """How much of a carrier one investment period may add, which was refused.
+
+    `Carrier.max_growth` is the one expansion feature that exists *only* because there are
+    periods: with a single period there is nothing for a growth rate to be measured against,
+    and `define_growth_limit` opens with `if not n._multi_invest: return`. It was refused
+    here on the grounds that growth limits "only bind on an extendable network, which is
+    refused just above" -- the ledger entry that became a gap the moment expansion across
+    periods was built.
+
+    One row per `(carrier, period)`:
+
+        sum of nominal(a) for a first active in p
+          - max_relative_growth(c) * sum of nominal(a) for a first active in p-1
+          <= max_growth(c)
+
+    Three periods, one snapshot each, and three extendable wind units with build years
+    2030/2040/2050 -- so each period charges exactly one unit and the rows are readable off
+    the capacities. `max_growth` is 100 and `max_relative_growth` is 0.5, which makes the
+    allowances 100, 100 + 0.5*100 = 150, and 100 + 0.5*150 = 175. PyPSA builds exactly that.
+
+    The structure is the same one `tech-capacity-limit` uses and for the same reason: `gas`
+    at 200 is never displaced entirely -- total wind reaches 425 against a load of 600 -- so
+    each MW of capacity displaces gas at a constant rate, every unit is worth building, and
+    all three rows bind. Had wind been able to cover the load the marginal value of the last
+    MW would drop to zero and the capacities would stop being a point.
+
+    The capital coefficients differ per unit because each is active in a different number of
+    periods -- 30, 20 and 10 per MW against a `capital_cost` of 10 -- which is
+    `Expansion.costWeight` doing its job underneath this fixture rather than something this
+    one tests.
+
+    PyPSA pays **212,750**. Setting `max_relative_growth` to 0 gives 246,000, with every
+    allowance back at a flat 100.
+
+    What this fixture is really for, though, is the part of `define_growth_limit` that is
+    hard to believe from the source. PyPSA picks the period an asset is charged to with
+    `active.cumsum() == 1` along the period axis, and that is **not** "the first period this
+    asset is active in": for an asset active in exactly one period the cumulative count stays
+    at 1 for every later period too, so the asset is charged again to every period after its
+    own. Giving `w2030` a `lifetime` of 10 makes it active in 2030 alone, and PyPSA then
+    charges it to all three rows -- so building it consumes growth budget three times over to
+    produce in one period, and the optimum builds **none of it**: capacities 0, 100, 150 and
+    an objective of 293,500. Reproduced rather than corrected, because the alternative is a
+    looser row than the pinned PyPSA builds and nothing here can say it is the intended one.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040, 2050], range(1)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040, 2050]
+    # Both flat. This fixture is about which period an asset's capacity is charged to, not
+    # about what that capacity costs, and `investment-periods-discounted` is the fixture for
+    # the weightings.
+    n.investment_period_weightings["objective"] = [1.0, 1.0, 1.0]
+    n.investment_period_weightings["years"] = [10, 10, 10]
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Carrier", "wind", max_growth=100.0, max_relative_growth=0.5)
+    n.add("Carrier", "gas")
+    # Rated above the whole load, so no period can be infeasible and every capacity decision
+    # is a cost comparison. It is also never fully displaced, which is what keeps the
+    # marginal value of wind constant and the capacities a point.
+    n.add("Generator", "gas", bus="b", carrier="gas", p_nom=700.0, marginal_cost=200.0)
+    for year in (2030, 2040, 2050):
+        n.add("Generator", f"w{year}", bus="b", carrier="wind", p_nom=0.0,
+              p_nom_extendable=True, capital_cost=10.0, build_year=year, lifetime=30)
+
+    n.add("Load", "d", bus="b", p_set=[600.0] * 3)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1578,6 +1651,7 @@ NETWORKS = {
     "operational-limit": operational_limit,
     "tech-capacity-limit": tech_capacity_limit,
     "period-scoped-constraints": period_scoped_constraints,
+    "growth-limit": growth_limit,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1628,6 +1702,7 @@ MULTI_INVEST = frozenset({
     "investment-periods-discounted",
     "investment-periods-expansion",
     "period-scoped-constraints",
+    "growth-limit",
 })
 
 

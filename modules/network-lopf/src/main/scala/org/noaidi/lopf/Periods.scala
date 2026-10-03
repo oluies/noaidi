@@ -157,36 +157,17 @@ object Periods:
     // limits below are refused too, and they are the one expansion feature that is
     // specific to having periods at all.
 
-    // `max_growth` limits how much of a carrier a period may add, and
-    // `max_relative_growth` scales that limit by what the carrier already had.
-    // The gate is `max_growth` alone: PyPSA selects `carrier_i = max_growth[
-    // max_growth != inf]` and reads `max_relative_growth` only for the carriers
-    // that filter picked, clipped at zero (`optimization/global_constraints.py`,
-    // `define_growth_limit`). Testing the two independently refused *every*
-    // multi-period network carrying an ordinary `carriers.csv`, because
-    // `max_relative_growth` defaults to 0.0 -- which is finite, so "no relative
-    // limit" read as a limit of nothing, and the refusal said so.
+    // `max_growth` and `max_relative_growth` are built now, in [[GrowthLimit]], and the
+    // refusal that used to sit here is gone. What it got right is worth keeping: the gate is
+    // `max_growth` alone, because `max_relative_growth` defaults to '''0.0''' -- finite, so
+    // testing the two independently read "no relative limit" as a limit of nothing and
+    // refused every multi-period network carrying an ordinary `carriers.csv`. PyPSA selects
+    // `carrier_i = max_growth[max_growth != inf]` and reads the relative column only for the
+    // carriers that filter picked, clipped at zero.
     //
-    // They only bind on an extendable network, which is refused just above --
-    // but the refusal is written here rather than left implicit, since
-    // "unreachable because something else refuses it" is exactly the reasoning
-    // the schema sweep was built to stop trusting.
-    network.table("Carrier").foreach { carriers =>
-      if declares(carriers, "max_growth") then
-        carriers.ids.foreach { id =>
-          val growth = carriers.float("max_growth", id)
-          if growth.isFinite then
-            val relative =
-              if declares(carriers, "max_relative_growth") then
-                carriers.float("max_relative_growth", id)
-              else 0.0
-            refuse(
-              s"Carrier '$id' sets max_growth = $growth, with max_relative_growth = $relative, " +
-                "which limits capacity added between investment periods; that is an expansion " +
-                "constraint and expansion is refused here"
-            )
-        }
-    }
+    // The refusal also said growth limits "only bind on an extendable network, which is
+    // refused just above" -- and that was the ledger entry that became a gap the moment
+    // expansion across periods was built.
 
     // A global constraint scoped to one period is built now, in `Lopf.build`'s
     // global-constraint block, and the refusal that used to sit here is gone. The

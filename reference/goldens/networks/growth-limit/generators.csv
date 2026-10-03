@@ -1,0 +1,5 @@
+name,bus,control,p_nom,p_nom_extendable,carrier,marginal_cost,build_year,lifetime,capital_cost
+gas,b,Slack,700.0,False,gas,200.0,0,inf,0.0
+w2030,b,PQ,0.0,True,wind,0.0,2030,30.0,10.0
+w2040,b,PQ,0.0,True,wind,0.0,2040,30.0,10.0
+w2050,b,PQ,0.0,True,wind,0.0,2050,30.0,10.0

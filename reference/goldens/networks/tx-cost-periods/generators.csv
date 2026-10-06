@@ -1,0 +1,4 @@
+name,bus,control,p_nom,marginal_cost
+cheap,A,Slack,400.0,5.0
+dearB,B,PQ,300.0,90.0
+dearC,C,PQ,300.0,100.0

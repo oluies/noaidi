@@ -405,7 +405,16 @@ which prices gas below wind so the cap has to displace economic generation: it
 emits 6702 unconstrained at a cost of 2819.52, and 2000 under the cap at 3178.55.
 That 12.7% spread is what a silent drop would have cost, and it is now a golden.
 
-Not implemented, and rejected rather than mis-solved in every case:
+Not implemented, and rejected rather than mis-solved in every case.
+
+An entry that gets built is **struck through rather than deleted**, and that is
+deliberate: this list and `GapRefusalSuite` exist to be read against each other — the
+suite's own docstring says so — and a deleted entry takes its reasoning with it. Three of
+the entries below became false between one commit and another, and two of them
+(period-scoped constraints and the per-period transmission weighting) stayed on the list
+for five commits after the refusal they depended on was lifted, which is exactly the
+failure the audit is supposed to catch.
+
 
 - **Annuitised and modular capacity.** Capacity expansion itself is implemented —
   see *Capacity expansion* below — but `overnight_cost` is annuitised over
@@ -421,16 +430,22 @@ Not implemented, and rejected rather than mis-solved in every case:
   constraints. A `Store`'s `e_set` and `p_set` are both refused, the latter
   because PyPSA pins it too, out of the generic loop, and admitting it silently
   would drop exactly the constraint the other refusal exists for.
-- **Multi-investment periods, and `Link.delay`.** See *The two the sweep left*
-  below: both were silently mis-solved rather than merely unimplemented, which is
-  why they are listed here at all.
-- **Global constraint types other than `primary_energy`,
-  `transmission_volume_expansion_limit` and `transmission_expansion_cost_limit`.**
+- ~~**Multi-investment periods, and `Link.delay`.**~~ Both are built — see *The
+  two the sweep left* below for the mis-solves that got them onto this list, and
+  the four period sections further down for what the first of them turned into.
+  Kept as a struck-through entry rather than deleted, because the reason they
+  were listed is the reason the list exists: each was silently mis-solved rather
+  than merely unimplemented.
+- ~~**Global constraint types other than `primary_energy`,
+  `transmission_volume_expansion_limit` and `transmission_expansion_cost_limit`.**~~
+  All five types `global_constraints.py` dispatches on are built. The reason this
+  was a gap still holds and is still the reason the five are separate functions:
   PyPSA dispatches on `type` to entirely different builders, so assuming one
-  would build an energy cap as an emissions cap wearing the same right-hand
-  side. `operational_limit` and `tech_capacity_expansion_limit` are the two that
-  remain, and `GlobalConstraintSuite` checks the three that are built against
-  PyPSA on `ac-dc-txvolume`, `ac-dc-txvolume-exact` and `ac-dc-txcost`.
+  would build an energy cap as an emissions cap wearing the same right-hand side
+  — which is what the refusal of an unknown `type` says, now naming a type PyPSA
+  does not have. See *`operational_limit`, the type the refusal used as its own
+  example* and *`tech_capacity_expansion_limit`, and all five types built*,
+  including the retired-reservoir and `bus0` coverage added after both.
 - **`primary_energy` charged against storage.** PyPSA also sums StorageUnit
   state-of-charge and Store energy for carriers with a non-zero intensity; this
   port sums generators only, and refuses a network where a storage carrier
@@ -444,9 +459,15 @@ Not implemented, and rejected rather than mis-solved in every case:
   no terms is a claim that can be false, and satisfying it silently is how a carrier typo
   becomes an unconstrained run. `<=` over nothing is left alone, because `0 <= constant` is
   vacuous for a non-negative cap and that is PyPSA's own skip path.
-- **Per-period global constraints.** PyPSA scopes a constraint to an
-  `investment_period` and weights the transmission limits per period. Neither is
-  reachable here: expansion across investment periods is itself refused.
+- ~~**Per-period global constraints.**~~ Both halves are built, and both became
+  reachable when expansion across investment periods stopped being refused. See
+  *A period-scoped global constraint, and a refusal that could not fire* for the
+  scoping — including the three separate things PyPSA does with the column — and
+  *A transmission cost limit on a multi-period network* for the weighting, which
+  applies to the `transmission_expansion_cost_limit` and not to the volume one,
+  and only where the constraint is unscoped. The comment claiming the weighting
+  was unreachable outlived the refusal it depended on by five commits, which is
+  what this list is for.
 
 ## L2: linear power flow
 
@@ -2185,6 +2206,80 @@ PyPSA pays **212,750**. Mutation-checked five ways: the cumulative-count rule (2
 the relative term (246,000), its sign (269,750), the negative gate (269,750) and the
 `max_growth != inf` gate (an unbounded row, which `LpBuilder` refuses outright).
 
+## A transmission cost limit on a multi-period network
+
+The last of the per-period weightings, and the one that outlived its own refusal.
+
+`define_transmission_expansion_cost_limit` scales each branch's `capital_cost` by the sum
+of the `objective` weightings of the periods it is active in:
+
+```python
+comp_weights = active @ period_weighting
+cost = c.capital_cost.reindex(ext_i) * comp_weights
+```
+
+`define_transmission_volume_expansion_limit` does **not** — it filters assets by period
+and weights by `length` alone. So the two callers of this port's one `transmissionLimit`
+builder differ in more than which attribute they weight by, which the shared builder was
+not written for.
+
+The comment in `Lopf.build` said:
+
+> PyPSA additionally scales by a per-period weighting, which is unreachable here:
+> expansion across investment periods is a refused gap.
+
+True when written. It stopped being true when that refusal was lifted, and it stayed in
+the file for five commits afterwards — found by a review finding that filed it as a
+documentation staleness and turned out to be naming a live divergence.
+
+### Unscoped only, which is upstream's branch and not an optimisation
+
+```python
+if not np.isnan(period):   period_filter = period;              weights = 1
+elif window.has_periods:   period_filter = list(window.periods); weights = None  # computed per component
+else:                      period_filter = None;                weights = 1
+```
+
+A scoped row is about one period, so there is nothing to sum over and the factor is 1.
+That has a useful consequence for the fixture: **the scoped answer is exactly the
+unweighted unscoped answer**, so the two readings can be separated by a mutation rather
+than by arithmetic.
+
+The factor itself is `Expansion.costWeight`, the same one the objective charges capital
+with. There is no second definition of it.
+
+### The fixture, and the symmetry that broke the first two attempts
+
+`tx-cost-periods`: two radial corridors from the cheap bus, `early` on A–B existing in
+both periods and `late` on A–C built in 2040.
+
+- **Radial, not parallel.** The first attempt put both lines between the same pair of
+  buses. With equal reactance the flow splits equally, so both capacities come out equal
+  whatever the limit says — 60 and 60 under every reading.
+- **Weights [1.0, 0.25], not [1.0, 0.5].** At 0.5 the branches' factors are 1.5 and 0.5,
+  which at equal capacities sum to exactly the unweighted 2.0: weighted and unweighted
+  limits agree by coincidence. At 0.25 they are 1.25 and 0.25.
+
+With a limit of 1,300:
+
+| reading | `early` | `late` | objective |
+|---|---|---|---|
+| weighted (unscoped) | **84** | **100** | **13,750** |
+| unweighted, or scoped to 2040 | 100 | 30 | 13,737.5 |
+
+Weighted, each MW of `early` consumes 12.5 of the limit against `late`'s 2.5; `early` is
+worth 106.25/MW and `late` 23.75, so `early` buys less per unit of limit consumed and is
+the one cut. Unweighted, both consume 10 and `late` — worth a quarter as much — is cut
+instead.
+
+The capacities are the discriminator rather than the objective: 84 against 100 and 100
+against 30, on an objective gap of 12.5. Both allocations are near-optimal, which is why
+the objective barely moves and why asserting it alone would be a thin test.
+
+Mutation-checked three ways: dropping the factor gives 13,737.5, applying it to the
+volume limit too gives 13,750 where 13,737.5 is right, and applying it to a scoped row
+gives 13,750 where 13,737.5 is right.
+
 ## A period-scoped global constraint, and a refusal that could not fire
 
 `investment_period` on a global constraint restricts it to one period. It was refused
@@ -3539,7 +3634,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are thirty-five golden networks and every *network* module, L1 onward, is
+there are thirty-six golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

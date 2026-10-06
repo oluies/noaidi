@@ -1013,3 +1013,72 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     assertEqualsDouble(atA.capacity("Generator", "windA"), 0.0, 1e-3,
       "windA is still being built, so the line is not competing for the same allowance")
   }
+
+  test("a transmission cost limit carries the per-period weighting, and the volume one does not") {
+    assume(available, "goldens missing")
+    // `define_transmission_expansion_cost_limit` scales each branch's `capital_cost` by the
+    // sum of the `objective` weightings of the periods it is active in --
+    // `comp_weights = active @ period_weighting` -- and the volume limit does not. The
+    // comment in `Lopf.build` said the weighting was "unreachable here: expansion across
+    // investment periods is a refused gap", which stopped being true the moment that refusal
+    // was lifted. A missing weighting is a cost limit measured in the wrong units.
+    val expected = results("tx-cost-periods")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool, "the golden was not solved multi-period")
+
+    val n      = network("tx-cost-periods")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 13750.0, 1e-6 * 13750.0, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    expected("nominal_opt")("Line").obj.foreach { (id, built) =>
+      assertEqualsDouble(result.capacity("Line", id), built.num, 1e-3, s"capacity of Line '$id'")
+    }
+    // The capacities are the real discriminator, and they differ by far more than the
+    // objective does: weighted, each MW of `early` consumes 12.5 of the limit against `late`'s
+    // 2.5, so `early` -- which buys less per unit consumed -- is the one cut.
+    assertEqualsDouble(result.capacity("Line", "early"), 84.0, 1e-3, "early under the weighted limit")
+    assertEqualsDouble(result.capacity("Line", "late"), 100.0, 1e-3, "late under the weighted limit")
+  }
+
+  test("a scoped cost limit gets no per-period factor, which is the unweighted row") {
+    assume(available, "goldens missing")
+    // PyPSA sets `weights = 1` for a scoped row: it is about one period and there is nothing
+    // to sum over. Both branches are active in 2040, so scoping there changes only the
+    // coefficients -- and the answer it produces is exactly what an unweighted unscoped
+    // reading produces, which is how the two are told apart. `late` is worth a quarter of
+    // `early` and now consumes the same 10 per MW, so it is the one cut: 100 and 30 rather
+    // than 84 and 100. PyPSA: 13,737.5.
+    val scoped = Lopf.solve(
+      mutate("tx-cost-periods", "global_constraints.csv",
+             setColumn(_, "investment_period", (_, _) => "2040.0")),
+      params,
+    )
+    assertEquals(scoped.status, SolveStatus.Optimal, s"${scoped.solution}")
+    assertEqualsDouble(scoped.objective, 13737.5, 1e-2,
+      "a scoped cost limit is still carrying a per-period factor")
+    assertEqualsDouble(scoped.capacity("Line", "early"), 100.0, 1e-3, "early under the scoped limit")
+    assertEqualsDouble(scoped.capacity("Line", "late"), 30.0, 1e-3, "late under the scoped limit")
+
+    // And the volume limit, which has no weighting at either scope. `length` is 1.0 on both
+    // branches, so a limit of 130 is the same row the unweighted cost limit builds at 1,300 --
+    // and PyPSA lands on the same 13,737.5, which is what says the volume builder was left
+    // alone when the cost one gained its factor.
+    val volume = Lopf.solve(
+      mutateAll(
+        "tx-cost-periods",
+        "global_constraints.csv" -> (text =>
+          setColumn(
+            setColumn(text, "type", (_, _) => "transmission_volume_expansion_limit"),
+            "constant", (_, _) => "130.0")),
+      ),
+      params,
+    )
+    assertEquals(volume.status, SolveStatus.Optimal, s"${volume.solution}")
+    assertEqualsDouble(volume.objective, 13737.5, 1e-2,
+      "the volume limit has acquired a per-period weighting")
+    assertEqualsDouble(volume.capacity("Line", "late"), 30.0, 1e-3, "late under the volume limit")
+  }

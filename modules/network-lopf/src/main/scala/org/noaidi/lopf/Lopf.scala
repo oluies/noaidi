@@ -832,8 +832,28 @@ object Lopf:
       * has a cost limit that disagrees with its own objective about what a branch costs to
       * build. That is upstream's behaviour -- `define_transmission_expansion_cost_limit`
       * weights by `c.capital_cost` -- and this is a port, so it is reproduced rather than
-      * corrected. PyPSA additionally scales by a per-period weighting, which is unreachable
-      * here: expansion across investment periods is a refused gap.
+      * corrected.
+      *
+      * ==The per-period weighting, which used to be unreachable and is not==
+      *
+      * The '''cost''' limit scales each branch's `capital_cost` by the sum of the `objective`
+      * weightings of the periods it is active in -- `comp_weights = active @ period_weighting`
+      * -- and the '''volume''' limit does not. So this builder's two callers differ in more
+      * than which attribute they weight by, and the difference is live rather than
+      * hypothetical: the comment here used to say the weighting was "unreachable, expansion
+      * across investment periods is a refused gap", which stopped being true the moment that
+      * refusal was lifted. A missing weighting is a cost limit measured in the wrong units,
+      * and on `tx-cost-periods` it is the difference between building 84 MW of one corridor
+      * and 100 of it.
+      *
+      * Only where the constraint is '''unscoped''', and that is upstream's own branch rather
+      * than an optimisation: a constraint naming a period sets `weights = 1`, because its row
+      * is about that one period and there is nothing to sum over. Which makes the scoped
+      * answer on that fixture identical to the unweighted unscoped one -- 13,737.5 against
+      * 13,750 -- so the two readings are separated by the mutation rather than by arithmetic.
+      *
+      * The factor is [[Expansion.costWeight]], the same one the objective charges capital
+      * with, which is why there is no second definition of it here.
       *
       * Non-extendable branches contribute nothing, and that is not an omission. Their
       * capacity is a constant, so including them would compare a fixed number against the
@@ -889,7 +909,16 @@ object Lopf:
                   s"'$weightAttribute', " +
                   s"which is $weight. A non-finite weight cannot be a coefficient."
               )
-            columns((Expansion.capacityKey(component), branch, Expansion.NoSnapshot)) -> weight
+            // The cost limit's per-period factor, and the cost limit's alone. `costWeight`
+            // is 1.0 on a flat index, so this is a no-op there; on a multi-period network it
+            // is the sum of the `objective` weightings of the periods the branch is active
+            // in. A scoped constraint gets no factor at all, which is upstream's
+            // `weights = 1`.
+            val scaled =
+              if weightAttribute == "capital_cost" && scope.isEmpty then
+                weight * Expansion.costWeight(network, table, branch)
+              else weight
+            columns((Expansion.capacityKey(component), branch, Expansion.NoSnapshot)) -> scaled
           }
         }
       }

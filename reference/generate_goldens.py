@@ -1403,6 +1403,73 @@ def operational_limit_retired():
     return n
 
 
+def tx_cost_periods():
+    """A transmission cost limit on a multi-period network, which was weighted wrongly.
+
+    `define_transmission_expansion_cost_limit` scales each branch's `capital_cost` by the sum
+    of the `objective` weightings of the periods the branch is active in --
+    `comp_weights = active @ period_weighting` -- and `define_transmission_volume_expansion_limit`
+    does not. The port had a comment saying the weighting was "unreachable here: expansion
+    across investment periods is a refused gap", which stopped being true the moment that
+    refusal was lifted. A missing weighting is a cost limit measured in the wrong units.
+
+    Two radial corridors from the cheap bus, so the two capacities are independent -- parallel
+    lines with equal reactance split their flow equally and come out equal whatever the limit
+    says, which is what the first attempt at this fixture did. `early` runs A-B and exists in
+    both periods; `late` runs A-C and is built in 2040.
+
+    The weights are [1.0, 0.25] rather than something symmetric, and that is the whole reason
+    the fixture works. At [1.0, 0.5] the two branches' factors are 1.5 and 0.5, which at equal
+    capacities sum to exactly the unweighted 2.0 -- so weighted and unweighted limits agree by
+    coincidence and the fixture distinguishes nothing. At [1.0, 0.25] they are 1.25 and 0.25.
+
+    With a limit of 1,300:
+
+      - weighted, each MW of `early` consumes 12.5 of the limit and each MW of `late` 2.5.
+        `early` is worth 106.25/MW and `late` 23.75, so `early` buys less per unit of limit
+        consumed and is the one cut: **84 and 100**, objective **13,750**.
+      - unweighted, both consume 10, so `late` -- worth a quarter as much -- is cut instead:
+        **100 and 30**, objective 13,737.5.
+
+    Scoping the constraint to 2040 produces that second answer exactly, because PyPSA sets
+    `weights = 1` for a scoped row: its row is about one period and there is nothing to sum
+    over. So the fixture separates the two readings by a mutation rather than by arithmetic,
+    and the capacities differ by more than the objective does -- 84 against 100 and 100
+    against 30, on an objective gap of 12.5.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(1)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["objective"] = [1.0, 0.25]
+    n.investment_period_weightings["years"] = [1, 1]
+
+    for bus in ("A", "B", "C"):
+        n.add("Bus", bus, v_nom=110.0)
+    n.add("Carrier", "AC")
+    n.buses["carrier"] = "AC"
+    # Radial, so no cycle and no Kirchhoff row couples the two corridors.
+    n.add("Line", "early", bus0="A", bus1="B", x=0.1, r=0.01, s_nom=0.0,
+          s_nom_extendable=True, s_nom_max=200.0, capital_cost=10.0, length=1.0, carrier="AC")
+    n.add("Line", "late", bus0="A", bus1="C", x=0.1, r=0.01, s_nom=0.0,
+          s_nom_extendable=True, s_nom_max=200.0, capital_cost=10.0, length=1.0,
+          carrier="AC", build_year=2040, lifetime=30)
+
+    n.add("Generator", "cheap", bus="A", p_nom=400.0, marginal_cost=5.0)
+    # Different prices at the two ends, so the two corridors are worth different amounts and
+    # which one the limit cuts is a strict comparison rather than a tie.
+    n.add("Generator", "dearB", bus="B", p_nom=300.0, marginal_cost=90.0)
+    n.add("Generator", "dearC", bus="C", p_nom=300.0, marginal_cost=100.0)
+    n.add("Load", "dB", bus="B", p_set=[100.0, 100.0])
+    n.add("Load", "dC", bus="C", p_set=[100.0, 100.0])
+
+    n.add("GlobalConstraint", "tx", type="transmission_expansion_cost_limit",
+          carrier_attribute="AC", sense="<=", constant=1300.0)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1814,6 +1881,7 @@ NETWORKS = {
     "storage-per-period": storage_per_period,
     "store-per-period": store_per_period,
     "operational-limit-retired": operational_limit_retired,
+    "tx-cost-periods": tx_cost_periods,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1868,6 +1936,7 @@ MULTI_INVEST = frozenset({
     "storage-per-period",
     "store-per-period",
     "operational-limit-retired",
+    "tx-cost-periods",
 })
 
 

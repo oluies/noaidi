@@ -2250,6 +2250,55 @@ True when written. It stopped being true when that refusal was lifted, and it st
 the file for five commits afterwards — found by a review finding that filed it as a
 documentation staleness and turned out to be naming a live divergence.
 
+### The reader that turned a NaN weighting into "no discounting"
+
+The refusal above was added first and could not fire for the shapes a real PyPSA export
+carries. `CsvReader.readInvestmentPeriods` and its snapshot equivalent parsed weighting
+cells with `toDoubleOption.getOrElse(1.0)`, and `Double.parseDouble` accepts only Java's
+exact spellings. What `export_to_csv_folder` actually writes, measured:
+
+```
+period,objective,years        period,objective,years
+2030,1.0,1                    2030,1.0,1
+2040,,1        <- NaN         2040,inf,1      <- infinity
+```
+
+An empty cell (`na_rep=''`) and a lowercase `inf`. Neither parses, so both became 1.0 --
+"no discounting" -- and the network solved quietly. The same network exported to netCDF
+goes through `NetCdfReader`'s raw-double path and *was* refused, so the two readers
+disagreed about one network, which is the single thing this layer exists to prevent.
+
+`parseWeighting` now reads these cells the way `parseFloat` reads a component column:
+empty and the `inf`/`nan` family map to the real double, an unrecognised token is a
+`MalformedNetwork`, and the 1.0 default survives only where it means what it says -- a
+column that is not there, or a row too short to have the cell. No committed fixture has
+an empty or non-numeric weighting cell, checked before the change, so nothing was
+silently relying on the old fallback.
+
+One mistake inside the test for that, worth recording because the reader cannot see it
+either: the first version used `0,25`, the decimal comma a European spreadsheet
+produces. `splitCsv` turns it into two fields, so the row gains a column, `0` parses and
+nothing is refused. That is a separate gap, and this fix does not close it.
+
+### The refusal reads the periods the snapshots carry
+
+`Expansion.costWeight` sums over `snapshotPeriods.distinct` and says why; both `years`
+call sites key off `periodOf`. So a file declaring a period no snapshot belongs to --
+which PyPSA tolerates -- has a weighting nothing in this port ever reads, and refusing a
+NaN there is the same over-refusal `max_relative_growth` already taught, in a different
+place. The refusal iterates the snapshot periods, and the "snapshot in an undeclared
+period" refusal two blocks below guarantees that set is a subset of the declared ones.
+
+### One message per column, because the columns do different jobs
+
+The first version of the refusal shared one message and said of both that the weighting
+"is a coefficient on every cost in that period, so a non-finite one makes the objective,
+the nodal prices and any period-weighted constraint NaN". True of `objective`, false of
+`years`, which the objective and `marginalPrice` never read -- and the module docstring
+at the top of `Periods` exists precisely to stop the two being conflated. The messages
+branch now, and the tests assert the per-column consequence rather than the shared
+prefix, because asserting the prefix passes on either wording.
+
 ### Unscoped only, which is upstream's branch and not an optimisation
 
 ```python

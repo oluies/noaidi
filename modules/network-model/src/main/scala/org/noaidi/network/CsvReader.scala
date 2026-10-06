@@ -135,7 +135,7 @@ object CsvReader:
           .filter((name, i) => i != at && name.nonEmpty)
           .map { (name, i) =>
             name -> IArray.from(body.map { r =>
-              if i < r.length then r(i).trim.toDoubleOption.getOrElse(1.0) else 1.0
+              if i < r.length then parseWeighting(r(i), "investment_periods", name) else 1.0
             })
           }
         (periods, ListMap.from(weightings))
@@ -185,7 +185,7 @@ object CsvReader:
           .filter((name, i) => !indexColumns.contains(i) && name.nonEmpty)
           .map { (name, i) =>
             name -> IArray.from(body.map { r =>
-              if i < r.length then r(i).trim.toDoubleOption.getOrElse(1.0) else 1.0
+              if i < r.length then parseWeighting(r(i), "snapshots", name) else 1.0
             })
           }
         (labels, periods, ListMap.from(weightings))
@@ -286,6 +286,44 @@ object CsvReader:
     else if present.nonEmpty && present.forall(_.toDoubleOption.isDefined) then
       Column.Floats(IArray.from(trimmed.map(c => if c.isEmpty then Double.NaN else c.toDouble)))
     else Column.Strings(IArray.from(trimmed))
+
+  /** One weighting cell, parsed the way a component column's float is parsed.
+    *
+    * `snapshots.csv` and `investment_periods.csv` used `toDoubleOption.getOrElse(1.0)`, which
+    * silently read anything it could not parse as 1.0 — "no weighting". That is not a
+    * tolerant default, it is a '''different network''': pandas writes a NaN weighting as an
+    * '''empty cell''' (`na_rep=''`) and an infinite one as lowercase `inf`, and neither
+    * parses, so a network whose `investment_period_weightings` held a NaN was read back with
+    * every period priced at 1.0, solved, and reported `Optimal` on a number nobody computed.
+    * Measured by exporting such a network from PyPSA 1.3.0 and reading the file back:
+    *
+    * {{{
+    * period,objective,years        period,objective,years
+    * 2030,1.0,1                    2030,1.0,1
+    * 2040,,1        <- NaN         2040,inf,1      <- infinity
+    * }}}
+    *
+    * Worse, the same network exported to netCDF does '''not''' go through this path —
+    * `NetCdfReader` reads the column as raw doubles — so the two readers disagreed about one
+    * network, which is the one thing this layer exists to prevent.
+    *
+    * So the tokens are handled as [[parseFloat]] handles them, and an unrecognised one is a
+    * malformed file rather than a 1.0. The 1.0 default survives only where it means what it
+    * says: a column that is not there, or a row too short to have the cell. A non-finite
+    * weighting now reaches the builder, where `Periods.reject` refuses it.
+    */
+  private def parseWeighting(cell: String, file: String, columnName: String): Double =
+    val t = cell.trim
+    if t.isEmpty then Double.NaN
+    else
+      t.toDoubleOption.getOrElse {
+        t.toLowerCase match
+          case "inf" | "+inf" | "infinity"  => Double.PositiveInfinity
+          case "-inf" | "-infinity"         => Double.NegativeInfinity
+          case "nan" | "na"                 => Double.NaN
+          case _ =>
+            throw new MalformedNetwork(s"$file.$columnName: '$cell' is not a number")
+      }
 
   private def defaultFloat(text: String): Double = text match
     case "inf"  => Double.PositiveInfinity

@@ -152,16 +152,33 @@ object Periods:
     // The two columns this model reads, not every column the file carries: a network with an
     // extra weighting nothing here consumes is one PyPSA solves, and refusing it would be the
     // over-refusal `max_relative_growth` already taught.
+    //
+    // Over the periods the SNAPSHOTS carry, not the periods the file declares, for the same
+    // reason `Expansion.costWeight` sums over those: PyPSA tolerates a declared period no
+    // snapshot belongs to, and nothing here ever reads its weighting. Refusing a NaN in a row
+    // nobody looks at is the same over-refusal in a different place. The refusal below
+    // guarantees this set is a subset of the declared periods, so nothing reachable is missed.
+    //
+    // The message is per column because the two columns do different jobs and saying
+    // otherwise is the conflation this module's docstring exists to prevent: `objective`
+    // multiplies every cost and divides every nodal price, while `years` is read only by the
+    // primary-energy sum and the operational limit. A NaN `years` leaves the objective alone.
     Seq("objective", "years").foreach { kind =>
       if network.investmentPeriodWeightings.contains(kind) then
-        network.investmentPeriods.foreach { period =>
+        network.snapshotPeriods.distinct.foreach { period =>
           val weighting = network.periodWeighting(kind, period)
           if !weighting.isFinite then
+            val consequence = kind match
+              case "objective" =>
+                "It multiplies every cost in that period and divides every nodal price there, " +
+                  "so a non-finite one makes the objective and the duals NaN"
+              case _ =>
+                "It is what a primary-energy limit and an operational limit sum against in " +
+                  "that period, so a non-finite one makes those rows NaN"
             refuse(
-              s"investment period '$period' has a $kind weighting of $weighting. It is a " +
-                "coefficient on every cost in that period, so a non-finite one makes the " +
-                "objective, the nodal prices and any period-weighted constraint NaN -- and " +
-                "PyPSA reports such a solve as optimal rather than refusing it."
+              s"investment period '$period' has a $kind weighting of $weighting. " +
+                consequence + " -- and PyPSA reports such a solve as optimal rather than " +
+                "refusing it."
             )
         }
     }
@@ -294,13 +311,14 @@ object Periods:
       }
     }
 
-    // Storage that cycles *per period* is refused by `Storage.reject` and
-    // `Stores.reject`, on every network rather than only a multi-period one.
-    // This carried its own copy of that check and covered two of the four flags,
-    // which reads as if the other two were handled: PyPSA treats an asset as
-    // per-period when *either* the cyclic or the initial flag is set (`CP | IP`
-    // in `define_storage_unit_constraints`), so a copy listing only the cyclic
-    // half is a shorter list of the same gap, not a narrower gap.
+    // Per-period storage cycling is built -- see [[Cycling]] -- and the refusals in
+    // `Storage.reject` and `Stores.reject` that this paragraph used to point at are gone.
+    // What is still worth recording is why the copy that lived here was wrong before it was
+    // removed: it covered two of the four flags, which reads as if the other two were
+    // handled. PyPSA treats an asset as per-period when *either* the cyclic or the initial
+    // flag is set (`CP | IP` in `define_storage_unit_constraints`), so a list naming only the
+    // cyclic half is a shorter list of the same gap and not a narrower gap. `Cycling` carries
+    // all four and the precedence between them.
 
   private def declares(table: ComponentTable, attribute: String): Boolean =
     table.spec.attribute(attribute).isDefined || table.static.contains(attribute)

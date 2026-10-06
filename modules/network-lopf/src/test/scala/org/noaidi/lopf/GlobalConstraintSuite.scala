@@ -1082,3 +1082,25 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
       "the volume limit has acquired a per-period weighting")
     assertEqualsDouble(volume.capacity("Line", "late"), 30.0, 1e-3, "late under the volume limit")
   }
+  test("a declared period no snapshot uses is not refused for its weighting") {
+    assume(available, "goldens missing")
+    // The narrowing half of the weighting refusal. Every consumer of these columns reads only
+    // the periods the SNAPSHOTS carry -- `Expansion.costWeight` sums over
+    // `snapshotPeriods.distinct` and says so, and both `years` call sites key off `periodOf`
+    // -- and PyPSA tolerates a declared period no snapshot belongs to. Refusing a NaN in a row
+    // nobody looks at would be the same over-refusal `max_relative_growth` already taught,
+    // just in a different place.
+    //
+    // 2050 is declared with an empty `objective`, which is what pandas writes for a NaN, and
+    // no snapshot is in it. The answer has to be the fixture's own.
+    val n = mutate("tx-cost-periods", "investment_periods.csv", _ + "2050,,1\n")
+    assertEquals(n.investmentPeriods, IndexedSeq("2030", "2040", "2050"), "the third period was not read")
+    assertEquals(n.snapshotPeriods.distinct, IndexedSeq("2030", "2040"), "no snapshot should be in 2050")
+    assert(!n.periodWeighting("objective", "2050").isFinite,
+      "the unused period's weighting is finite, so this test is not exercising the narrowing")
+
+    val r = Lopf.solve(n, params)
+    assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+    assertEqualsDouble(r.objective, 13750.0, 1e-2,
+      "a weighting no snapshot reads changed the answer")
+  }

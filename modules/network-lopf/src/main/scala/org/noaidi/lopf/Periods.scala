@@ -79,6 +79,30 @@ object Periods:
     * rather than two multiplications spread through the builder, because the
     * price recovery has to divide by exactly the same thing and the two going
     * out of step is not visible in the objective.
+    *
+    * ==Which PyPSA this is==
+    *
+    * PyPSA keys two things off two different signals, and this port deliberately
+    * keys both off one. Whether an asset '''exists''' in a period comes from the
+    * snapshot index: `get_activity_mask` branches on `has_investment_periods`, so
+    * `build_year` and `lifetime` bind on any network whose snapshots are
+    * `(period, timestep)` pairs. Whether the period weightings are '''applied'''
+    * comes from `n._multi_invest`, which only
+    * `optimize(multi_investment_periods=True)` sets -- `define_objective` guards
+    * the `objective` column on it and `define_primary_energy_limit` guards the
+    * `years` column on it.
+    *
+    * So PyPSA will mask a network by build year and then charge every period
+    * undiscounted, if asked. This port has no such switch: a network whose index
+    * carries periods is weighted, which is PyPSA's flagged behaviour. That is the
+    * choice a solver reading a file has to make -- the `_multi_invest` field in
+    * `network.csv` is a residue of whatever the last solve was told, and PyPSA
+    * writes 0 into it for a network exported before it was solved -- but it was an
+    * '''unvalidated''' choice for as long as the only multi-period fixture held
+    * both weightings at 1.0 and was generated with no flag at all.
+    * `investment-periods-discounted` is the fixture that can tell: `objective`
+    * [1.0, 0.6], `years` [10, 5], a CO2 cap that only binds once `years` is
+    * applied, and PyPSA's own answer under the flag.
     */
   def objectiveWeight(network: Network, snapshot: Int): Double =
     network.weighting("objective", snapshot) * network.periodObjectiveWeighting(snapshot)

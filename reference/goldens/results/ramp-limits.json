@@ -361,6 +361,7 @@
     ]
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "base": 300.0,

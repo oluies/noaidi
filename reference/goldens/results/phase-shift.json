@@ -283,6 +283,7 @@
     []
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "g": 900.0,

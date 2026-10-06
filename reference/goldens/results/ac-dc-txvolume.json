@@ -1099,6 +1099,7 @@
     ]
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "Frankfurt Gas": 401.57364571680677,

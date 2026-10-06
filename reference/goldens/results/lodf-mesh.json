@@ -256,6 +256,7 @@
     []
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "g": 600.0

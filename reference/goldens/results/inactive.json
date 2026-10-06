@@ -334,6 +334,7 @@
     []
    ]
   },
+  "multi_investment_periods": false,
   "nominal_opt": {
    "Generator": {
     "peak": 400.0,

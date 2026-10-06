@@ -325,6 +325,7 @@
     []
    ]
   },
+  "multi_investment_periods": true,
   "nominal_opt": {
    "Generator": {
     "new": 200.0,

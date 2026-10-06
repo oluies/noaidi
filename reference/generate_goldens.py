@@ -808,6 +808,73 @@ def investment_periods():
     return n
 
 
+def investment_periods_discounted():
+    """The two per-period weightings, on a fixture where they are not 1.0.
+
+    `investment_periods.csv` carries `objective` and `years` beside the label and
+    they do different jobs: `objective` discounts every cost in the period, while
+    `years` says how many years the period stands for and scales a primary-energy
+    sum. `investment-periods` holds both at 1.0, so reading either, swapping them
+    or ignoring both gives the identical answer there -- which is the weak-fixture
+    shape this directory keeps rediscovering.
+
+    Worse, neither weighting is applied at all unless the solve is told to apply
+    it. PyPSA gates them on `n._multi_invest`, which is set by
+    `optimize(multi_investment_periods=True)` and nothing else; the *activity
+    window* is gated separately, on whether the snapshot index has periods. So a
+    multi-period network solved without the flag masks assets by `build_year` and
+    still charges every period undiscounted. This script passed no flag anywhere
+    until this fixture, so `investment-periods` was generated in that mode -- and
+    its unit weights hid it.
+
+    Here `objective` is `[1.0, 0.6]` and `years` is `[10, 5]`, and both bind:
+
+      - `gas` is the cheap unit at every snapshot, so an undiscounted,
+        uncapped solve runs it flat out for **9,200**.
+      - The CO2 cap is a primary-energy constraint, so its sum carries `years`.
+        Weighted, emissions come to 3,000 against a cap of 2,500; unweighted they
+        come to 400 and the cap is slack. That alone separates the two modes.
+      - Abatement is cheapest where `(VOLL - mc) * objective / years` is
+        smallest, which is 2030's second snapshot at 7.8 -- *not* 2040, even
+        though 2040 is discounted, because 2030's `years` is twice as large. A
+        reading that swapped the two columns would abate in the other period.
+
+    PyPSA pays **11,100** with 50 MW of `clean` at one snapshot, and the cap's
+    shadow price is **-7.8**. Deliberately interior: the abatement is 50 of a
+    possible 100 MW at a single snapshot, so the vertex is unique and simplex and
+    interior-point agree to the digit -- unlike a cap that happens to retire a
+    whole block, where the dual sits between two adjacent merit-order steps.
+
+    Nothing is extendable and no asset has a build year, which keeps this about
+    the weightings alone; `investment-periods` is the fixture for the activity
+    window.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(2)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["objective"] = [1.0, 0.6]
+    n.investment_period_weightings["years"] = [10, 5]
+
+    n.add("Bus", "b", v_nom=110.0)
+    n.add("Carrier", "gas", co2_emissions=0.5)
+    # `efficiency` 0.5 against `co2_emissions` 0.5 makes a tonne per MWh of
+    # electricity, so the cap can be read off the dispatch without dividing.
+    # Marginal cost rises across the horizon so that no two snapshots are
+    # equally cheap to abate at: on a flat cost the 100 MWh of abatement splits
+    # arbitrarily between 2030's two snapshots and the dispatch is a face rather
+    # than a point.
+    n.add("Generator", "gas", bus="b", p_nom=200.0, carrier="gas", efficiency=0.5,
+          marginal_cost=[20.0, 22.0, 24.0, 26.0])
+    n.add("Generator", "clean", bus="b", p_nom=200.0, marginal_cost=100.0)
+    n.add("Load", "d", bus="b", p_set=[100.0] * 4)
+    n.add("GlobalConstraint", "co2", type="primary_energy",
+          carrier_attribute="co2_emissions", sense="<=", constant=2500.0)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1210,6 +1277,7 @@ NETWORKS = {
     "ramp-limits": ramp_limits,
     "energy-budget": energy_budget,
     "investment-periods": investment_periods,
+    "investment-periods-discounted": investment_periods_discounted,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1235,6 +1303,27 @@ NETWORKS = {
     # anything Prima has been exercised on outside Netlib.
     "scigrid-de": pypsa.examples.scigrid_de,
 }
+
+
+# Networks solved with `multi_investment_periods=True`.
+#
+# PyPSA keys two different things off two different signals, and conflating them
+# is the mistake this set exists to stop. Whether an asset *exists* in a period
+# comes from the snapshot index: `get_activity_mask` branches on
+# `has_investment_periods`, so `build_year` and `lifetime` are enforced on any
+# network whose snapshots are `(period, timestep)` pairs. Whether a period's
+# `objective` discount and its `years` count are *applied* comes from
+# `n._multi_invest`, which only `optimize(multi_investment_periods=True)` sets --
+# `define_objective` and `define_primary_energy_limit` both guard on it.
+#
+# So a multi-period network solved without the flag masks assets by build year
+# and then charges every period undiscounted. This script passed no flag at all
+# until `investment-periods-discounted` was added, which means the
+# `investment-periods` golden was generated in that mode. Its weights are both
+# 1.0, so the recorded answer is the same either way and nothing was wrong with
+# it -- but nothing validated the weighting either, and the port applies it
+# unconditionally.
+MULTI_INVEST = frozenset({"investment-periods", "investment-periods-discounted"})
 
 
 def jsonable(value):
@@ -1601,7 +1690,10 @@ def capture_network(name: str, build) -> dict:
         # non-optimal termination, so an infeasible or truncated solve would
         # otherwise be written out as though it had converged -- and committed,
         # since regenerating after a version bump is the documented workflow.
-        status, condition = m.optimize(solver_name="highs")
+        multi_invest = name in MULTI_INVEST
+        status, condition = m.optimize(
+            solver_name="highs", multi_investment_periods=multi_invest
+        )
         if status != "ok" or condition != "optimal":
             raise RuntimeError(f"solve did not converge: status={status} condition={condition}")
 
@@ -1612,6 +1704,12 @@ def capture_network(name: str, build) -> dict:
         results["optimize"] = {
             "status": status,
             "condition": condition,
+            # Recorded rather than left implicit, because it is a *solve option*
+            # and not a property of the exported network: the `_multi_invest`
+            # field in `network.csv` is whatever the last solve left behind, and
+            # these networks are exported before they are solved, so it reads 0
+            # there however this was run. See MULTI_INVEST.
+            "multi_investment_periods": multi_invest,
             "objective": jsonable(m.objective),
             "objective_constant": jsonable(m.objective_constant),
             "total_system_cost": jsonable(m.objective + m.objective_constant),

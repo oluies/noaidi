@@ -245,6 +245,28 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
           "budget,operational_limit,hydro,<=,500.0\n"),
     )
   }
+  // A non-finite weighting in `investment_periods.csv` reaches the objective, the nodal
+  // prices and three constraint families, and `ComponentTable.periodWeighting` has no filter
+  // of its own. Refused because PyPSA does not: measured on `tx-cost-periods`, an `objective`
+  // weighting of NaN gives `ok/optimal` with an objective of 11,500 and an infinite one gives
+  // `ok/unknown` with 0.0 -- a solve reporting Optimal on a number nobody computed.
+  //
+  // `NaN` and `Infinity`, not `nan` and `inf`, and the spelling is the test rather than
+  // pedantry. `CsvReader` reads these two columns with `toDoubleOption.getOrElse(1.0)`, and
+  // `Double.parseDouble` accepts only Java's exact spellings -- so `nan` does not parse, falls
+  // back to 1.0, and reaches the builder as "no discounting" rather than as a refusal. The
+  // first version of these tests used the lowercase forms and passed nothing: the refusal was
+  // never reached, and `Lopf.build` solved an undiscounted network. The reachable paths for a
+  // genuinely non-finite weighting are these spellings and `NetCdfReader`, which reads the
+  // column as raw doubles with no spelling to get wrong.
+  refuses("a NaN investment-period objective weighting", "objective weighting") {
+    mutate("tx-cost-periods", "investment_periods.csv",
+           setColumn(_, "objective", (p, w) => if p == "2040" then "NaN" else w))
+  }
+  refuses("an infinite investment-period years weighting", "years weighting") {
+    mutate("tx-cost-periods", "investment_periods.csv",
+           setColumn(_, "years", (p, w) => if p == "2040" then "Infinity" else w))
+  }
   refuses("a snapshot in an undeclared period", "does not declare") {
     mutate("investment-periods", "snapshots.csv",
            setColumn(_, "period", (i, p) => if i == "3" then "2050" else p))

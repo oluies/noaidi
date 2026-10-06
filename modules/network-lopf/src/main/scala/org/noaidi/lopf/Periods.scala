@@ -130,6 +130,42 @@ object Periods:
         )
     }
 
+    // A non-finite weighting on a declared period. `objective` multiplies every cost and
+    // divides every nodal price; `years` scales a primary-energy sum and an operational
+    // limit; and `Expansion.costWeight` sums `objective` into the capital coefficient of
+    // every extendable asset and into an unscoped transmission cost limit. So one NaN in a
+    // two-column file reaches the objective, the duals and three constraint families, and
+    // `ComponentTable.periodWeighting` has no filter of its own -- it returns what the file
+    // holds.
+    //
+    // PyPSA does not refuse it, and what it does instead is the argument for refusing:
+    //
+    // {{{
+    // objective = nan -> ok/optimal, objective 11500   (a wrong number, reported as optimal)
+    // objective = inf -> ok/unknown, objective 0.0
+    // years     = nan -> ok/optimal                    (inert only where nothing reads it)
+    // }}}
+    //
+    // Measured on `tx-cost-periods`. A NaN that makes a solve report `Optimal` on a number
+    // nobody computed is exactly the failure this port refuses on sight.
+    //
+    // The two columns this model reads, not every column the file carries: a network with an
+    // extra weighting nothing here consumes is one PyPSA solves, and refusing it would be the
+    // over-refusal `max_relative_growth` already taught.
+    Seq("objective", "years").foreach { kind =>
+      if network.investmentPeriodWeightings.contains(kind) then
+        network.investmentPeriods.foreach { period =>
+          val weighting = network.periodWeighting(kind, period)
+          if !weighting.isFinite then
+            refuse(
+              s"investment period '$period' has a $kind weighting of $weighting. It is a " +
+                "coefficient on every cost in that period, so a non-finite one makes the " +
+                "objective, the nodal prices and any period-weighted constraint NaN -- and " +
+                "PyPSA reports such a solve as optimal rather than refusing it."
+            )
+        }
+    }
+
     // A snapshot in no declared period has no weighting and no activity window,
     // so every asset would read as present and the costs would be unscaled.
     network.snapshots.indices.foreach { t =>

@@ -903,21 +903,38 @@ object Lopf:
             // wrong here, where dropping a branch from a limit silently changes what the
             // limit means.
             val weight = table.float(weightAttribute, branch)
-            if !weight.isFinite then
-              throw new UnsupportedNetwork(
-                s"global constraint '$id' weights $component '$branch' by " +
-                  s"'$weightAttribute', " +
-                  s"which is $weight. A non-finite weight cannot be a coefficient."
-              )
             // The cost limit's per-period factor, and the cost limit's alone. `costWeight`
             // is 1.0 on a flat index, so this is a no-op there; on a multi-period network it
             // is the sum of the `objective` weightings of the periods the branch is active
             // in. A scoped constraint gets no factor at all, which is upstream's
             // `weights = 1`.
-            val scaled =
+            val periodFactor =
               if weightAttribute == "capital_cost" && scope.isEmpty then
-                weight * Expansion.costWeight(network, table, branch)
-              else weight
+                Expansion.costWeight(network, table, branch)
+              else 1.0
+            val scaled = weight * periodFactor
+            // Tested on `scaled` and not on `weight`, because `scaled` is what reaches the
+            // matrix. The guard was written before the per-period factor existed and kept
+            // testing the attribute alone afterwards, so the factor sat outside the very
+            // check whose comment above says it exists to stop a NaN becoming "an anonymous
+            // row".
+            //
+            // Defence in depth, and unreachable from a file as things stand: `Periods.reject`
+            // refuses a non-finite period weighting before this block is built, and
+            // `costWeight` is a sum of those weightings, so there is no network where the
+            // factor is non-finite and the weightings are not. Reverting this to test `weight`
+            // is therefore an EQUIVALENT MUTANT -- measured, no test fails. It is kept
+            // because the guard's own comment claims a property of the coefficient it emits,
+            // and a claim that is only true because something else happens first is the
+            // reasoning the schema sweep was built to stop trusting.
+            if !scaled.isFinite then
+              throw new UnsupportedNetwork(
+                s"global constraint '$id' weights $component '$branch' by " +
+                  s"'$weightAttribute' = $weight" +
+                  (if periodFactor != 1.0 then s", times a per-period factor of $periodFactor"
+                   else "") +
+                  s", which gives $scaled. A non-finite weight cannot be a coefficient."
+              )
             columns((Expansion.capacityKey(component), branch, Expansion.NoSnapshot)) -> scaled
           }
         }

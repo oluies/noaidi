@@ -1610,11 +1610,22 @@ takes the horizon as the **shortest** period's, which the refusal now matches.
 
 ### What is still refused, and why each is a formulation rather than a factor
 
-Capacity expansion across periods is a different model: PyPSA gives each build
-year its own asset, and *when* to build interacts with the activity window and the
-discounting. Growth limits between periods only bind on that. Per-period storage
-cycling closes the wrap at each period's last snapshot rather than the horizon's,
-which is a different set of energy-balance rows. And unit commitment is refused on
+**Three of the four claims this section used to make are gone, and the first two were
+wrong about why.** They are recorded rather than deleted, because being wrong about why a
+thing is hard is how it stays undone:
+
+- ~~Capacity expansion across periods is a different model: PyPSA gives each build year its
+  own asset.~~ It does not. One capacity variable per asset, a different coefficient — see
+  *Capacity expansion across periods: a refusal that was wrong about why*.
+- ~~Growth limits between periods only bind on that.~~ True, and that made it a ledger
+  entry which became a gap the moment expansion landed — see *Growth limits, and a rule
+  that is not what its name says*.
+- ~~Per-period storage cycling closes the wrap at each period's last snapshot rather than
+  the horizon's, which is a different set of energy-balance rows.~~ It is the same rows
+  with the chain reaching back to a different snapshot — see *Per-period cycling: four
+  flags, one precedence, two call sites*.
+
+What is genuinely still refused: unit commitment on
 a multi-period network specifically — `Lopf` accepts one and `UnitCommitment` does
 not — because commitment chains minimum up and down times across a flat horizon,
 and a unit outside its build year has no status there. Pinning its dispatch to
@@ -1878,12 +1889,16 @@ composition on the multi-period fixture rather than inferring it from the
 single-period one.
 
 `Carrier.max_growth` is the one expansion feature that exists only because there
-are periods -- a limit on how much of a carrier a period may add -- and it stays
-refused. So do a period-scoped global constraint, per-period storage cycling, a
-ramp-limited asset whose window is not the whole horizon, and a cycled passive
-branch with a window. The last two are the composition hazards this change could
-have walked into: both were already refused for reasons that have nothing to do
-with expansion, and both still are.
+are periods -- a limit on how much of a carrier a period may add -- and when this
+section was written it was refused, along with a period-scoped global constraint and
+per-period storage cycling. All three are built now; the sections below cover them.
+That is three claims in one paragraph that outlived the commit after next, which is
+why the gap list up top now keeps a struck-through entry rather than a deleted one.
+
+What this paragraph said that is still true: a ramp-limited asset whose window is not
+the whole horizon, and a cycled passive branch with a window, are refused. Both are
+composition hazards the expansion work could have walked into, both were already
+refused for reasons that have nothing to do with expansion, and both still are.
 
 ## `operational_limit`, the type the refusal used as its own example
 
@@ -1994,8 +2009,11 @@ altogether gives 2,600. Three of those land on the same number because each one 
 the cap slack, which is the fixture working as intended rather than three tests
 collapsing into one.
 
-`tech_capacity_expansion_limit` is the one of PyPSA's five types still refused, and
-the refusal test now names it instead of `operational_limit`.
+When this section was written `tech_capacity_expansion_limit` was the one of PyPSA's
+five types still refused, and the refusal test named it instead of
+`operational_limit`. It is built too -- see the next section -- so that test has now
+been rewritten twice as the type it named got built, and names one PyPSA does not
+have.
 
 ## Per-period cycling: four flags, one precedence, two call sites
 

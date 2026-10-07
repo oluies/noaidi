@@ -1966,6 +1966,109 @@ collapsing into one.
 `tech_capacity_expansion_limit` is the one of PyPSA's five types still refused, and
 the refusal test now names it instead of `operational_limit`.
 
+## Growth limits, and a rule that is not what its name says
+
+`Carrier.max_growth` is the one expansion feature that exists **only** because there
+are periods: `define_growth_limit` opens with `if not n._multi_invest: return`, because
+a growth rate over one period has nothing to be a rate of. It was refused here on the
+grounds that growth limits "only bind on an extendable network, which is refused just
+above" — the ledger entry that became a gap the moment expansion across periods was
+built.
+
+One row per `(carrier, period)`:
+
+```
+Σ_{a first active in p} nominal(a)
+  − max_relative_growth(c) · Σ_{a first active in p−1} nominal(a)   ≤ max_growth(c)
+```
+
+### `active.cumsum() == 1` is not "the first period this asset is active in"
+
+This is the part that is hard to believe from the source and had to be read off the
+model. PyPSA picks the period an asset is charged to with `active.cumsum() == 1` along
+the period axis. For an asset active from its build year onward that is its build
+period, as expected. For an asset active in **exactly one** period the cumulative count
+stays at 1 for every later period too — so the asset is charged again to every period
+after its own.
+
+Measured by building the model and printing the constraint, on three periods where the
+first unit has `lifetime = 10`:
+
+```
+period 2030:  p_nom(w2030)                ≤ max_growth
+period 2040:  p_nom(w2030) + p_nom(w2040) ≤ max_growth
+period 2050:  p_nom(w2030) + p_nom(w2050) ≤ max_growth
+```
+
+A unit retired before the second period is still counted as growth in the second and
+third. The consequence on the fixture is not subtle: building it would consume growth
+budget three times over to produce in one period, so the optimum builds **none of it**
+— capacities 0, 100, 150 against 100, 150, 175, and 293,500 against 212,750.
+
+Reproduced rather than corrected. It reads like an oversight, but the alternative is a
+looser row than the pinned PyPSA builds and nothing here can say it is the intended one.
+An implementation that read "first active period" the obvious way lands on 250,750.
+
+### `max_relative_growth` and the two spellings of one condition
+
+`max_growth` defaults to infinity and `max_relative_growth` to **0.0**, so the gate is
+`max_growth != inf` alone. That much the refusal this replaces already had right, and
+had learned the hard way: testing the two independently called "no relative limit" a
+limit of nothing and refused every multi-period network carrying an ordinary
+`carriers.csv`.
+
+PyPSA then clips the relative column at zero. The first version here clipped it too —
+and the clip was an **equivalent mutant**, found by mutating it and watching every test
+pass. `.clip(min=0)` followed by a multiply gives a term whose coefficient is zero; the
+`relative > 0.0` test that decides whether to emit the term at all gives no term. Same
+row. So the clip was a second spelling of one condition, and it is gone: the condition
+that survives mutation is the one doing the work.
+
+What either spelling is for: honoured rather than clipped, a rate of −0.5 would
+*subtract* half the previous period's additions from this period's allowance, making the
+row tighter than no relative allowance at all. PyPSA on `max_relative_growth = -0.5`
+returns exactly the flat answer, 246,000, and the mutation that honours the sign lands
+on 269,750.
+
+NaN falls through to "no relative allowance" rather than to a refusal, and that is
+chosen rather than incidental: `relative > 0.0` is false for NaN, the direction tightens
+and loosens nothing, and a blank cell in a hand-written `carriers.csv` reads as NaN —
+refusing it would reject an ordinary network, which is the mirror image of the mistake
+the old refusal made. A positive infinity *is* refused, because it would reach
+`LpBuilder` as a coefficient and surface rows away as an anonymous failure.
+
+### A second equivalent mutant, left in place
+
+`if !network.isMultiPeriod then return` is redundant: `periods` is empty on a flat
+index, so the loop over it emits nothing and removing the line changes no row. It is
+kept, because it is PyPSA's own first line, and the redundancy is now stated in the code
+— a guard that looks load-bearing and is not is the kind of line someone later moves.
+
+The behaviour it documents is tested anyway, on `tech-capacity-limit`: a growth limit of
+10 on its wind carrier would hold `windA` and `windB` to 10 between them instead of 80
+and 40 if it were built at all, and PyPSA is unchanged at 19,400.
+
+### The fixture
+
+`growth-limit`: three periods, one snapshot each, three extendable wind units with build
+years 2030/2040/2050 — so each period charges exactly one unit and the rows are readable
+off the capacities. `max_growth` 100 and `max_relative_growth` 0.5 make the allowances
+100, 150 and 175, and all three bind.
+
+The structure is `tech-capacity-limit`'s, for the same reason: `gas` at 200 is never
+displaced entirely — total wind reaches 425 against a load of 600 — so each MW displaces
+gas at a constant rate, every unit is worth building, and the capacities are a point. Had
+wind been able to cover the load, the marginal value of the last MW would drop to zero
+and they would not be.
+
+The capital coefficients differ per unit — 30, 20 and 10 per MW against a `capital_cost`
+of 10, because each is active in a different number of periods — which is
+`Expansion.costWeight` working underneath this fixture rather than something it tests.
+
+PyPSA pays **212,750**. Mutation-checked five ways: the cumulative-count rule (250,750),
+the relative term (246,000), its sign (269,750), the negative gate (269,750) and the
+`max_growth != inf` gate (an unbounded row, which `LpBuilder` refuses outright).
+
 ## A period-scoped global constraint, and a refusal that could not fire
 
 `investment_period` on a global constraint restricts it to one period. It was refused
@@ -3308,7 +3411,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are thirty-one golden networks and every *network* module, L1 onward, is
+there are thirty-two golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

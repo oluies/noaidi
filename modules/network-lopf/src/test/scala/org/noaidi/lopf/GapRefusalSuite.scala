@@ -206,8 +206,14 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     mutate("investment-periods-expansion", "generators.csv",
            setColumn(_, "p_nom_mod", (id, m) => if id == "wind" then "10.0" else m))
   }
-  refuses("Carrier max_growth between periods", "max_growth") {
-    withExtraFile("investment-periods", "carriers.csv", "name,max_growth\nAC,100.0\n")
+  // `max_growth` itself is built now -- see `growth-limit` and `GrowthLimit` -- so what is
+  // left to refuse is a relative growth rate that cannot be a coefficient. PyPSA clips the
+  // column at zero and does nothing else with it, so an infinite one reaches linopy as an
+  // infinite coefficient; here it would reach `LpBuilder` as one, and an infinity in the
+  // constraint matrix surfaces hundreds of rows away as an anonymous failure.
+  refuses("an infinite Carrier max_relative_growth", "max_relative_growth") {
+    mutate("growth-limit", "carriers.csv",
+           setColumn(_, "max_relative_growth", (id, v) => if id == "wind" then "inf" else v))
   }
   refuses("per-period storage cycling", "cyclic_state_of_charge_per_period") {
     withExtraFile(

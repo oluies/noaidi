@@ -42,6 +42,16 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
   private def results(name: String): ujson.Value =
     ujson.read(Files.readString(goldens.resolve("results").resolve(s"$name.json")))
 
+  /** A column of a golden frame, by entity name. As `LopfSuite`'s, which this suite had no
+    * occasion for until a fixture here recorded a dispatch worth comparing row by row.
+    */
+  private def frameValue(frame: ujson.Value, row: Int, column: String): Double =
+    val index = frame("columns").arr.indexWhere(_.str == column)
+    assert(index >= 0, s"golden frame has no column '$column'")
+    frame("values")(row)(index) match
+      case ujson.Num(v) => v
+      case other        => fail(s"unexpected golden value $other")
+
   /** The lengths `generate_goldens.py` gives the lines, in file order.
     *
     * Needed as a literal for exactly one thing: the free-volume comparison against
@@ -609,4 +619,102 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     // nothing -- and unlike the `primary_energy` case above, a carrier naming no branch is
     // an ordinary thing in PyPSA (it filters `carrier in @car` and may match none).
     Lopf.build(carrierTypo("ac-dc-txvolume", "<=")): Unit
+  }
+
+  test("an operational_limit caps a carrier's energy, not its emissions") {
+    assume(available, "goldens missing")
+    // The type the refusal above used to name as its own justification: a cap on a carrier's
+    // energy built as an emissions-weighted sum is a different constraint wearing the same
+    // right-hand side, returning `Optimal`. It is built now, and this fixture says what it is.
+    //
+    // Four things are observable here at once, and the base comparison fails on each of them
+    // alone -- which is why the mutations below are about the *cap* rather than about these:
+    //
+    //   - the sum is weighted by `snapshot_weightings.generators`, which this fixture sets to
+    //     3.0 while leaving `objective` at 1.0. It is the first golden anywhere whose three
+    //     weighting columns are not all equal.
+    //   - `gas` runs 40 MW at the first snapshot, so summing every generator rather than the
+    //     named carrier's reaches 800 against the cap's 680.
+    //   - `res` contributes its NET depletion, `-soc(last) + 500 = 200`, as one variable plus
+    //     a constant rather than a sum over the horizon.
+    //   - `pump` carries the same carrier and is cyclic, so it contributes nothing.
+    //
+    // The last of those is detected by a margin of 0.8, not by the 20 its
+    // `state_of_charge_initial` would suggest, and the reason is worth writing down because
+    // the first version of this comment got it wrong. Including the cyclic unit does not
+    // tighten the cap by 20: it hands the LP a lever, because `-soc(pump, last) + 20` can be
+    // driven to zero by holding the unit charged at the last snapshot. What that costs is
+    // `marginal_cost_storage`, which is 0.01 here -- so the objective comes out 2,800.8
+    // instead of 2,800. At the attribute's default of zero the lever would be free, the term
+    // would go to exactly zero, and including a cyclic unit would be invisible on this
+    // fixture. The 0.01 is doing two jobs: pinning the level so the dispatch is determinate,
+    // and making the wrong filter observable at all.
+    val expected = results("operational-limit")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+
+    val n      = network("operational-limit")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 2800.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    // The cap's own shadow price, which has no accessor, is -3.0. It shows up in the nodal
+    // prices instead: 12 at the first snapshot, where gas is marginal, and 13 at the rest,
+    // where `res` is -- its bid of 10 plus the multiplier. So the prices check the dual.
+    val p      = expected("generator_p")
+    val soc    = expected("storage_state_of_charge")
+    val prices = expected("bus_marginal_price")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      n.require("StorageUnit").ids.foreach { id =>
+        assertEqualsDouble(result.stateOfCharge(id, t), frameValue(soc, t, id), 1e-3,
+          s"$id's level at snapshot $t")
+      }
+      assertEqualsDouble(result.marginalPrice("b", t), frameValue(prices, t, "b"), 1e-4,
+        s"marginal price at snapshot $t")
+    }
+
+    // The cap is partial at the last snapshot -- 10 MW of an available 30 -- which is what
+    // makes the shadow price a point rather than an interval, and it is why the cap is 680
+    // and not a rounder number: at 720 and at 660 the answer sits on a corner and PyPSA's own
+    // two solvers disagree about the dispatch while agreeing about the cost.
+    assertEqualsDouble(result.dispatch("Generator", "ror", 3), 10.0, 1e-4,
+      "the cut is not partial at the last snapshot, so this fixture's dual is an interval")
+  }
+
+  test("the cap is on net depletion, and on the `generators` weighting") {
+    assume(available, "goldens missing")
+    def solved(file: String, edit: String => String): Double =
+      val r = Lopf.solve(mutate("operational-limit", file, edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // The weighting column, and the whole reason the fixture sets the three apart. At
+    // `generators = 1.0` the left-hand side comes to 160 + 200 = 360 against a limit of 680
+    // and the cap stops binding, so `ror` runs to its profile and gas stays off. PyPSA: 2,600.
+    assertEqualsDouble(
+      solved("snapshots.csv", setColumn(_, "generators", (_, _) => "1.0")),
+      2600.0, 1e-3, "the sum is not carrying the `generators` snapshot weighting")
+
+    // The limit itself, tightened by 80. The substitution ladder continues at the next
+    // cheapest snapshot rather than restarting, so this is a check on the ordering and not
+    // only on the number being read. PyPSA: 3,070.
+    assertEqualsDouble(
+      solved("global_constraints.csv", setColumn(_, "constant", (_, _) => "600.0")),
+      3070.0, 1e-3, "the cap's constant is not being read")
+
+    // Raising the reservoir's starting level by 100 changes NOTHING, because the cap is on
+    // how much lower it ends than it started and not on where it sits. The initial level is
+    // the constant on the left-hand side and `-soc(last)` is the variable beside it, so the
+    // two move together; a port that kept one and dropped the other would shift by 100 here.
+    // PyPSA: 2,800, with every level 100 higher.
+    assertEqualsDouble(
+      solved("storage_units.csv",
+             setColumn(_, "state_of_charge_initial", (id, v) => if id == "res" then "600.0" else v)),
+      2800.0, 1e-3, "the cap is on the absolute level rather than on the depletion")
   }

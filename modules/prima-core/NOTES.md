@@ -1864,6 +1864,152 @@ branch with a window. The last two are the composition hazards this change could
 have walked into: both were already refused for reasons that have nothing to do
 with expansion, and both still are.
 
+## `operational_limit`, the type the refusal used as its own example
+
+The global-constraint block refuses a `type` it does not implement, and the comment
+explaining why named one:
+
+> `type` selects an entirely different left-hand side in PyPSA. Assuming one would
+> take an `operational_limit` capping a carrier's *energy* and build it as an
+> emissions-weighted sum over every emitting generator: a different constraint
+> wearing the same right-hand side, returning Optimal.
+
+That is still the reason `primary_energy` and `operational_limit` are separate
+functions. It is no longer the reason one of them is missing.
+
+### Three parts, three ways to be wrong
+
+```
+Σ_g Σ_t weight(t) · p(g,t)                   generators whose carrier matches
+  − Σ_s soc(s, last) + Σ_s soc_initial(s)    non-cyclic storage units whose carrier matches
+  − Σ_e e(e, last)   + Σ_e e_initial(e)      non-cyclic stores whose carrier matches
+```
+
+- **`weight` is the `generators` column, not `objective`.** Both this and the
+  emissions sum are quantities of energy rather than costs, and PyPSA weights both
+  with `window.snapshot_weightings("generators")`.
+- **The storage term is a net depletion.** One variable at one snapshot plus a
+  constant, not a sum over the horizon. Read as `Σ_t p_dispatch` it counts the same
+  water again every time the unit refills.
+- **A cyclic unit contributes nothing.** It returns to its starting level, so its net
+  production is zero by construction, and PyPSA filters `not cyclic_state_of_charge`
+  and `not e_cyclic`.
+
+The left-hand constant has nowhere to live in `LpBuilder`, which takes terms and a
+bound, so `OperationalLimit.terms` returns it separately and the caller subtracts it
+from the right-hand side. The vacuity test on an empty left-hand side moved onto that
+shifted bound at the same time: `<=` over no terms is `0 <= bound`, and judging it by
+the file's own constant would drop a cap that the initial levels already violate.
+
+### `last` is not `snapshots.last`
+
+PyPSA takes the final level as `soc.ffill("snapshot").isel(snapshot=-1)`, and the
+forward fill is load-bearing. A unit absent from the final period has no variable
+there; without the fill the term would be missing rather than the last level the unit
+actually held. Here the column exists at every snapshot and is pinned to `[0, 0]`
+outside the activity window, so reading the literal last snapshot would charge the
+depletion as though the unit had emptied itself on retirement. The last **active**
+snapshot is where the fill lands.
+
+Nothing tests that yet: `operational-limit` is single-period, so the two readings
+coincide on it. Recorded here as a gap in the fixture rather than in the code.
+
+### The refusal that is PyPSA's own
+
+`define_operational_limit` raises `NotImplementedError` for a non-cyclic unit whose
+state of charge runs continuously across periods weighted unequally — "the
+operational constraint will be inconsistent" — and names the three ways out. That
+raise is reproduced rather than worked around: the alternative is a row whose own
+author says it means nothing.
+
+### The fixture, and the 0.8 that caught the cyclic filter
+
+`operational-limit` is **the first golden anywhere whose three snapshot weighting
+columns are not all equal**: `generators` is 3.0 while `objective` and `stores` stay
+1.0. Every other golden holds them equal, which is why no comparison here could tell
+which column a sum read. With `objective` in its place the cap's left-hand side comes
+to 360 against a limit of 680 and stops binding: 2,600 against PyPSA's 2,800.
+
+`gas` runs 40 MW at the first snapshot, so a port that summed every generator instead
+of the named carrier's reaches 800 rather than 680. `res` starts at 500 and ends at
+300, contributing 200. `ror` is cut to 10 MW of an available 30 at the last snapshot —
+partial on purpose, which is what makes the shadow price of −3.0 a point rather than
+an interval. The cap was swept for that: at 720 and at 660 the answer sits on a corner
+and PyPSA's own two solvers disagree about the dispatch while agreeing about the cost.
+
+The cyclic exclusion was the hard part to make observable, and the first attempt at
+explaining it was wrong in a way worth recording. `pump` carries the same carrier and
+is cyclic. A port that included it would add `−soc(pump, last) + 20`, and the natural
+expectation is that this tightens the cap by 20. It does not: the LP can drive the
+term to zero by holding the unit charged at the last snapshot. What that costs is
+`marginal_cost_storage`, which is 0.01 here, so the objective comes out **2,800.8**
+rather than 2,800 — caught by 0.8, not by 60.
+
+At the attribute's default of zero the lever would be free, the term would go to
+exactly zero, and including a cyclic unit would be **invisible** on this fixture. So
+the 0.01 is doing two jobs: pinning the unit's level, since a cyclic unit with no flow
+and no storage price has a state of charge free to sit anywhere in its band, and
+making the wrong filter observable at all.
+
+One mutation is a check that nothing happens: raising `res`'s starting level by 100
+leaves the answer at 2,800 with every level 100 higher, because the cap is on how much
+lower the unit ends than it started and not on where it sits. The initial level is the
+constant and `−soc(last)` is the variable beside it, so the two move together.
+
+Mutation-checked four ways, each failing the base comparison: dropping the cyclic
+filter gives 2,800.8, weighting with `objective` gives 2,600, dropping the left
+constant from the right-hand side gives 2,600, and dropping the depletion terms
+altogether gives 2,600. Three of those land on the same number because each one makes
+the cap slack, which is the fixture working as intended rather than three tests
+collapsing into one.
+
+`tech_capacity_expansion_limit` is the one of PyPSA's five types still refused, and
+the refusal test now names it instead of `operational_limit`.
+
+## All four families at once, which was a note rather than a test
+
+`SclopfFamiliesSuite` had cases for each family alone, for two together, and for
+`all-three` — hydro, terminal value and bid ladder, chosen because the last two both
+emit an equality. It did not have all four, and that was written down as a known gap:
+"nothing tests all four families together, that's where the next instance of the
+row-ordering defect will hide".
+
+The gap was specific rather than generic. `Stability` is the family `Lopf.build` emits
+**last** and the only one that emits inequalities exclusively, so it sits on the far
+side of the equality/inequality split from the other three. A copy that got the three
+equality-emitting families right and put stability's rows on the wrong side would pass
+`all-three` and every single-family case.
+
+Confirmed by mutation: moving `Stability.constrain` above `BidLadder.constrain`, so
+its inequalities precede the ladder's equalities, fails exactly the two new tests —
+`Sclopf.build` refuses with "the base model maps original row 281 to Negated(337)
+rather than to the standard-form row of the same index" — and leaves all eleven
+pre-existing cases passing.
+
+`all-four` uses `scr_min` rather than `ek_system_gws`. Grid strength reaches the wind,
+which is what the reservoir displaces on this fixture, so it interacts with the other
+three; rotational energy forces synchronous plant online, which here is the reservoir
+itself, so it would partly duplicate `hydro`'s hourly floor and the case would be
+weaker than its name. Every one of the fixture's own three conditions holds on it —
+the family changes the secure answer, security still binds with the family on, and the
+combination differs from either half — and every series it records is one both PyPSA
+solves agree on, so the port asserts the whole dispatch rather than only the cost.
+
+The second new test holds `all-three` and `all-four` side by side, which is the only
+way to check the half of the invariant that is about the **split** rather than about an
+index: adding a family that emits only inequalities must leave the equality count
+untouched.
+
+### Two reference environments, not one
+
+`reference/nordpsa/*.json` record pandas 3.0.6 and `reference/goldens/manifest.json`
+records 3.0.5, because the NordPSA fixtures need Python 3.11 — NordPSA's own pin —
+while the goldens are generated on 3.13. Regenerating either set from the other's venv
+rewrites a recorded version for no change in any number, which is a provenance claim
+going backwards. `reference/nordpsa/.venv` now exists beside `reference/.venv` and both
+are ignored; the NordPSA constraint modules import cleanly into either, which is how
+this was found rather than assumed.
+
 ## The AC transformer model, and an assumption that was never made
 
 Off-nominal taps, phase shift and the T model were three separate refusals in the
@@ -2956,7 +3102,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are twenty-eight golden networks and every *network* module, L1 onward, is
+there are twenty-nine golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

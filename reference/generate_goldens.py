@@ -875,6 +875,78 @@ def investment_periods_discounted():
     return n
 
 
+def investment_periods_expansion():
+    """Capacity as a decision on a multi-period network, which was refused.
+
+    The refusal said capacity expansion across investment periods is "a different
+    model, not this one with an extra factor", on the grounds that PyPSA gives each
+    build year its own asset. It does not. There is **one** capacity variable per
+    asset; `build_year` is an input on the static frame saying which periods the
+    asset exists in, and `define_objective` charges its capital once per such
+    period:
+
+        cost_weight = (active.groupby("period").any("snapshot") * period_weight).sum("period")
+
+    So `wind`, active in both periods, is charged `120 * (1.0 + 0.5) = 180` per MW,
+    and `late`, built in 2040, is charged `60 * 0.5 = 30`. Reading either as the
+    unweighted `capital_cost` or giving `late` both periods' weight is a different
+    objective, and the fixture separates all three.
+
+    Three other things it pins, each of which was wrong or unreachable before:
+
+      - **The activity window on an extendable asset.** An extendable column is
+        declared free and its limits live in two rows against the capacity
+        variable, so `activeBounds` never touched it -- which means `late`, at a
+        marginal cost of 5 against `old`'s 100, would have run through 2030 as
+        well. Cheaper than the truth, reporting `Optimal`.
+      - **Those rows have to be masked too, not just the column.** The lower row
+        is `p - p_min_pu * p_nom >= 0`; with `p` pinned to zero and a positive
+        `p_min_pu` it reads `-p_min_pu * p_nom >= 0` and forces the *capacity* to
+        zero over the whole horizon. PyPSA masks both rows with `active`.
+      - **`objective_constant` is 0.0 under `multi_investment_periods`.**
+        `define_objective` computes the sunk-capital term in both branches and
+        appends it only in the single-period one, so the same network reports a
+        constant of 3,000 without the flag and 0.0 with it. Reproduced rather than
+        corrected: the objective is what a port is compared on.
+
+    `p_nom_max = 60` on `wind` is what makes both assets bind -- uncapped, wind
+    alone would serve the whole load in every period and `late` would be built to
+    zero, which is a fixture that cannot see `late`'s weighting at all.
+
+    PyPSA pays **20,175** with `wind` at 60 MW and `late` at 40, and prices
+    [100, 100, 65, 5]: 65 is `5 + 30 / 0.5`, `late`'s bid plus its capital
+    coefficient divided back out by the period discount, at the one snapshot where
+    its capacity binds. The 2040 load drops to 90 at the last snapshot precisely so
+    that it does *not* bind there -- with a flat load both 2040 prices are a dual
+    face, and simplex and interior-point disagreed on them (60/0 against 30/30)
+    while agreeing on everything else. As written the two solvers agree on the
+    objective, the capacities, the dispatch and all four prices.
+    """
+    n = pypsa.Network()
+    snapshots = pd.MultiIndex.from_product(
+        [[2030, 2040], range(2)], names=["period", "timestep"]
+    )
+    n.set_snapshots(snapshots)
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["objective"] = [1.0, 0.5]
+    n.investment_period_weightings["years"] = [10, 10]
+
+    n.add("Bus", "b", v_nom=110.0)
+    # The backstop, so no period can be infeasible and every capacity decision is
+    # a cost comparison rather than a feasibility one.
+    n.add("Generator", "old", bus="b", p_nom=100.0, marginal_cost=100.0)
+    # Both extendables carry a non-zero `p_nom`, which is what the objective
+    # constant is computed from: 120 * 20 + 60 * 10 = 3,000. It is inert in the LP
+    # -- `p_nom_min` defaults to 0 -- and exists only so that subtracting the
+    # constant is visibly wrong rather than invisibly so.
+    n.add("Generator", "wind", bus="b", p_nom=20.0, p_nom_extendable=True,
+          p_nom_max=60.0, capital_cost=120.0, marginal_cost=0.0)
+    n.add("Generator", "late", bus="b", p_nom=10.0, p_nom_extendable=True,
+          capital_cost=60.0, marginal_cost=5.0, build_year=2040, lifetime=30)
+    n.add("Load", "d", bus="b", p_set=[100.0, 100.0, 100.0, 90.0])
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1278,6 +1350,7 @@ NETWORKS = {
     "energy-budget": energy_budget,
     "investment-periods": investment_periods,
     "investment-periods-discounted": investment_periods_discounted,
+    "investment-periods-expansion": investment_periods_expansion,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,
@@ -1323,7 +1396,11 @@ NETWORKS = {
 # 1.0, so the recorded answer is the same either way and nothing was wrong with
 # it -- but nothing validated the weighting either, and the port applies it
 # unconditionally.
-MULTI_INVEST = frozenset({"investment-periods", "investment-periods-discounted"})
+MULTI_INVEST = frozenset({
+    "investment-periods",
+    "investment-periods-discounted",
+    "investment-periods-expansion",
+})
 
 
 def jsonable(value):

@@ -810,3 +810,112 @@ class GlobalConstraintSuite extends munit.FunSuite, CsvFixtures:
     assert(failure.getMessage.contains("'C'"),
       s"the refusal does not name the missing bus: ${failure.getMessage}")
   }
+
+  test("a global constraint scoped to one investment period binds in that period only") {
+    assume(available, "goldens missing")
+    // Refused until now, and the refusal's reasoning was right as far as it went: read as
+    // horizon-wide, a cap meant for 2040 alone is TIGHTER than the network states and makes
+    // the answer dearer, while read as a cap per period rather than in total it is looser.
+    // Neither direction has a defensible sign, so refusing beat guessing.
+    //
+    // What was missing is that there is nothing to guess. For the two snapshot-summing types
+    // PyPSA restricts the sum to that period's snapshots -- `period_sns = sns[period_of ==
+    // period]` -- and that is all.
+    //
+    // Note what the export looks like, because it is where this would have gone wrong
+    // silently: `global_constraints.csv` writes `investment_period` as `2030.0` while
+    // `investment_periods.csv` writes the period as `2030`. Comparing the two as text matches
+    // nothing, every scoped constraint would be skipped as naming an absent period, and the
+    // answer would come out cheaper. The scope is resolved numerically.
+    val expected = results("period-scoped-constraints")("optimize")
+    assert(!expected.obj.contains("error"), s"golden solve failed: ${expected.obj.get("error")}")
+    assert(expected("multi_investment_periods").bool, "the golden was not solved multi-period")
+
+    val n = network("period-scoped-constraints")
+    assertEquals(n.snapshotPeriods, IndexedSeq("2030", "2030", "2040", "2040"), "snapshot periods")
+
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
+
+    val target = expected("objective").num
+    assertEqualsDouble(target, 15020.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
+
+    val p      = expected("generator_p")
+    val prices = expected("bus_marginal_price")
+    n.snapshots.indices.foreach { t =>
+      n.require("Generator").ids.foreach { id =>
+        assertEqualsDouble(result.dispatch("Generator", id, t), frameValue(p, t, id), 1e-4,
+          s"generator $id at snapshot $t")
+      }
+      assertEqualsDouble(result.marginalPrice("b", t), frameValue(prices, t, "b"), 1e-4,
+        s"marginal price at snapshot $t")
+    }
+
+    // Each period abates for itself and neither borrows from the other: 50 MW at 2030's
+    // second snapshot and 80 at 2040's. The prices carry the two multipliers separately --
+    // 88 = 10 + 7.8 x 10 at 2030's first snapshot and 88 = 14 + 14.8 x 5 at 2040's -- which is
+    // what says each row is weighted by its own period's `years` and not by the other's.
+    assertEqualsDouble(result.dispatch("Generator", "clean", 1), 50.0, 1e-4, "2030 abates 50")
+    assertEqualsDouble(result.dispatch("Generator", "clean", 3), 80.0, 1e-4, "2040 abates 80")
+    assertEqualsDouble(result.dispatch("Generator", "clean", 0), 0.0, 1e-4, "2030's cheap snapshot is untouched")
+    assertEqualsDouble(result.dispatch("Generator", "clean", 2), 0.0, 1e-4, "2040's cheap snapshot is untouched")
+  }
+
+  test("the three things a scope does, and the one it must not do") {
+    assume(available, "goldens missing")
+    def solved(edit: String => String): Double =
+      val r = Lopf.solve(mutate("period-scoped-constraints", "global_constraints.csv", edit), params)
+      assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
+      r.objective
+
+    // Unscoping the 2040 cap applies its 600 to the whole horizon, where unweighted emissions
+    // are 3,000 -- so almost everything has to be abated and the answer more than doubles.
+    // PyPSA: 26,920. This is the direction the old refusal called "tighter than the network
+    // states", and it is the one a port that ignored the column would take.
+    assertEqualsDouble(
+      solved(setColumn(_, "investment_period", (id, v) => if id == "co2_2040" then "" else v)),
+      26920.0, 1e-3, "the scope is not restricting the sum to its own period")
+
+    // Scoping it to a period the horizon does not cover makes NO ROW. PyPSA's `elif
+    // glc.investment_period in periods: ... else: continue`, which is a different outcome from
+    // the empty left-hand side the emptiness guard handles -- that one refuses `>=` and `==`,
+    // and this one must not, because upstream builds nothing either way. With the 2040 cap
+    // gone, 2040 runs gas flat out. PyPSA: 9,100.
+    assertEqualsDouble(
+      solved(setColumn(_, "investment_period", (id, v) => if id == "co2_2040" then "2050.0" else v)),
+      9100.0, 1e-3, "a scope naming an absent period is not being skipped")
+
+    // And the `years` weighting, flattened: the caps become 200 and 200 against limits of
+    // 1,500 and 600, both slack, so gas runs flat out everywhere. PyPSA: 5,200. The fixture
+    // holds `objective` at 1.0 precisely so a failure here cannot be the other column.
+    val flatYears = Lopf.solve(
+      mutate("period-scoped-constraints", "investment_periods.csv",
+             setColumn(_, "years", (_, _) => "1.0")),
+      params,
+    )
+    assertEquals(flatYears.status, SolveStatus.Optimal, s"${flatYears.solution}")
+    assertEqualsDouble(flatYears.objective, 5200.0, 1e-3,
+      "a scoped emissions sum is not carrying its period's `years`")
+  }
+
+  test("a scope on a network with no periods is refused, because PyPSA crashes on it") {
+    assume(available, "goldens missing")
+    // Not a judgement call. Both `define_primary_energy_limit` and `define_operational_limit`
+    // read `periods`, which is bound only inside `if n._multi_invest`, so a scoped constraint
+    // on a network solved without the flag dies with
+    // `UnboundLocalError: cannot access local variable 'periods'`. Measured on both types,
+    // not inferred from the source -- so there is no answer here to agree with, and building
+    // the row horizon-wide would be inventing one.
+    val failure = intercept[Lopf.UnsupportedNetwork] {
+      Lopf.build(
+        mutate("ac-dc-co2", "global_constraints.csv",
+               text => setColumn(text, "investment_period", (_, _) => "2030.0"))
+      )
+    }
+    assert(failure.getMessage.contains("2030"),
+      s"the refusal does not name the period: ${failure.getMessage}")
+    assert(failure.getMessage.toLowerCase.contains("no periods") ||
+             failure.getMessage.contains("UnboundLocalError"),
+      s"the refusal does not say why: ${failure.getMessage}")
+  }

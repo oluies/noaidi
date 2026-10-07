@@ -1966,6 +1966,118 @@ collapsing into one.
 `tech_capacity_expansion_limit` is the one of PyPSA's five types still refused, and
 the refusal test now names it instead of `operational_limit`.
 
+## A period-scoped global constraint, and a refusal that could not fire
+
+`investment_period` on a global constraint restricts it to one period. It was refused
+here, and the reasoning the refusal gave was right as far as it went:
+
+> Left unread it is not conservative: a CO2 cap meant for 2040 alone would be applied
+> to the whole horizon, which is a *tighter* constraint than the network states and
+> makes the answer dearer, or — read the other way, as a cap per period rather than in
+> total — looser. Neither has a defensible sign, and PyPSA builds a separate row per
+> scoped period.
+
+Both directions were measured after the fact and both are large: unscoping the 2040 cap
+on the new fixture takes the answer from 15,020 to 26,920.
+
+### The refusal could not fire
+
+It read the column with `constraints.string("investment_period", id)`.
+`investment_period` is a **Float** in the schema, and `ComponentTable.string` throws
+`IllegalArgumentException` on a numeric column. So a genuinely scoped constraint died
+with
+
+```
+investment_period is Float, not a string
+```
+
+rather than with the refusal's own message, naming neither the constraint nor the gap.
+It still stopped the build, so this was loud rather than silent — the port never
+returned a wrong number — but the refusal that existed to explain the gap explained
+nothing, and the test suite could not tell, because no fixture had both periods and a
+scoped constraint. Found by lifting the refusal, not by reading it.
+
+An absent column is fine, because `string` falls back to the schema's default text for
+a column that is not present at all. Only a network that actually sets the attribute
+reaches the throw — which is exactly the network the refusal was for.
+
+### There was nothing to guess
+
+PyPSA does three separate things with the column, and none is the same as the others:
+
+| type | what the scope does |
+|---|---|
+| `primary_energy`, `operational_limit` | the sum runs over **that period's snapshots alone** (`period_sns = sns[period_of == period]`) |
+| the three capacity types | **assets** are filtered by activity in that period |
+| any type, period not in the horizon | **no row at all** |
+
+That last one is `elif glc.investment_period in periods: ... else: continue`, and it is
+a different outcome from a row over an empty left-hand side. The emptiness guard here
+refuses `>=` and `==` over no terms, on the grounds that such a row is a claim about
+nothing; a scope naming an absent period must **not** reach that guard, because
+upstream builds nothing either way and refusing would reject a network PyPSA solves.
+
+The two *unscoped* cases of the capacity types disagree with each other, which is worth
+recording because unifying them would be a guess:
+
+- a transmission limit passes `list(window.periods)` — every period the snapshots
+  carry — and `get_active_assets` with a list means "active in any of them"
+- `tech_capacity_expansion_limit` passes `None`, which means the `active` flag alone
+  with `build_year` and `lifetime` **ignored**
+
+The two differ only on an asset active in no declared period, which no sane network
+carries. They are written apart anyway.
+
+### Resolved by value, not by spelling
+
+`global_constraints.csv` writes this column as `2030.0` while `investment_periods.csv`
+writes the period as `2030`. Matching the two as text matches nothing, so every scoped
+constraint would be skipped as naming an absent period and the answer would come out
+cheaper. The mutation that does exactly that lands on 5,200 against PyPSA's 15,020 —
+both caps dropped, gas flat out.
+
+### A scope with no periods is a crash upstream, not a behaviour
+
+Still refused, and this one is not a judgement call. Both
+`define_primary_energy_limit` and `define_operational_limit` read `periods`, which is
+bound only inside `if n._multi_invest`:
+
+```
+flat primary_energy     period=2030  -> UnboundLocalError: cannot access local variable 'periods'
+flat operational_limit  period=2030  -> UnboundLocalError: cannot access local variable 'periods'
+```
+
+Measured on both, not inferred from the source. There is no answer to agree with, and
+building the row horizon-wide would be inventing one. The refusal moved into
+`Lopf.build`'s global-constraint block, beside the others, because it is about the
+constraint rather than about the periods.
+
+### The fixture
+
+`period-scoped-constraints`: two caps, one per period, both binding.
+
+- `years` is [10, 5], so an identical MWh of gas costs ten emission units in 2030 and
+  five in 2040. The caps are 1,500 against an unscoped 2,000 and 600 against an
+  unscoped 1,000, so each period abates for itself and neither can borrow from the
+  other.
+- `gas` rises 10/12/14/16, so within each period there is a strictly cheapest snapshot
+  to abate at and the answer is a point. 2030 abates 50 MW at its second snapshot and
+  2040 abates 80 at its second; the two cheap snapshots are untouched.
+- The shadow prices are −7.8 and −14.8 — `(90 − 12) / 10` and `(90 − 16) / 5` — which is
+  what says each row carries its own period's `years` and not the other's. They show up
+  in the nodal prices as 88 = `10 + 7.8 × 10` and 88 = `14 + 14.8 × 5`, the same number
+  by two different routes.
+- `objective` is held at 1.0 on purpose. `investment-periods-discounted` is the fixture
+  for the discount factor; holding it flat here keeps a failure unambiguous between the
+  two columns.
+
+PyPSA pays **15,020**, and simplex and interior-point agree on the objective, every
+dispatch and all four prices.
+
+Mutation-checked four ways: dropping the snapshot restriction gives 26,920, dropping
+the absent-period skip 26,920 on that case, resolving the scope by spelling 5,200, and
+dropping the no-periods refusal fails the refusal test outright.
+
 ## `tech_capacity_expansion_limit`, and all five types built
 
 The fifth and last type `global_constraints.py` dispatches on, and the last one left
@@ -3196,7 +3308,7 @@ underestimate would start the method outside the region where it converges.
 
 **No golden files from PyPSA in *this* module.** The heading used to read "No
 golden files from PyPSA yet", which stopped being true once L1 and L2 arrived —
-there are thirty golden networks and every *network* module, L1 onward, is
+there are thirty-one golden networks and every *network* module, L1 onward, is
 gated on them. Not "every module above this one": the modules above `prima-core`
 in the build graph are the other Prima ones, and none of them reads
 `NOAIDI_GOLDENS` — they are validated against ojAlgo and the Netlib corpus, which

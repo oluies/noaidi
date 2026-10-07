@@ -65,7 +65,7 @@ object OperationalLimit:
     */
   def terms(
       network: Network,
-      snapshots: Range,
+      snapshots: IndexedSeq[Int],
       columns: scala.collection.Map[(String, String, Int), Int],
       id: String,
       carrier: String,

@@ -1022,6 +1022,82 @@ def operational_limit():
     return n
 
 
+def tech_capacity_limit():
+    """A cap on buildable capacity per carrier, and per carrier at one bus.
+
+    `tech_capacity_expansion_limit` is the fifth and last of the types
+    `global_constraints.py` dispatches on, and it was the last one left here rather than the
+    hardest: its left-hand side is one coefficient of 1.0 per capacity column, with no
+    weighting and no snapshot index. What it needed was capacity to be a decision at all.
+
+    Three things about the columns, and the first is a trap:
+
+      - `carrier_attribute` names a **carrier** on this type, not a column of
+        `carriers.csv`. The same field means `co2_emissions` on `primary_energy` and `hydro`
+        on `operational_limit`, and PyPSA reads it both ways from one field.
+      - `bus` is optional and is a bus name. PyPSA treats an empty string as absent
+        (`glc.get("bus") or None`), which matters because a CSV round-trip writes an unset
+        `bus` as `""` rather than omitting the column.
+      - A branch counts at its `bus0` only, so a cap at one bus counts a line leaving it and
+        not the same line arriving. Asymmetric, and upstream's.
+
+    And despite the name it caps **capacity**, not expansion: the left-hand side is the same
+    column the objective charges `capital_cost` on, which for an extendable asset is the
+    whole optimal capacity. An asset arriving with `p_nom = 100` counts its full `p_nom_opt`,
+    so a cap of 100 permits no addition rather than 100 of it. Both extendables here start at
+    `p_nom = 0` so that reading is not what the fixture is about; the docstring says it
+    because the name invites the other one.
+
+    The structure is deliberate. Every renewable here has zero marginal cost and `gas` sits
+    at 80, and the caps keep renewable output below the load at both snapshots -- so each MW
+    of capacity displaces gas at a **constant** rate and its net value is constant too:
+    `windA` +20/MW, `windB` +30/MW, `solarA` +20/MW. That makes the problem linear in the
+    capacities with nothing but the caps to bound them, which is the only arrangement where
+    both caps bind at once and the answer is still a point:
+
+      - `windB` is worth most per MW, so it fills its bus cap of 40 first
+      - `windA` takes the remaining 80 of the network-wide 120
+      - `solarA` is a different carrier, so neither cap touches it and it builds to its
+        `p_nom_max` of 50 -- which is also what makes the carrier filter observable, since a
+        port that counted every extendable would have 120 to share between three assets
+
+    PyPSA pays **19,400** with shadow prices of -20 on the total and -10 at the bus, and
+    simplex and interior-point agree on the objective, all three capacities, every dispatch
+    and the line flow. `p_nom_max` on `solarA` is load-bearing in a way the caps are not: at
+    a constant +20/MW with no cap and no limit its capacity is unbounded.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+
+    n.add("Bus", "A", v_nom=110.0)
+    n.add("Bus", "B", v_nom=110.0)
+    for carrier in ("AC", "wind", "solar", "gas"):
+        n.add("Carrier", carrier)
+    n.buses["carrier"] = "AC"
+    # Fixed, and rated far above anything that crosses it. An extendable line would bring the
+    # two transmission limit types into a fixture that is about neither.
+    n.add("Line", "AB", bus0="A", bus1="B", x=0.1, r=0.01, s_nom=500.0, carrier="AC")
+
+    n.add("Generator", "gas", bus="A", carrier="gas", p_nom=300.0, marginal_cost=80.0)
+    # Complementary profiles, so neither wind site is simply better than the other at every
+    # snapshot and the line carries something in both directions of the merit order.
+    n.add("Generator", "windA", bus="A", carrier="wind", p_nom=0.0, p_nom_extendable=True,
+          capital_cost=100.0, marginal_cost=0.0, p_max_pu=[1.0, 0.5])
+    n.add("Generator", "windB", bus="B", carrier="wind", p_nom=0.0, p_nom_extendable=True,
+          capital_cost=90.0, marginal_cost=0.0, p_max_pu=[0.5, 1.0])
+    n.add("Generator", "solarA", bus="A", carrier="solar", p_nom=0.0, p_nom_extendable=True,
+          p_nom_max=50.0, capital_cost=60.0, marginal_cost=0.0, p_max_pu=[0.8, 0.2])
+
+    n.add("Load", "dA", bus="A", p_set=[100.0, 60.0])
+    n.add("Load", "dB", bus="B", p_set=[50.0, 80.0])
+
+    n.add("GlobalConstraint", "wind_total", type="tech_capacity_expansion_limit",
+          carrier_attribute="wind", sense="<=", constant=120.0)
+    n.add("GlobalConstraint", "wind_at_b", type="tech_capacity_expansion_limit",
+          carrier_attribute="wind", bus="B", sense="<=", constant=40.0)
+    return n
+
+
 def link_delay():
     """A link whose energy arrives later, which this port delivered instantly.
 
@@ -1427,6 +1503,7 @@ NETWORKS = {
     "investment-periods-discounted": investment_periods_discounted,
     "investment-periods-expansion": investment_periods_expansion,
     "operational-limit": operational_limit,
+    "tech-capacity-limit": tech_capacity_limit,
     "link-delay": link_delay,
     "link-delay-wrap": link_delay_wrap,
     "store-bank": store_bank,

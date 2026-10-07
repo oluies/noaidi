@@ -1,0 +1,536 @@
+{
+ "bodf": {
+  "0": {
+   "bodf": [
+    [
+     -1.0
+    ]
+   ],
+   "branches": [
+    [
+     "Line",
+     "AB"
+    ]
+   ]
+  }
+ },
+ "lpf": {
+  "bus_v_ang": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     0.0,
+     -0.00041322314049586776
+    ],
+    [
+     0.0,
+     -0.0006611570247933885
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "gas",
+    "windA",
+    "windB",
+    "solarA"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     150.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     140.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [
+    "AB"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     50.0
+    ],
+    [
+     80.0
+    ]
+   ]
+  },
+  "link_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  }
+ },
+ "optimize": {
+  "bus_marginal_price": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     80.0,
+     80.0
+    ],
+    [
+     80.0,
+     80.0
+    ]
+   ]
+  },
+  "condition": "optimal",
+  "generator_p": {
+   "columns": [
+    "gas",
+    "windA",
+    "windB",
+    "solarA"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     10.0,
+     80.0,
+     20.0,
+     40.0
+    ],
+    [
+     50.0,
+     40.0,
+     40.0,
+     10.0
+    ]
+   ]
+  },
+  "generator_status": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "global_constraint_mu": {
+   "wind_at_b": -10.0,
+   "wind_total": -20.0
+  },
+  "line_p0": {
+   "columns": [
+    "AB"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     30.0
+    ],
+    [
+     40.0
+    ]
+   ]
+  },
+  "link_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "multi_investment_periods": false,
+  "nominal_opt": {
+   "Generator": {
+    "gas": 300.0,
+    "solarA": 50.0,
+    "windA": 80.0,
+    "windB": 40.0
+   },
+   "Line": {
+    "AB": 500.0
+   }
+  },
+  "objective": 19400.0,
+  "objective_constant": 0.0,
+  "status": "ok",
+  "storage_p": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_p_dispatch": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_p_store": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_spill": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_state_of_charge": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "store_e": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "store_p": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "total_system_cost": 19400.0,
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  }
+ },
+ "pf": {
+  "bus_p": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     50.00206628655542,
+     -50.0
+    ],
+    [
+     80.00528995625245,
+     -80.0
+    ]
+   ]
+  },
+  "bus_q": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     0.020662867347709835,
+     0.0
+    ],
+    [
+     0.05289957435161341,
+     0.0
+    ]
+   ]
+  },
+  "bus_v_ang": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     0.0,
+     -0.00041324026429034503
+    ],
+    [
+     0.0,
+     -0.0006612009361571357
+    ]
+   ]
+  },
+  "bus_v_mag_pu": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     1.0,
+     0.9999585905909979
+    ],
+    [
+     1.0,
+     0.9999336613179208
+    ]
+   ]
+  },
+  "converged": {
+   "columns": [
+    "0"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     1.0
+    ],
+    [
+     1.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "gas",
+    "windA",
+    "windB",
+    "solarA"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ]
+   ]
+  },
+  "generator_q": {
+   "columns": [
+    "gas",
+    "windA",
+    "windB",
+    "solarA"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     0.020662867347709835,
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.05289957435161341,
+     0.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [
+    "AB"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     50.00206628655542
+    ],
+    [
+     80.00528995625245
+    ]
+   ]
+  },
+  "line_p1": {
+   "columns": [
+    "AB"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     -49.99999999972907
+    ],
+    [
+     -79.99999999821993
+    ]
+   ]
+  },
+  "line_q0": {
+   "columns": [
+    "AB"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     0.020662867347709835
+    ],
+    [
+     0.05289957435161341
+    ]
+   ]
+  },
+  "line_q1": {
+   "columns": [
+    "AB"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     9.157539236484167e-10
+    ],
+    [
+     5.973583679262268e-09
+    ]
+   ]
+  }
+ }
+}

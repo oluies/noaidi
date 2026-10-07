@@ -1,0 +1,5 @@
+name,bus,control,p_nom,p_nom_extendable,p_nom_max,carrier,marginal_cost,capital_cost
+gas,A,Slack,300.0,False,inf,gas,80.0,0.0
+windA,A,PQ,0.0,True,inf,wind,0.0,100.0
+windB,B,PQ,0.0,True,inf,wind,0.0,90.0
+solarA,A,PQ,0.0,True,50.0,solar,0.0,60.0

@@ -2280,6 +2280,44 @@ either: the first version used `0,25`, the decimal comma a European spreadsheet
 produces. `splitCsv` turns it into two fields, so the row gains a column, `0` parses and
 nothing is refused. That is a separate gap, and this fix does not close it.
 
+### The other half of the reader fix: snapshot weightings
+
+`parseWeighting` feeds **two** files, and the first version of its docstring named only one
+guard — "A non-finite weighting now reaches the builder, where `Periods.reject` refuses it".
+True of `investment_periods.csv`. False of `snapshots.csv`, which every network has:
+`Periods.reject` returns early on a flat index, so a NaN snapshot weighting reached a
+coefficient unrefused.
+
+Reachable *because* the reader got stricter, not in spite of it. An empty cell is what
+pandas writes for a NaN, and it used to read as 1.0 — a wrong answer, quietly. Reading it
+faithfully is right, and it turned that into an anonymous crash. Measured on
+`operational-limit` with each column emptied in turn:
+
+```
+objective   ->  IllegalArgumentException: objective coefficient 0 is not finite: NaN
+stores      ->  IllegalArgumentException: constraint has empty range [NaN, NaN]
+generators  ->  IllegalArgumentException: entry at (12, 0) is not finite: NaN
+```
+
+Loud, so no wrong number was ever returned — and not one of those names the snapshot, the
+column or the file. That is the failure `TerminalValue` and `Stability` refuse by name, and
+the one the transmission limit's own weight guard exists for.
+
+`Lopf.rejectSnapshotWeightings` covers the three kinds this model reads, and the three are
+separate because each reaches a different coefficient: `objective` multiplies every cost and
+divides every nodal price, `stores` **is** the elapsed hours of a snapshot and so scales
+every storage and store balance row, and `generators` weights the emissions sum and the
+operational limit. Only those three: `snapshots.csv` can carry others, and a network with a
+weighting nothing here consumes is one PyPSA solves.
+
+It runs on every network rather than only a multi-period one, which is the whole point —
+the refusal tests use the single-period `operational-limit` fixture precisely because that
+is where `Periods.reject` cannot help.
+
+Mutation-checked: removing the call fails all three tests, and narrowing it to `objective`
+alone fails two.
+
+
 ### The refusal reads the periods the snapshots carry
 
 `Expansion.costWeight` sums over `snapshotPeriods.distinct` and says why; both `years`

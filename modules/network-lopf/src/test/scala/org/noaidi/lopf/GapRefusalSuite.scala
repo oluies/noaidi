@@ -279,6 +279,26 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     mutate("tx-cost-periods", "investment_periods.csv",
            setColumn(_, "objective", (p, w) => if p == "2040" then "NaN" else w))
   }
+  // The snapshot weightings, which `CsvReader.parseWeighting` made reachable: an empty cell is
+  // what pandas writes for a NaN, and it used to read as 1.0. All three kinds this model reads
+  // are covered, because each reaches a different coefficient -- and without the refusal each
+  // surfaces as an anonymous failure from inside the builder, measured on `operational-limit`:
+  // "objective coefficient 0 is not finite", "constraint has empty range [NaN, NaN]" and
+  // "entry at (12, 0) is not finite". None names the snapshot, the column or the file.
+  //
+  // On a SINGLE-PERIOD fixture on purpose. The period weightings are refused by
+  // `Periods.reject`, which returns early without periods -- so a flat network is exactly
+  // where that guard cannot help and this one has to.
+  refuses("an empty snapshot objective weighting", "multiplies every cost") {
+    mutate("operational-limit", "snapshots.csv", setColumn(_, "objective", (_, _) => ""))
+  }
+  refuses("an empty snapshot stores weighting", "elapsed hours") {
+    mutate("operational-limit", "snapshots.csv", setColumn(_, "stores", (_, _) => ""))
+  }
+  refuses("an empty snapshot generators weighting", "emissions sum") {
+    mutate("operational-limit", "snapshots.csv", setColumn(_, "generators", (_, _) => ""))
+  }
+
   refuses("a snapshot in an undeclared period", "does not declare") {
     mutate("investment-periods", "snapshots.csv",
            setColumn(_, "period", (i, p) => if i == "3" then "2050" else p))

@@ -309,8 +309,15 @@ object CsvReader:
     *
     * So the tokens are handled as [[parseFloat]] handles them, and an unrecognised one is a
     * malformed file rather than a 1.0. The 1.0 default survives only where it means what it
-    * says: a column that is not there, or a row too short to have the cell. A non-finite
-    * weighting now reaches the builder, where `Periods.reject` refuses it.
+    * says: a column that is not there, or a row too short to have the cell.
+    *
+    * A non-finite weighting now reaches the builder, which refuses it — in '''two''' places,
+    * because this function feeds two files. `Periods.reject` covers
+    * `investment_periods.csv`, and `Lopf.rejectSnapshotWeightings` covers this one. The first
+    * version of this sentence named only the period half, which was wrong for the file that
+    * every network has: `Periods.reject` returns early on a flat index, so a NaN snapshot
+    * weighting reached a coefficient and surfaced as `objective coefficient 0 is not finite`
+    * with nothing to say which snapshot or column it came from.
     */
   private def parseWeighting(cell: String, file: String, columnName: String): Double =
     val t = cell.trim

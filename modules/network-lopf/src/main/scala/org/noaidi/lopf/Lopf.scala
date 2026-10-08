@@ -122,6 +122,9 @@ object Lopf:
     // duplicated labels for a network whose real problem is that this model does
     // not have periods at all.
     Periods.reject(network, m => throw new UnsupportedNetwork(m))
+    // Beside `Periods.reject` rather than inside it: a snapshot weighting is not a period's,
+    // and `Periods.reject` returns early on a flat index while every network has these.
+    rejectSnapshotWeightings(network)
     // Only the delays PyPSA's own consistency check refuses. The rest are
     // modelled -- see `Delays`, and the shift applied in the balance rows below.
     //
@@ -1331,6 +1334,60 @@ object Lopf:
     * the answer cheaper with no diagnostic -- so this is loud, matching
     * `Topology.danglingReferences`, which the model layer already made throw.
     */
+  /** Refuse a snapshot weighting that cannot be a coefficient.
+    *
+    * `snapshots.csv` carries three weighting columns and this model reads all three:
+    * `objective` multiplies every cost and divides every nodal price, `stores` is the elapsed
+    * hours of a snapshot and so scales every storage and store balance row, and `generators`
+    * weights an emissions sum and an operational limit. A non-finite value in any of them
+    * reaches a coefficient.
+    *
+    * It '''is''' caught without this, and loudly — but anonymously, which is the whole reason
+    * the check exists. Measured on `operational-limit` with each column emptied in turn:
+    *
+    * {{{
+    * objective   ->  objective coefficient 0 is not finite: NaN
+    * stores      ->  constraint has empty range [NaN, NaN]
+    * generators  ->  entry at (12, 0) is not finite: NaN
+    * }}}
+    *
+    * Not one of those names the snapshot, the column or the file, which is the failure
+    * `TerminalValue` and `Stability` already refuse by name and the one the transmission
+    * limit's own weight guard exists for.
+    *
+    * Reachable because the reader got stricter, not in spite of it. `CsvReader.parseWeighting`
+    * used to read an unparseable cell as 1.0, and pandas writes a NaN weighting as an
+    * '''empty cell''' — so such a network silently became "no weighting" instead. Reading it
+    * faithfully is right, and it moved the diagnosis from a wrong answer to an anonymous
+    * crash; this is the other half of that change.
+    *
+    * Only the three kinds this model reads. `snapshots.csv` can carry others, and a network
+    * with a weighting nothing here consumes is one PyPSA solves — refusing it would be the
+    * over-refusal `max_relative_growth` already taught. And unlike the period weightings,
+    * this runs on '''every''' network: a flat index has snapshot weightings too, which is
+    * exactly what `Periods.reject` cannot check, since it returns early without periods.
+    */
+  private def rejectSnapshotWeightings(network: Network): Unit =
+    Seq("objective", "stores", "generators").foreach { kind =>
+      network.snapshots.indices.foreach { t =>
+        val weighting = network.weighting(kind, t)
+        if !weighting.isFinite then
+          throw new UnsupportedNetwork(
+            s"snapshot ${network.snapshotLabel(t)} has a $kind weighting of $weighting. " +
+              (kind match
+                case "objective" =>
+                  "It multiplies every cost at that snapshot and divides its nodal price"
+                case "stores" =>
+                  "It is the elapsed hours of that snapshot, so it scales every storage and " +
+                    "store balance row there"
+                case _ =>
+                  "It weights the emissions sum and the operational limit at that snapshot") +
+              ", so a non-finite one cannot be a coefficient. An empty cell is what pandas " +
+              "writes for a NaN weighting."
+          )
+      }
+    }
+
   private def rejectDanglingBuses(network: Network): Unit =
     Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
       throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")

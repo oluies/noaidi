@@ -122,6 +122,9 @@ object Lopf:
     // duplicated labels for a network whose real problem is that this model does
     // not have periods at all.
     Periods.reject(network, m => throw new UnsupportedNetwork(m))
+    // Beside `Periods.reject` rather than inside it: a snapshot weighting is not a period's,
+    // and `Periods.reject` returns early on a flat index while every network has these.
+    rejectSnapshotWeightings(network)
     // Only the delays PyPSA's own consistency check refuses. The rest are
     // modelled -- see `Delays`, and the shift applied in the balance rows below.
     //
@@ -832,8 +835,28 @@ object Lopf:
       * has a cost limit that disagrees with its own objective about what a branch costs to
       * build. That is upstream's behaviour -- `define_transmission_expansion_cost_limit`
       * weights by `c.capital_cost` -- and this is a port, so it is reproduced rather than
-      * corrected. PyPSA additionally scales by a per-period weighting, which is unreachable
-      * here: expansion across investment periods is a refused gap.
+      * corrected.
+      *
+      * ==The per-period weighting, which used to be unreachable and is not==
+      *
+      * The '''cost''' limit scales each branch's `capital_cost` by the sum of the `objective`
+      * weightings of the periods it is active in -- `comp_weights = active @ period_weighting`
+      * -- and the '''volume''' limit does not. So this builder's two callers differ in more
+      * than which attribute they weight by, and the difference is live rather than
+      * hypothetical: the comment here used to say the weighting was "unreachable, expansion
+      * across investment periods is a refused gap", which stopped being true the moment that
+      * refusal was lifted. A missing weighting is a cost limit measured in the wrong units,
+      * and on `tx-cost-periods` it is the difference between building 84 MW of one corridor
+      * and 100 of it.
+      *
+      * Only where the constraint is '''unscoped''', and that is upstream's own branch rather
+      * than an optimisation: a constraint naming a period sets `weights = 1`, because its row
+      * is about that one period and there is nothing to sum over. Which makes the scoped
+      * answer on that fixture identical to the unweighted unscoped one -- 13,737.5 against
+      * 13,750 -- so the two readings are separated by the mutation rather than by arithmetic.
+      *
+      * The factor is [[Expansion.costWeight]], the same one the objective charges capital
+      * with, which is why there is no second definition of it here.
       *
       * Non-extendable branches contribute nothing, and that is not an omission. Their
       * capacity is a constant, so including them would compare a fixed number against the
@@ -883,13 +906,39 @@ object Lopf:
             // wrong here, where dropping a branch from a limit silently changes what the
             // limit means.
             val weight = table.float(weightAttribute, branch)
-            if !weight.isFinite then
+            // The cost limit's per-period factor, and the cost limit's alone. `costWeight`
+            // is 1.0 on a flat index, so this is a no-op there; on a multi-period network it
+            // is the sum of the `objective` weightings of the periods the branch is active
+            // in. A scoped constraint gets no factor at all, which is upstream's
+            // `weights = 1`.
+            val periodFactor =
+              if weightAttribute == "capital_cost" && scope.isEmpty then
+                Expansion.costWeight(network, table, branch)
+              else 1.0
+            val scaled = weight * periodFactor
+            // Tested on `scaled` and not on `weight`, because `scaled` is what reaches the
+            // matrix. The guard was written before the per-period factor existed and kept
+            // testing the attribute alone afterwards, so the factor sat outside the very
+            // check whose comment above says it exists to stop a NaN becoming "an anonymous
+            // row".
+            //
+            // Defence in depth, and unreachable from a file as things stand: `Periods.reject`
+            // refuses a non-finite period weighting before this block is built, and
+            // `costWeight` is a sum of those weightings, so there is no network where the
+            // factor is non-finite and the weightings are not. Reverting this to test `weight`
+            // is therefore an EQUIVALENT MUTANT -- measured, no test fails. It is kept
+            // because the guard's own comment claims a property of the coefficient it emits,
+            // and a claim that is only true because something else happens first is the
+            // reasoning the schema sweep was built to stop trusting.
+            if !scaled.isFinite then
               throw new UnsupportedNetwork(
                 s"global constraint '$id' weights $component '$branch' by " +
-                  s"'$weightAttribute', " +
-                  s"which is $weight. A non-finite weight cannot be a coefficient."
+                  s"'$weightAttribute' = $weight" +
+                  (if periodFactor != 1.0 then s", times a per-period factor of $periodFactor"
+                   else "") +
+                  s", which gives $scaled. A non-finite weight cannot be a coefficient."
               )
-            columns((Expansion.capacityKey(component), branch, Expansion.NoSnapshot)) -> weight
+            columns((Expansion.capacityKey(component), branch, Expansion.NoSnapshot)) -> scaled
           }
         }
       }
@@ -1275,6 +1324,60 @@ object Lopf:
         s"network contains unmodelled component(s): " +
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
+
+  /** Refuse a snapshot weighting that cannot be a coefficient.
+    *
+    * `snapshots.csv` carries three weighting columns and this model reads all three:
+    * `objective` multiplies every cost and divides every nodal price, `stores` is the elapsed
+    * hours of a snapshot and so scales every storage and store balance row, and `generators`
+    * weights an emissions sum and an operational limit. A non-finite value in any of them
+    * reaches a coefficient.
+    *
+    * It '''is''' caught without this, and loudly — but anonymously, which is the whole reason
+    * the check exists. Measured on `operational-limit` with each column emptied in turn:
+    *
+    * {{{
+    * objective   ->  objective coefficient 0 is not finite: NaN
+    * stores      ->  constraint has empty range [NaN, NaN]
+    * generators  ->  entry at (12, 0) is not finite: NaN
+    * }}}
+    *
+    * Not one of those names the snapshot, the column or the file, which is the failure
+    * `TerminalValue` and `Stability` already refuse by name and the one the transmission
+    * limit's own weight guard exists for.
+    *
+    * Reachable because the reader got stricter, not in spite of it. `CsvReader.parseWeighting`
+    * used to read an unparseable cell as 1.0, and pandas writes a NaN weighting as an
+    * '''empty cell''' — so such a network silently became "no weighting" instead. Reading it
+    * faithfully is right, and it moved the diagnosis from a wrong answer to an anonymous
+    * crash; this is the other half of that change.
+    *
+    * Only the three kinds this model reads. `snapshots.csv` can carry others, and a network
+    * with a weighting nothing here consumes is one PyPSA solves — refusing it would be the
+    * over-refusal `max_relative_growth` already taught. And unlike the period weightings,
+    * this runs on '''every''' network: a flat index has snapshot weightings too, which is
+    * exactly what `Periods.reject` cannot check, since it returns early without periods.
+    */
+  private def rejectSnapshotWeightings(network: Network): Unit =
+    Seq("objective", "stores", "generators").foreach { kind =>
+      network.snapshots.indices.foreach { t =>
+        val weighting = network.weighting(kind, t)
+        if !weighting.isFinite then
+          throw new UnsupportedNetwork(
+            s"snapshot ${network.snapshotLabel(t)} has a $kind weighting of $weighting. " +
+              (kind match
+                case "objective" =>
+                  "It multiplies every cost at that snapshot and divides its nodal price"
+                case "stores" =>
+                  "It is the elapsed hours of that snapshot, so it scales every storage and " +
+                    "store balance row there"
+                case _ =>
+                  "It weights the emissions sum and the operational limit at that snapshot") +
+              ", so a non-finite one cannot be a coefficient. An empty cell is what pandas " +
+              "writes for a NaN weighting."
+          )
+      }
+    }
 
   /** Reject a component whose bus does not exist.
     *

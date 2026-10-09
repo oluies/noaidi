@@ -245,6 +245,60 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
           "budget,operational_limit,hydro,<=,500.0\n"),
     )
   }
+  // A non-finite weighting in `investment_periods.csv` reaches the objective, the nodal
+  // prices and three constraint families, and `ComponentTable.periodWeighting` has no filter
+  // of its own. Refused because PyPSA does not: measured on `tx-cost-periods`, an `objective`
+  // weighting of NaN gives `ok/optimal` with an objective of 11,500 and an infinite one gives
+  // `ok/unknown` with 0.0 -- a solve reporting Optimal on a number nobody computed.
+  //
+  // The spellings PyPSA actually writes, which is the point. `export_to_csv_folder` writes a
+  // NaN weighting as an EMPTY CELL (`na_rep=''`) and an infinite one as lowercase `inf` --
+  // measured by exporting such a network and reading the file. `CsvReader` read these two
+  // columns with `toDoubleOption.getOrElse(1.0)`, so neither parsed and both arrived as "no
+  // discounting"; the first version of these tests used `NaN` and `Infinity`, Java's exact
+  // spellings, which do parse and so reached the refusal while the shapes a real export
+  // produces walked straight past it. `parseWeighting` now reads the cells the way a
+  // component column is read.
+  //
+  // The phrase each case asserts is the per-column CONSEQUENCE, not the shared prefix. The two
+  // columns do different jobs -- `objective` multiplies every cost and divides every nodal
+  // price, `years` is read only by a primary-energy sum and an operational limit -- and a
+  // single message saying the first of those about both is the conflation `Periods`' own
+  // docstring exists to prevent. Asserting the prefix would pass on either wording.
+  refuses("an empty investment-period objective weighting", "nodal price") {
+    mutate("tx-cost-periods", "investment_periods.csv",
+           setColumn(_, "objective", (p, w) => if p == "2040" then "" else w))
+  }
+  refuses("a lowercase infinite years weighting", "primary-energy") {
+    mutate("tx-cost-periods", "investment_periods.csv",
+           setColumn(_, "years", (p, w) => if p == "2040" then "inf" else w))
+  }
+  // Java's spellings too, since `NetCdfReader` has no spelling to get wrong and a
+  // hand-written file may use either.
+  refuses("a NaN investment-period objective weighting", "objective weighting of NaN") {
+    mutate("tx-cost-periods", "investment_periods.csv",
+           setColumn(_, "objective", (p, w) => if p == "2040" then "NaN" else w))
+  }
+  // The snapshot weightings, which `CsvReader.parseWeighting` made reachable: an empty cell is
+  // what pandas writes for a NaN, and it used to read as 1.0. All three kinds this model reads
+  // are covered, because each reaches a different coefficient -- and without the refusal each
+  // surfaces as an anonymous failure from inside the builder, measured on `operational-limit`:
+  // "objective coefficient 0 is not finite", "constraint has empty range [NaN, NaN]" and
+  // "entry at (12, 0) is not finite". None names the snapshot, the column or the file.
+  //
+  // On a SINGLE-PERIOD fixture on purpose. The period weightings are refused by
+  // `Periods.reject`, which returns early without periods -- so a flat network is exactly
+  // where that guard cannot help and this one has to.
+  refuses("an empty snapshot objective weighting", "multiplies every cost") {
+    mutate("operational-limit", "snapshots.csv", setColumn(_, "objective", (_, _) => ""))
+  }
+  refuses("an empty snapshot stores weighting", "elapsed hours") {
+    mutate("operational-limit", "snapshots.csv", setColumn(_, "stores", (_, _) => ""))
+  }
+  refuses("an empty snapshot generators weighting", "emissions sum") {
+    mutate("operational-limit", "snapshots.csv", setColumn(_, "generators", (_, _) => ""))
+  }
+
   refuses("a snapshot in an undeclared period", "does not declare") {
     mutate("investment-periods", "snapshots.csv",
            setColumn(_, "period", (i, p) => if i == "3" then "2050" else p))
@@ -302,4 +356,23 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     // deliberately allowed, so this one belongs to `Sclopf` and names the branch.
     val failure = intercept[Sclopf.UnsupportedNetwork](Sclopf.build(network("ac-dc-meshed")))
     assert(failure.getMessage.contains("extendable"), failure.getMessage)
+  }
+
+  test("an unparseable weighting is a malformed file, not a 1.0") {
+    assume(available, "goldens missing")
+    // The other half of the reader fix. `toDoubleOption.getOrElse(1.0)` turned every token it
+    // could not parse into "no weighting", so a typo in `investment_periods.csv` was a
+    // different network solved quietly. `parseWeighting` recognises the tokens
+    // `CsvReader.parseFloat` recognises and refuses the rest, which is what a component column
+    // has always done.
+    // A token with no comma in it. The first version of this test used `0,25` -- a decimal
+    // comma, which is the typo a European spreadsheet actually produces -- and `splitCsv` turns
+    // it into two fields, so the row gained a column, `0` parsed, and nothing was refused. The
+    // reader cannot see that mistake at all, which is a separate gap from this one.
+    val failure = intercept[CsvReader.MalformedNetwork] {
+      mutate("tx-cost-periods", "investment_periods.csv",
+             setColumn(_, "objective", (p, w) => if p == "2040" then "a quarter" else w))
+    }
+    assert(failure.getMessage.contains("investment_periods.objective"),
+      s"the message does not name the column: ${failure.getMessage}")
   }

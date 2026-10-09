@@ -110,17 +110,40 @@ trait CsvFixtures extends munit.Suite, munit.Assertions:
     }
     CsvReader.read(dir, schema, name)
 
-  /** A golden network with one file edited, read back through the reader. */
-  protected def mutate(name: String, file: String, edit: String => String): Network =
-    val dir    = copyOf(name)
-    val target = dir.resolve(file)
-    val before = Files.readString(target)
-    val after  = edit(before)
-    // Otherwise a fixture that silently stops matching turns into a test that
-    // asserts something about an unmodified network.
-    assertNotEquals(after, before, s"the edit to $file changed nothing")
-    Files.writeString(target, after)
+  /** A golden network with several files edited, read back through the reader.
+    *
+    * [[mutate]] takes one file and returns a `Network`, so two of them cannot be composed --
+    * which is fine until a case needs two files changed at once to say anything. The first
+    * such case was the `bus0` rule on a transmission capacity limit: it needs a branch made
+    * extendable with the capped carrier in `lines.csv` '''and''' the cap moved in
+    * `global_constraints.csv`, because either edit alone leaves a network where the rule is
+    * invisible.
+    *
+    * Every edit has to change its file, for the reason [[mutate]] gives: a fixture that
+    * silently stops matching turns into a test asserting something about an unmodified
+    * network.
+    */
+  protected def mutateAll(name: String, edits: (String, String => String)*): Network =
+    val dir = copyOf(name)
+    edits.foreach { (file, edit) =>
+      val target = dir.resolve(file)
+      val before = Files.readString(target)
+      val after  = edit(before)
+      assertNotEquals(after, before, s"the edit to $file changed nothing")
+      Files.writeString(target, after)
+    }
     CsvReader.read(dir, schema, name)
+
+  /** A golden network with one file edited, read back through the reader.
+    *
+    * Delegates rather than repeating [[mutateAll]]'s body. It had the body copied at first,
+    * which is the idiom this whole file exists to replace — see the note at the top about a
+    * helper that was added for one suite and then reappeared by hand in another. Two copies
+    * of the "the edit to $file changed nothing" guard can drift apart, and the one that
+    * drifts is the one nobody is looking at.
+    */
+  protected def mutate(name: String, file: String, edit: String => String): Network =
+    mutateAll(name, file -> edit)
 
   override def afterAll(): Unit =
     temporaries.foreach { dir =>

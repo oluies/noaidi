@@ -1,0 +1,2 @@
+name,type,carrier_attribute,sense,constant
+tx,transmission_expansion_cost_limit,AC,<=,1300.0

@@ -52,6 +52,36 @@ object MilpReport:
       if relaxationStatus != SolveStatus.Optimal then None
       else Some(math.abs(oracleObjective - relaxation) / math.max(1.0, math.abs(oracleObjective)))
 
+  /** The table header.
+    *
+    * CI's job summary extracts the table by matching `^instance `, so this
+    * line's leading token is load-bearing beyond the human reader.
+    */
+  private val header =
+    f"${"instance"}%-18s ${"size"}%-16s ${"int"}%4s ${"prima"}%-9s ${"ojalgo"}%-9s " +
+      f"${"prima obj"}%14s ${"ojalgo obj"}%14s ${"rel gap"}%9s ${"int gap"}%9s " +
+      f"${"nodes"}%7s ${"unprv"}%6s ${"prima ms"}%9s ${"ojalgo ms"}%10s"
+
+  /** One instance's line, kept next to [[header]] so the columns and their
+    * widths cannot drift apart now that the two are printed from different
+    * places.
+    *
+    * Every numeric column is blanked unless both solvers reached `Optimal`: a
+    * gap against an objective one side never established is not a measurement,
+    * and printing it would read as agreement.
+    */
+  private def render(r: Row): String =
+    val comparable = r.oracleStatus == MilpStatus.Optimal && r.primaStatus == MilpStatus.Optimal
+    val mineObj    = if comparable then f"${r.primaObjective}%14.6f" else f"${"-"}%14s"
+    val theirsObj  = if comparable then f"${r.oracleObjective}%14.6f" else f"${"-"}%14s"
+    val gap        = if comparable then f"${r.relativeGap}%9.2e" else f"${"-"}%9s"
+    val intGap     = r.integralityGap match
+      case Some(g) if comparable => f"$g%9.2e"
+      case _                     => f"${"-"}%9s"
+    f"${r.name}%-18s ${r.size}%-16s ${r.integers}%4d ${r.primaStatus}%-9s ${r.oracleStatus}%-9s " +
+      f"$mineObj $theirsObj $gap $intGap ${r.nodes}%7d ${r.unproven}%6d " +
+      f"${r.primaMillis}%9d ${r.oracleMillis}%10d"
+
   def main(args: Array[String]): Unit =
     java.util.Locale.setDefault(java.util.Locale.ROOT)
     println(ValidationLadder.host)
@@ -59,7 +89,25 @@ object MilpReport:
     val params = MilpLadder.params
     val lp     = params.lp
 
+    // The header goes out before the first solve, and each row as its instance
+    // finishes, rather than all nine lines after the last one.
+    //
+    // `rows` used to be built in full before anything was printed, so a search
+    // that ran past CI's ten-minute `timeout` left a log containing the step's
+    // own kill message and not one row -- the report existed only in a value
+    // that never got printed. Which instance had diverged was then a guess. The
+    // order of the output is unchanged, so the job summary still finds its
+    // table by the `^instance ` header.
+    println(header)
+
     val rows = MilpLadder.instances.map { instance =>
+      // On stderr, so it stays out of `milp-report.txt` and the job summary
+      // while still landing in the log. `BnbParams.timeLimitMillis` should now
+      // end a degenerate search with `Feasible` and a FAIL line rather than let
+      // it reach the step's `timeout`, but this marker costs nothing and covers
+      // the case that limit cannot: it is checked between nodes, so a single
+      // node's LP running to its 200,000-iteration cap overruns it uninterrupted.
+      System.err.println(s"solving ${instance.name}")
       val relaxed = Pdhg.solve(instance.problem, lp)
 
       val startMine = System.currentTimeMillis()
@@ -70,7 +118,7 @@ object MilpReport:
       val theirs      = OjAlgoMilp.solve(instance.problem, instance.integers)
       val theirsMs    = System.currentTimeMillis() - startTheirs
 
-      Row(
+      val row = Row(
         name = instance.name,
         size = s"${instance.problem.numVariables}v/${instance.problem.numConstraints}c/" +
           s"${instance.problem.constraintMatrix.nnz}nz",
@@ -87,27 +135,8 @@ object MilpReport:
         relaxationStatus = relaxed.status,
         primaPrimal = mine.primal,
       )
-    }
-
-    println(
-      f"${"instance"}%-18s ${"size"}%-16s ${"int"}%4s ${"prima"}%-9s ${"ojalgo"}%-9s " +
-        f"${"prima obj"}%14s ${"ojalgo obj"}%14s ${"rel gap"}%9s ${"int gap"}%9s " +
-        f"${"nodes"}%7s ${"unprv"}%6s ${"prima ms"}%9s ${"ojalgo ms"}%10s"
-    )
-
-    rows.foreach { r =>
-      val comparable = r.oracleStatus == MilpStatus.Optimal && r.primaStatus == MilpStatus.Optimal
-      val mineObj    = if comparable then f"${r.primaObjective}%14.6f" else f"${"-"}%14s"
-      val theirsObj  = if comparable then f"${r.oracleObjective}%14.6f" else f"${"-"}%14s"
-      val gap        = if comparable then f"${r.relativeGap}%9.2e" else f"${"-"}%9s"
-      val intGap     = r.integralityGap match
-        case Some(g) if comparable => f"$g%9.2e"
-        case _                     => f"${"-"}%9s"
-      println(
-        f"${r.name}%-18s ${r.size}%-16s ${r.integers}%4d ${r.primaStatus}%-9s ${r.oracleStatus}%-9s " +
-          f"$mineObj $theirsObj $gap $intGap ${r.nodes}%7d ${r.unproven}%6d " +
-          f"${r.primaMillis}%9d ${r.oracleMillis}%10d"
-      )
+      println(render(row))
+      row
     }
 
     val comparable = rows.filter(r =>

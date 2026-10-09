@@ -89,7 +89,29 @@ object MilpLadder:
     * 100,000 default in the suite.
     */
   val params: BnbParams =
-    BnbParams(lp = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000), maxNodes = 50_000)
+    BnbParams(
+      lp = PdhgParams(epsAbs = 1e-9, epsRel = 1e-9, maxIterations = 200_000),
+      maxNodes = 50_000,
+      // A wall-clock bound as well as a bound in work, because the bound in work
+      // cannot hold the report inside CI's ten-minute step budget. 50,000 nodes
+      // against a 200,000-iteration LP is on the order of 10^10 iterations, so
+      // exhausting the node budget takes thousands of seconds, not ten minutes.
+      //
+      // A healthy run is nowhere near either: the whole ladder is around 420
+      // nodes and under 100ms of search, because a node's relaxation converges
+      // in a few hundred iterations. What makes the node budget reachable is a
+      // node whose relaxation stops converging and runs to its iteration cap --
+      // a thousandfold rise in per-node cost -- and that is exactly the state a
+      // degenerate search reaches. `timeout` then kills the step, and a killed
+      // step reports nothing at all.
+      //
+      // Hitting this limit instead leaves the search `Feasible`, which
+      // `MilpReport` already fails on by name, so the same degeneration becomes
+      // a named failure with a printed report. Per instance, so all nine stay
+      // well inside the step budget; and ~500x the slowest healthy instance, so
+      // a slow runner cannot trip it.
+      timeLimitMillis = Some(20_000L),
+    )
 
   /** The ladder.
     *

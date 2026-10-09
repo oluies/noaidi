@@ -650,8 +650,16 @@ jobs:
     # seconds over its last five green runs, and then wedged for nearly two
     # hours in `MilpReport` on JDK 21 while its JDK 25 twin did the same work in
     # 47 seconds. With no limit anywhere it would have held a runner until
-    # GitHub's six-hour default. `BnbParams` bounds the search at 50,000 nodes
-    # and 200,000 LP iterations, which is a bound in work and not in wall time.
+    # GitHub's six-hour default.
+    #
+    # `BnbParams` bounds the search at 50,000 nodes and 200,000 LP iterations,
+    # and that was once described here as protection. It is not: the product is
+    # on the order of 10^10 iterations, so a search that reaches the node budget
+    # runs for thousands of seconds and the step's `timeout` kills it. It now
+    # also carries `timeLimitMillis`, which is a bound in wall time per
+    # instance, chosen so all nine finish well inside the step budget. That
+    # turns a degenerate search into `Feasible` plus a FAIL line -- which
+    # `MilpReport` already treats as a failure -- instead of an opaque kill.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -700,7 +708,7 @@ jobs:
           timeout 600 sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
             | tee milp-report.txt || status=$?
           if [ "$status" -eq 124 ]; then
-            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. This is the step that wedged for nearly two hours on JDK 21 while JDK 25 did the same work in 47 seconds; the search is deterministic, so a repeat is a branch-and-bound defect rather than a slow runner."
+            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, so look for one LP running to its iteration cap rather than a slow runner. The rows printed before this point name the instances that did finish."
           fi
           exit "$status"
 

@@ -1325,15 +1325,6 @@ object Lopf:
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
 
-  /** Reject a component whose bus does not exist.
-    *
-    * A branch with a stale endpoint contributes a term at only its valid end, so
-    * its flow becomes a free source or sink bounded only by its rating and the
-    * objective comes out cheaper than the real network's. A generator or load
-    * with a bad bus simply vanishes. Both stay feasible, and a dropped load makes
-    * the answer cheaper with no diagnostic -- so this is loud, matching
-    * `Topology.danglingReferences`, which the model layer already made throw.
-    */
   /** Refuse a snapshot weighting that cannot be a coefficient.
     *
     * `snapshots.csv` carries three weighting columns and this model reads all three:
@@ -1388,6 +1379,15 @@ object Lopf:
       }
     }
 
+  /** Reject a component whose bus does not exist.
+    *
+    * A branch with a stale endpoint contributes a term at only its valid end, so
+    * its flow becomes a free source or sink bounded only by its rating and the
+    * objective comes out cheaper than the real network's. A generator or load
+    * with a bad bus simply vanishes. Both stay feasible, and a dropped load makes
+    * the answer cheaper with no diagnostic -- so this is loud, matching
+    * `Topology.danglingReferences`, which the model layer already made throw.
+    */
   private def rejectDanglingBuses(network: Network): Unit =
     Topology.danglingBusReferences(network).headOption.foreach { (component, id, port, bus) =>
       throw new UnsupportedNetwork(s"$component '$id' references unknown bus '$bus' via $port")

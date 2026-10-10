@@ -567,5 +567,24 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|pv": 1400.0,
+   "Generator|slack": 6250.0
+  },
+  "opex|carrier": {
+   "Generator|-": 7650.0
+  },
+  "supply|bus": {
+   "Generator|pv": 140.0,
+   "Generator|slack": 125.0,
+   "Line|pq": 220.0,
+   "Line|pv": 23.88889
+  },
+  "supply|carrier": {
+   "Generator|-": 265.0,
+   "Line|AC": 243.88889
+  }
  }
 }

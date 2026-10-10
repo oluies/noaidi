@@ -41,8 +41,9 @@ optimisation.
 | `network-lopf` | L2: linear optimal power flow with storage, stores, capacity expansion, delayed links and multi-investment periods, N-1 security-constrained LOPF, and unit commitment via Prima's branch-and-bound. |
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
+| `network-stats` | L3: PyPSA's `statistics` in SQL. Loads a solved result into an in-memory DuckDB and answers metrics as queries. A consumer of the solve — nothing below it knows it exists, and the cross-build is untouched. Two of nineteen metrics so far; see [`docs/network-stats-design.md`](docs/network-stats-design.md). |
 
-1,036 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
+1,072 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
 runs as a separate step, plus 48 in the opt-in Netlib module and 20 in
 `prima-cyfra`, which need hardware and a corpus no runner has.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible
@@ -70,6 +71,9 @@ is the cell that would settle it — see [`HPC.md`](HPC.md).
   the numerical caveats, and the known gaps.
 - [`docs/pypsa-and-noaidi.md`](docs/pypsa-and-noaidi.md) — the same constraint written
   in PyPSA's linopy and in this port, side by side, and what each stack is better at.
+- [`docs/network-stats-design.md`](docs/network-stats-design.md) — why DuckDB sits
+  downstream of the solve rather than underneath the network, and the six things
+  building the first two metrics proved the design note had wrong.
 - [`modules/demo-js/README.md`](modules/demo-js/README.md) — Prima and the model layer
   compiled to JavaScript, what that costs, and what still bounds it.
 

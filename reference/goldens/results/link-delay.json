@@ -665,5 +665,19 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b": 9000.0
+  },
+  "opex|carrier": {
+   "Generator|-": 9000.0
+  },
+  "supply|bus": {
+   "Generator|b": 100.0
+  },
+  "supply|carrier": {
+   "Generator|-": 100.0
+  }
  }
 }

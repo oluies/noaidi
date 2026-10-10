@@ -738,5 +738,34 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|A|2030": 420.0,
+   "Generator|A|2040": 230.0,
+   "Generator|B|2030": 1440.0,
+   "Generator|B|2040": 360.0,
+   "Generator|C|2030": 10000.0
+  },
+  "opex|carrier": {
+   "Generator|-|2030": 11860.0,
+   "Generator|-|2040": 590.0
+  },
+  "supply|bus": {
+   "Generator|A|2030": 84.0,
+   "Generator|A|2040": 184.0,
+   "Generator|B|2030": 16.0,
+   "Generator|B|2040": 16.0,
+   "Generator|C|2030": 100.0,
+   "Line|B|2030": 84.0,
+   "Line|B|2040": 84.0,
+   "Line|C|2040": 100.0
+  },
+  "supply|carrier": {
+   "Generator|-|2030": 200.0,
+   "Generator|-|2040": 200.0,
+   "Line|AC|2030": 84.0,
+   "Line|AC|2040": 184.0
+  }
  }
 }

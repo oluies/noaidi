@@ -638,5 +638,23 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|A": 1300.0
+  },
+  "opex|carrier": {
+   "Generator|-": 1300.0
+  },
+  "supply|bus": {
+   "Generator|A": 130.0,
+   "Line|B": 45.34884,
+   "Line|C": 130.0,
+   "Line|D": 18.13953
+  },
+  "supply|carrier": {
+   "Generator|-": 130.0,
+   "Line|AC": 193.48837
+  }
  }
 }

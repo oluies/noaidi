@@ -990,5 +990,26 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|a": 19000.0,
+   "Generator|b": 19150.0,
+   "Link|a": 90.0
+  },
+  "opex|carrier": {
+   "Generator|-": 38150.0,
+   "Link|AC": 90.0
+  },
+  "supply|bus": {
+   "Generator|a": 1270.0,
+   "Generator|b": 830.0,
+   "Link|a": 5.0,
+   "Link|b": 185.0
+  },
+  "supply|carrier": {
+   "Generator|-": 2100.0,
+   "Link|AC": 190.0
+  }
  }
 }

@@ -436,6 +436,7 @@ lazy val primaNetlib = project
 // set of case classes. The schema is read from the pinned PyPSA install's own
 // registry (reference/goldens/schema.json), which is why upickle is here.
 val upickleVersion = "4.4.3"
+val duckdbVersion  = "1.3.1.0"
 val jhdfVersion    = "0.13.0"
 
 // Where the network modules find the goldens and the port's own sources.
@@ -593,6 +594,35 @@ lazy val primaOrtools = project
     Test / fork := true,
   )
 
+// L3: statistics over a solved result, answered in SQL.
+//
+// DuckDB as a CONSUMER of the solve, never as the store underneath it. PyPSA's `statistics`
+// is nineteen metrics over seven grouping dimensions and three time aggregations, which is
+// group-by-and-aggregate with a cross product -- nineteen hand-written folds each carrying
+// its own grouping parameter is the version that rots. See `docs/network-stats-design.md`
+// for why the same argument does NOT extend to `network-model`.
+//
+// JVM only, and deliberately so. DuckDB is a JNI library; DuckDB-Wasm is a separate artifact
+// with an async Arrow API, and no single Scala source targets both. There is no
+// `networkStatsJs` and there must not be one: `demoJs` links `networkModelJs` and solves an
+// LP in the browser, so a native dependency anywhere in that graph ends the demo.
+lazy val networkStats = project
+  .in(file("modules/network-stats"))
+  // `test->test` for `CsvFixtures`, which is where the golden-network loading lives.
+  .dependsOn(networkLopf % "compile->compile;test->test", networkModel % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name := "network-stats",
+    // Forked, because DuckDB loads a native library into the JVM and sbt reuses its own.
+    Test / fork := true,
+    // The goldens hold PyPSA's own `statistics`, which is what the metrics are compared
+    // against. Absolute, for the reason `referenceEnv` gives: a forked test JVM does not run
+    // from the repository root, so a relative default resolves to nothing and every test
+    // that needs the fixtures reports as SKIPPED rather than failed.
+    Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
+    libraryDependencies += "org.duckdb" % "duckdb_jdbc" % duckdbVersion,
+  )
+
 lazy val root = project
   .in(file("."))
   .aggregate(
@@ -606,6 +636,7 @@ lazy val root = project
     networkLopf,
     networkPf,
     networkIo,
+    networkStats,
   )
   .settings(
     name := "noaidi",

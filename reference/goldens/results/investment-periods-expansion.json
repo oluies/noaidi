@@ -976,5 +976,23 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b|2030": 8000.0,
+   "Generator|b|2040": 175.0
+  },
+  "opex|carrier": {
+   "Generator|-|2030": 8000.0,
+   "Generator|-|2040": 175.0
+  },
+  "supply|bus": {
+   "Generator|b|2030": 200.0,
+   "Generator|b|2040": 190.0
+  },
+  "supply|carrier": {
+   "Generator|-|2030": 200.0,
+   "Generator|-|2040": 190.0
+  }
  }
 }

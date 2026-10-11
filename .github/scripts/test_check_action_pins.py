@@ -2,13 +2,22 @@
 """Tests for `check_action_pins.py`.
 
 These existed as a shell session and a paragraph in a commit message, which is
-worth nothing to the next person: the script's logic is glob matching, tree
-walking, a set comparison and an error/warning split, and its failure mode is a
-check that passes while the invariant it names is broken.
+worth nothing to the next person: the script's logic is globbing, tree walking
+and a regex over version strings, and its failure mode is a check that passes
+while the invariant it names is broken.
 
 Plain asserts and a `__main__`, deliberately. The whole argument for pinning
-`pyyaml` in the workflow is that a check about dependency discipline should not
-be casual about its own, and adding pytest to buy `assert` would undercut it.
+`pyyaml` and `json5` in the workflow is that a check about dependency discipline
+should not be casual about its own, and adding pytest to buy `assert` would
+undercut it.
+
+Rewritten when Renovate replaced Dependabot. The cases that went away were about
+`dependabot.yml`'s `ignore` list -- an entry matching nothing, an entry
+suppressing the wrong update types, an action missing from the list -- none of
+which is a state that can exist now: Renovate needs no such list, because it
+offers only the next major for a floating tag. The cases about *pinning* stayed
+and became errors rather than a cross-check, and two are new, for the Renovate
+config itself.
 
     python3 .github/scripts/test_check_action_pins.py
 """
@@ -24,19 +33,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from check_action_pins import check  # noqa: E402
 
-IGNORE = """\
-version: 2
-updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    ignore:
-{entries}
-"""
-
-ENTRY = """\
-      - dependency-name: "{name}"
-        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
-"""
+# The shape that matters, not the whole file: `enabledManagers` is the only key
+# the checker reads, and a fixture carrying the rest would drift from the real
+# config without testing anything more.
+CONFIG = '{\n  // a comment, because the real file is json5 for its comments\n  enabledManagers: ["github-actions"],\n}\n'
 
 
 def workflow(*uses: str) -> str:
@@ -57,124 +57,124 @@ def run(files: dict[str, str]) -> tuple[int, str, str]:
         return code, out.getvalue(), err.getvalue()
 
 
-def tree(*, uses: tuple[str, ...], ignored: tuple[str, ...], workflow_name: str = "ci.yml") -> dict[str, str]:
-    entries = "".join(ENTRY.format(name=n) for n in ignored)
+def tree(*, uses: tuple[str, ...], workflow_name: str = "ci.yml", config: str = CONFIG) -> dict[str, str]:
     return {
         f".github/workflows/{workflow_name}": workflow(*uses),
-        ".github/dependabot.yml": IGNORE.format(entries=entries),
+        ".github/renovate.json5": config,
     }
 
 
 CASES: list[tuple[str, dict[str, str], int, str]] = [
     (
-        "a floating-major action in the ignore list passes",
-        tree(uses=("actions/checkout@v7",), ignored=("actions/checkout",)),
+        "floating-major pins pass",
+        tree(uses=("actions/checkout@v7", "sbt/setup-sbt@v1")),
         0,
-        "every ignored action is floating-major pinned",
+        "all floating-major pinned",
     ),
     (
-        "an ignored action pinned to a SHA is an error",
-        tree(uses=("actions/checkout@" + "a" * 40,), ignored=("actions/checkout",)),
+        "a SHA pin is an error",
+        tree(uses=("actions/checkout@" + "a" * 40,)),
         1,
-        "freezes it silently",
+        "not a floating major tag",
     ),
     (
-        "an ignored action pinned to an exact version is an error",
-        tree(uses=("actions/checkout@v7.1.2",), ignored=("actions/checkout",)),
+        "an exact version pin is an error",
+        tree(uses=("actions/checkout@v7.1.2",)),
         1,
-        "freezes it silently",
+        "not a floating major tag",
     ),
     (
-        "an ignore entry matching nothing in use is an error",
-        tree(uses=("actions/checkout@v7",), ignored=("actions/checkout", "actions/nowhere")),
+        "a branch pin is an error",
+        tree(uses=("actions/checkout@main",)),
         1,
-        "matches no action",
+        "not a floating major tag",
     ),
     (
-        "a new floating-major action is a warning, not an error",
-        tree(uses=("actions/checkout@v7", "astral-sh/setup-uv@v7"), ignored=("actions/checkout",)),
-        0,
-        "::warning::astral-sh/setup-uv",
+        "one action pinned two ways reports the loose pin only",
+        {
+            ".github/workflows/ci.yml": workflow("actions/checkout@v7"),
+            ".github/workflows/pages.yml": workflow("actions/checkout@v7.1.2"),
+            ".github/renovate.json5": CONFIG,
+        },
+        1,
+        "['v7', 'v7.1.2'], and ['v7.1.2'] is not",
     ),
     (
         "a .yaml workflow is scanned too",
-        tree(uses=("actions/checkout@" + "b" * 40,), ignored=("actions/checkout",), workflow_name="ci.yaml"),
+        tree(uses=("actions/checkout@" + "b" * 40,), workflow_name="ci.yaml"),
         1,
-        "freezes it silently",
+        "not a floating major tag",
     ),
     (
-        "a root action.yml is scanned, as Dependabot scans it",
+        "a root action.yml is scanned",
         {
-            **tree(uses=("actions/checkout@v7",), ignored=("actions/checkout",)),
-            "action.yml": "name: a\nruns:\n  using: composite\n  steps:\n    - uses: sbt/setup-sbt@v1\n",
+            **tree(uses=("actions/checkout@v7",)),
+            "action.yml": "name: a\nruns:\n  using: composite\n  steps:\n    - uses: sbt/setup-sbt@v1.2\n",
         },
-        0,
-        "::warning::sbt/setup-sbt",
+        1,
+        "sbt/setup-sbt is pinned to ['v1.2']",
     ),
     (
         "a commented-out uses: is not counted",
         {
             ".github/workflows/ci.yml": "name: w\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
-            "    steps:\n      - uses: actions/checkout@v7\n      # - uses: astral-sh/setup-uv@v7\n",
-            ".github/dependabot.yml": IGNORE.format(entries=ENTRY.format(name="actions/checkout")),
+            "    steps:\n      - uses: actions/checkout@v7\n      # - uses: astral-sh/setup-uv@main\n",
+            ".github/renovate.json5": CONFIG,
         },
         0,
         "1 files, 1 actions",
     ),
     (
-        "a glob entry with different casing resolves",
-        tree(uses=("actions/checkout@v7", "actions/setup-java@v5"), ignored=("Actions/*",)),
+        "a local composite reference has no version to pin and is skipped",
+        tree(uses=("actions/checkout@v7", "./.github/actions/local")),
         0,
-        "every ignored action is floating-major pinned",
+        "1 actions",
     ),
     (
-        "an ignore entry with no update-types is an error",
-        {
-            ".github/workflows/ci.yml": workflow("actions/checkout@v7"),
-            ".github/dependabot.yml": "version: 2\nupdates:\n  - package-ecosystem: \"github-actions\"\n"
-            "    directory: \"/\"\n    ignore:\n      - dependency-name: \"actions/checkout\"\n",
-        },
-        1,
-        "every update type",
-    ),
-    (
-        "an ignore entry that also suppresses majors is an error",
-        {
-            ".github/workflows/ci.yml": workflow("actions/checkout@v7"),
-            ".github/dependabot.yml": "version: 2\nupdates:\n  - package-ecosystem: \"github-actions\"\n"
-            "    directory: \"/\"\n    ignore:\n      - dependency-name: \"actions/checkout\"\n"
-            "        update-types: [\"version-update:semver-patch\", \"version-update:semver-minor\", "
-            "\"version-update:semver-major\"]\n",
-        },
-        1,
-        "unexpected ['version-update:semver-major']",
+        "a docker:// reference is skipped",
+        tree(uses=("actions/checkout@v7", "docker://alpine:3.20")),
+        0,
+        "1 actions",
     ),
     (
         "no scanned files at all is an error, not a silent pass",
-        {".github/dependabot.yml": IGNORE.format(entries=ENTRY.format(name="actions/checkout"))},
+        {".github/renovate.json5": CONFIG},
         1,
         "has a directory moved?",
     ),
     (
-        "a dependabot.yml with no updates list is reported clearly",
-        {".github/workflows/ci.yml": workflow("actions/checkout@v7"), ".github/dependabot.yml": "version: 2\n"},
+        "no Renovate configuration at all is an error",
+        {".github/workflows/ci.yml": workflow("actions/checkout@v7")},
         1,
-        "no `updates` list",
+        "no Renovate configuration found",
     ),
     (
-        "a dependabot.yml with no github-actions ecosystem is reported clearly",
+        "two Renovate configurations are an error, because only the first is read",
         {
             ".github/workflows/ci.yml": workflow("actions/checkout@v7"),
-            ".github/dependabot.yml": "version: 2\nupdates:\n  - package-ecosystem: \"npm\"\n    directory: \"/\"\n",
+            "renovate.json": '{"enabledManagers": ["github-actions"]}',
+            ".github/renovate.json5": CONFIG,
         },
         1,
-        "no `github-actions` entry",
+        "several Renovate configurations exist",
     ),
     (
-        "a local composite reference has no version to pin and is skipped",
-        tree(uses=("actions/checkout@v7", "./.github/actions/local"), ignored=("actions/checkout",)),
-        0,
-        "1 actions",
+        "a Renovate configuration that does not parse is reported as such",
+        tree(uses=("actions/checkout@v7",), config="{ enabledManagers: [ \n"),
+        1,
+        "does not parse",
+    ),
+    (
+        "widening enabledManagers to sbt is an error",
+        tree(uses=("actions/checkout@v7",), config='{ enabledManagers: ["github-actions", "sbt"] }'),
+        1,
+        "puts two bots on the same dependencies",
+    ),
+    (
+        "omitting enabledManagers is an error, since the default is every manager",
+        tree(uses=("actions/checkout@v7",), config="{ labels: [\"dependencies\"] }"),
+        1,
+        "enabledManagers to None",
     ),
 ]
 

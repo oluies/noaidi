@@ -158,23 +158,11 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
       mutate("store-bank", "stores.csv", setColumn(_, attribute, "1.0"))
     }
   }
-  // The two that were missing, and the only ones in this suite that an existing golden
-  // already triggers rather than needing a mutation: `ac-pf-pv` ships
-  // `generators-p_set.csv`. It is kept as the unmutated network for that reason -- it is
-  // the shape PyPSA exported, and the file is a series rather than a static column, which
-  // is the half of the predicate a `setColumn` mutation would not reach.
-  refuses("Generator p_set", "p_set") {
-    network("ac-pf-pv")
-  }
-  refuses("Link p_set", "p_set") {
-    mutate("ac-dc-meshed", "links.csv", setColumn(_, "p_set", "1.0"))
-  }
-  // Zero, not merely non-zero. A `p_set` of 0.0 holds the unit off and is as much a
-  // constraint as any other value; a predicate written as `!= 0.0` -- the obvious shape, and
-  // wrong -- passes every case above and fails this one.
-  refuses("Generator p_set of zero", "p_set") {
-    mutate("ac-dc-meshed", "generators.csv", setColumn(_, "p_set", "0.0"))
-  }
+  // `Generator` and `Link` `p_set` were refused here for exactly one release and are now
+  // built -- see `FixedDispatch` and `FixedDispatchSuite`. Three cases deleted in the change
+  // that implemented them, which is what the heading above says to do with a gap that closes.
+  // The infinite case moved there too: it is still a refusal, but of a value rather than of a
+  // feature, so it belongs beside the builder that reads it.
 
   // Global constraints: PyPSA dispatches on `type` to entirely different
   // builders, so the wrong one is a different constraint wearing the same

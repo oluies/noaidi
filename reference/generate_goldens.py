@@ -1244,6 +1244,88 @@ def growth_limit():
     return n
 
 
+def fixed_dispatch():
+    """A generator and a link held at a set point, which this port read nowhere.
+
+    `define_fixed_operation_constraints` fixes a dispatch variable to its `<attr>_set`, and
+    `Generator.p_set` and `Link.p_set` were read by PyPSA's optimiser and by nothing here --
+    so the LP solved the unconstrained problem and returned `Optimal`. `ac-pf-pv` had carried
+    a generator `p_set` for as long as the gap existed and nothing compared its LOPF result:
+    2,650 here against upstream's 7,650.
+
+    That fixture cannot be this one. It is the AC power flow's, where `p_set` is an *input*
+    to `pf` rather than a constraint, so it has to keep the values Newton-Raphson needs.
+
+    Both set points bind AGAINST the free optimum, which is the only way either says
+    anything:
+
+      - `pinned` bids 80 and would never run; `p_set` forces it to 50/20/70 and `cheap`
+        backs off by the same amount. Measured against the 28,400 optimum, dropping its
+        equality gives 18,600.
+      - `tie` would carry its full 200 MW, because bus `a` is cheap and bus `b` is dear;
+        `p_set` holds it at 120 and `local` makes up the 80. Dropping its equality: 18,800.
+
+    Dropping both gives 9,000, so the two are separated from each other as well as from the
+    free problem -- a fixture where the pair happened to coincide would pass with either one
+    read and the other dropped. The first version of this docstring quoted 23,000 and 25,200,
+    which were derived rather than measured and were both wrong.
+
+    One is a **series** and the other a **static** column, deliberately: `p_set` is
+    `static or series` upstream, and a series with no static counterpart is invisible to a
+    `static.contains` check -- the same trap `ramp_limits` records for `ramp_limit_up`.
+
+    `spare` never runs. It is what leaves the problem a degree of freedom to resolve by cost:
+    with it, `local` at 50 is chosen over `spare` at 200 and the nodal prices are 10 at `a`
+    and 50 at `b`. Without it every variable is determined by the balances and the two pins,
+    and the fixture would pass under any marginal cost at all.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+
+    n.add("Bus", "a", v_nom=110.0)
+    n.add("Bus", "b", v_nom=110.0)
+
+    n.add("Generator", "cheap", bus="a", p_nom=300.0, marginal_cost=10.0)
+    n.add("Generator", "pinned", bus="a", p_nom=100.0, marginal_cost=80.0,
+          p_set=[50.0, 20.0, 70.0])
+    n.add("Generator", "local", bus="b", p_nom=300.0, marginal_cost=50.0)
+    n.add("Generator", "spare", bus="b", p_nom=300.0, marginal_cost=200.0)
+
+    n.add("Link", "tie", bus0="a", bus1="b", p_nom=200.0, p_set=120.0)
+
+    n.add("Load", "da", bus="a", p_set=[100.0] * 3)
+    n.add("Load", "db", bus="b", p_set=[200.0] * 3)
+    return n
+
+
+def fixed_dispatch_periods():
+    """A set point on an asset that does not exist yet, which PyPSA masks away.
+
+    `mask = active & (~fix.isnull())`, and the first half is the one with teeth. `new` carries
+    `p_set` at every snapshot and is built in 2040, so upstream pins it in the second period
+    and leaves the first alone.
+
+    This port pins an inactive asset's column to `[0, 0]` -- see `Lopf.activeBounds` -- so an
+    equality emitted at a snapshot the asset is absent from reads `0 = 40` and the LP is
+    **infeasible**. Unmasked, that is the answer; masked, it is 20,400. A wrong reading here
+    does not cost accuracy, it invents a verdict PyPSA never reaches and blames the network
+    for it, which is why this is a separate fixture rather than a column added to
+    `fixed-dispatch`.
+
+    Static rather than a series, because the mask has to be read off `build_year` and
+    `lifetime` rather than off which cells the file happens to carry. A series written only
+    for the active snapshots would pass with no mask at all.
+    """
+    n = pypsa.Network()
+    _two_periods(n)
+
+    n.add("Generator", "old", bus="b", p_nom=200.0, marginal_cost=20.0, build_year=2030)
+    n.add("Generator", "new", bus="b", p_nom=100.0, marginal_cost=90.0, build_year=2040,
+          p_set=40.0)
+    n.add("Load", "d", bus="b", p_set=[100.0] * 6)
+    return n
+
+
 def _per_period_prices(n):
     """A gas price that is cheap once inside the first period and dear throughout the second.
 
@@ -1887,6 +1969,8 @@ NETWORKS = {
     "store-bank": store_bank,
     "unit-commitment": unit_commitment,
     "ac-pf-pv": ac_pf_pv,
+    "fixed-dispatch": fixed_dispatch,
+    "fixed-dispatch-periods": fixed_dispatch_periods,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
     "ac-dc-txvolume": ac_dc_txvolume,
@@ -1937,6 +2021,7 @@ STATISTICS_METRICS = ("supply", "opex")
 # it -- but nothing validated the weighting either, and the port applies it
 # unconditionally.
 MULTI_INVEST = frozenset({
+    "fixed-dispatch-periods",
     "investment-periods",
     "investment-periods-discounted",
     "investment-periods-expansion",

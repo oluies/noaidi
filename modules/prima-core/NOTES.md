@@ -424,17 +424,17 @@ failure the audit is supposed to catch.
 - **Security-constrained expansion of the transmission.** `Sclopf` refuses an
   extendable *branch*; extendable generation is allowed. See the SCLOPF section
   below for why the distinction matters and how it was got wrong first.
-- **Dispatch set points, on every component that has one.** `p_set` on a
-  `StorageUnit` pins the net `p_dispatch − p_store` and
+- **Set points on a storage unit's power, and on either of a store's variables.**
+  `p_set` on a `StorageUnit` pins the net `p_dispatch − p_store` and
   `p_dispatch_set`/`p_store_set` pin them individually — three different
   constraints. A `Store`'s `e_set` and `p_set` are both refused, the latter
   because PyPSA pins it too, out of the generic loop, and admitting it silently
-  would drop exactly the constraint the other refusal exists for. `Generator`
-  and `Link` are refused as well, and were the hole in this entry for as long as
-  it existed: `ac-pf-pv` carries a generator `p_set`, and this port answered
-  2,650 against PyPSA's 7,650 with no diagnostic until a statistics metric read
-  that golden's LOPF result for the first time. See *`<attr>_set` fixes dispatch;
-  the two reachable cases are now refused*, which also records that the two
+  would drop exactly the constraint the other refusal exists for.
+- ~~**`Generator.p_set` and `Link.p_set`.**~~ Built — see *`<attr>_set` fixes
+  dispatch; `Generator` and `Link` are now built*. Struck through rather than
+  deleted, because the reason it was listed is the reason this list exists: it
+  had an entry here and no code site, and `ac-pf-pv` was silently triggering it
+  for as long as the fixture had existed. That section also records that the two
   `s_set` names in PyPSA's own docstring are not attributes of anything.
 - ~~**Multi-investment periods, and `Link.delay`.**~~ Both are built — see *The
   two the sweep left* below for the mis-solves that got them onto this list, and
@@ -1445,48 +1445,85 @@ Guarding it needs a delayed link with a non-zero `p_set`, and that is **blocked
 behind a gap found while trying to build one** — see below. Recorded as unguarded
 rather than quietly left claiming otherwise.
 
-### `<attr>_set` fixes dispatch; the two reachable cases are now refused
+### `<attr>_set` fixes dispatch; `Generator` and `Link` are now built
 
-Trying to give a delay fixture a link `p_set` turned the LOPF answer from 500
-into 3,900. `define_fixed_operation_constraints` fixes a component's dispatch
-variable to its `_set` attribute, and its docstring lists **Generator (p), Line
-(s), Transformer (s), Link (p), Store (e), StorageUnit** — not just the two this
-port refuses.
+Trying to give a delay fixture a link `p_set` turned the LOPF answer from 500 into 3,900.
+`define_fixed_operation_constraints` fixes a component's dispatch variable to its `_set`
+attribute, and its docstring lists **Generator (p), Line (s), Transformer (s), Link (p),
+Store (e), StorageUnit** — not just the two this port refused at the time.
 
-So `Generator.p_set` and `Link.p_set` were read by PyPSA's optimiser and by
-nothing here: on the two-bus probe above PyPSA fixes the link at 60 and pays
-3,900, where this port left it free and paid 500. Same shape as the six the
-schema sweep found, and the sweep cannot see it — `p_set` is quoted in these
-sources for `Load` and for the StorageUnit refusal, so the bare-name match reads
-it as handled everywhere. The documented masking limitation, hiding a live defect
-rather than a harmless one.
+So `Generator.p_set` and `Link.p_set` were read by PyPSA's optimiser and by nothing here. The
+gap sat on the list below with no code site, then spent one release as a refusal, and is now
+**built**: `FixedDispatch` emits one equality per pinned `(entity, snapshot)` and
+`FixedDispatchSuite` holds seven cases. Four things are worth keeping.
 
-**`Lopf.rejectDispatchSetPoints` now refuses both**, and `GapRefusalSuite` has
-three cases for it. Still not *implemented* — a fixed-dispatch equality wants its
-own fixture and golden — but no longer silent. Three things about it are worth
-keeping:
+**Two of the four names in that docstring do not exist.** `component_attrs` carries no
+`s_set` on `lines.csv` or `transformers.csv`, only `s_nom_set`, and
+`define_fixed_operation_constraints` returns early when `attr_set not in c.dynamic.keys()`.
+So the generic loop calls it for `Line,s` and `Transformer,s` and it does nothing.
+Enumerating the `_set` columns of every `component_attrs` CSV is what settled that; reading
+the docstring is what got it wrong the first time, in this file. The complete reachable list
+is `Generator.p_set`, `Link.p_set`, `Process.p_set`, the four `StorageUnit` ones and the two
+`Store` ones -- of which the four and the two are still refused, `state_of_charge_set` is
+built inside the storage balance, and `Process` is refused as a component.
 
-- **Two of the four names in that docstring do not exist.** `component_attrs`
-  carries no `s_set` on `lines.csv` or `transformers.csv`, only `s_nom_set`, and
-  `define_fixed_operation_constraints` returns early when `attr_set not in
-  c.dynamic.keys()`. So the generic loop calls it for `Line,s` and
-  `Transformer,s` and it does nothing. Enumerating the `_set` columns of every
-  `component_attrs` CSV is what settled that; reading the docstring is what got
-  it wrong the first time. The complete reachable list is `Generator.p_set`,
-  `Link.p_set`, `Process.p_set`, the four `StorageUnit` ones and the two `Store`
-  ones.
-- **An existing golden was triggering it.** `ac-pf-pv` ships
-  `generators-p_set.csv`: PyPSA pins its PV unit to 60/80 MW and pays 7,650,
-  this port dispatched it to 120/145 MW and paid 2,650, `Optimal` both times. The
-  fixture had been in the tree for as long as the gap and nothing compared its
-  LOPF result — `NewtonRaphsonSuite` and `TopologySuite` are its only readers and
-  neither solves an LP. It surfaced when `network-stats` ran `opex` over every
-  golden, which is the argument for a suite that iterates the manifest rather
-  than a list.
-- **Refusing is the only reason the delay guard above is still honest.** That
-  section says guarding the no-shift contract needs a delayed link with a
-  non-zero `p_set`. It still does, and such a network is now refused rather than
-  silently answered — blocked for a loud reason instead of a quiet one.
+**An existing golden was silently triggering it.** `ac-pf-pv` ships `generators-p_set.csv`:
+PyPSA pins its PV unit to 60/80 MW and pays 7,650, this port dispatched it to 120/145 MW and
+paid 2,650, `Optimal` both times. The fixture had been in the tree for as long as the gap and
+nothing compared its LOPF result -- `NewtonRaphsonSuite` and `TopologySuite` are its only
+other readers and neither solves an LP. It surfaced when `network-stats` ran `opex` over
+every golden, which is the argument for a suite that iterates the manifest rather than a
+list. `FixedDispatchSuite` now asserts it, and so does `StatsSuite`, which stopped skipping
+it.
+
+**A row, not a tightened bound,** and the difference is a verdict rather than a number. The
+obvious implementation was to intersect `p_set` into the dispatch column's bounds, the way
+`Lopf.activeBounds` pins an inactive asset to `[0, 0]`. But PyPSA bounds a non-extendable
+dispatch with **rows** -- `define_operational_constraints_for_non_extendables` adds `>=` and
+`<=` against `p_min_pu · p_nom` and `p_max_pu · p_nom` -- and then adds the equality on top,
+so a `p_set` above the unit's ceiling makes upstream's LP *infeasible*. Intersecting bounds
+gives `lo > hi` on a column, which the builder rejects as a malformed model: a crash where
+PyPSA has an answer. The same holds for a `p_set` that conflicts with a ramp limit. Emitting
+the equality against the existing bound reproduces the verdict, and it is also what
+`state_of_charge_set` -- the one set point this model had already built -- does.
+
+**The activity mask is the half that is not arithmetic.** `mask = active & (~fix.isnull())`,
+and getting the first half wrong does not cost accuracy: an inactive asset's column is pinned
+to `[0, 0]` here, so an unmasked equality reads `0 = p_set` and the LP is infeasible -- a
+verdict PyPSA never reaches, blamed on the network rather than on this model.
+`fixed-dispatch-periods` is the fixture for exactly that, and it is a separate network rather
+than a column on the first one for exactly that reason.
+
+The two fixtures:
+
+    fixed-dispatch            28,400   a generator p_set (series) and a link p_set (static)
+      without the generator's 18,600
+      without the link's      18,800
+      without either           9,000
+    fixed-dispatch-periods    20,400   p_set on an asset built in the second period
+      unmasked              infeasible
+
+One of each spelling, deliberately: `p_set` is `static or series` upstream and a series with
+no static counterpart is invisible to a `static.contains` check -- the same trap this file
+records for `ramp_limit_up`. `fixed-dispatch-periods` also carries an **empty** cell for its
+first generator beside a real value for its second, so "not given" and "given" are in one
+file; and a `p_set` of zero is a real constraint holding a unit off, which is why no
+predicate here tests for non-zero.
+
+The first version of `fixed-dispatch`'s docstring quoted 23,000 and 25,200 for the two
+single-pin readings. Both were derived rather than measured and both were wrong, which is the
+third time in this file that a hand-computed fixture number has been.
+
+A `declares` guard was written for this builder and then removed. Every other builder here
+tests "declared in the spec or present as a column" before reading an attribute, and `p_set`
+is schema-declared on `Generator` and on every controllable branch -- so the predicate was
+true for every table that reached it, and dropping it changed no row across all 302 tests in
+the module. An equivalent mutant is worse than no check, because it reads as coverage.
+
+Still not built: an infinite `p_set`, which is refused by name. NaN is the attribute's
+default and means "not given", so it cannot be an error; an infinity has no null test
+upstream that catches it, so it reaches linopy as a right-hand side and would reach the
+builder here as one.
 
 ### A third port's delay crashed rather than being read
 

@@ -315,8 +315,10 @@ Two things the *Testing* section planned for turned out differently.
 And one thing it did not plan for at all: **a statistics suite that iterates the manifest
 reads goldens nothing else reads.** `ac-pf-pv` had carried a generator `p_set` for as long
 as the LOPF had ignored it, and `opex` over that network is what finally compared the two —
-2,650 here against 7,650 upstream. The LOPF now refuses it; see NOTES. Breadth of coverage
-found a correctness bug in another module, which is an argument for the module that the
+2,650 here against 7,650 upstream. The LOPF refused it for a release and now **builds** it —
+`FixedDispatch` — so `StatsSuite` stopped skipping that network and its `opex` is one of the
+assertions that says the equality is right. Breadth of coverage found a correctness bug in
+another module, and then confirmed its fix, which is an argument for the module that the
 nineteen-metrics argument does not make.
 
 ## What this deliberately does not do

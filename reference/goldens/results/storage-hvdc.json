@@ -3695,6 +3695,207 @@
   }
  },
  "statistics": {
+  "capex|bus": {
+   "Generator|0": 297802.53496,
+   "Generator|1": 3582606.23822,
+   "Generator|2": 363166.14375,
+   "Generator|3": 201828.82773,
+   "Generator|4": 244789.35262,
+   "Generator|5": 9475372.0911,
+   "Line|0": 10.14105,
+   "Line|1": 73.30119,
+   "Line|2": 3.69354,
+   "Line|3": 81.33602,
+   "Line|4": 196.79718,
+   "Line|5": 204.2654,
+   "Link|0": 51.49085,
+   "Link|1": 52.68705,
+   "StorageUnit|0": 12738.88269,
+   "StorageUnit|1": 7835.60445,
+   "StorageUnit|2": 486776.8962,
+   "StorageUnit|3": 5720.84106,
+   "StorageUnit|4": 1567613.4196,
+   "StorageUnit|5": 14372.26343
+  },
+  "capex|bus_carrier": {
+   "Generator|AC": 14165565.18839,
+   "Line|AC": 569.53438,
+   "Link|AC": 104.1779,
+   "StorageUnit|AC": 2095057.90744
+  },
+  "capex|carrier": {
+   "Generator|gas": 66507.51528,
+   "Generator|wind": 14099057.67311,
+   "Line|AC": 569.53438,
+   "Link|AC": 104.1779,
+   "StorageUnit|battery": 2095057.90744
+  },
+  "capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capex|location": {
+   "Generator|": 14165565.18839,
+   "Line|": 569.53438,
+   "Link|": 104.1779,
+   "StorageUnit|": 2095057.90744
+  },
+  "capex|name": {
+   "Generator|Gas 0": 41933.55212,
+   "Generator|Gas 1": 24573.96316,
+   "Generator|Wind 0": 255868.98284,
+   "Generator|Wind 1": 3558032.27506,
+   "Generator|Wind 2": 363166.14375,
+   "Generator|Wind 3": 201828.82773,
+   "Generator|Wind 4": 244789.35262,
+   "Generator|Wind 5": 9475372.0911,
+   "Line|0": 10.14105,
+   "Line|1": 73.30119,
+   "Line|2": 3.69354,
+   "Line|3": 81.33602,
+   "Line|4": 196.79718,
+   "Line|5": 204.2654,
+   "Link|TL 0": 51.49085,
+   "Link|TL 1": 52.68705,
+   "StorageUnit|Storage 0": 12738.88269,
+   "StorageUnit|Storage 1": 7835.60445,
+   "StorageUnit|Storage 2": 486776.8962,
+   "StorageUnit|Storage 3": 5720.84106,
+   "StorageUnit|Storage 4": 1567613.4196,
+   "StorageUnit|Storage 5": 14372.26343
+  },
+  "capex|unit": {
+   "Generator|": 14165565.18839,
+   "Line|": 569.53438,
+   "Link|": 104.1779,
+   "StorageUnit|": 2095057.90744
+  },
+  "expanded_capex|bus": {
+   "Generator|0": 0.0,
+   "Generator|1": 3294967.3229900002,
+   "Generator|2": 0.0,
+   "Generator|3": 0.0,
+   "Generator|4": 0.0,
+   "Generator|5": 9254209.2795,
+   "Line|0": 10.14105,
+   "Line|1": 73.30119,
+   "Line|2": 0.0,
+   "Line|3": 81.33602,
+   "Line|4": 196.79718,
+   "Line|5": 204.2654,
+   "Link|0": 10.6004,
+   "Link|1": 0.0,
+   "StorageUnit|0": 12738.88269,
+   "StorageUnit|1": 0.0,
+   "StorageUnit|2": 486776.8962,
+   "StorageUnit|3": 5720.84106,
+   "StorageUnit|4": 1567613.4196,
+   "StorageUnit|5": 14372.26343
+  },
+  "expanded_capex|bus_carrier": {
+   "Generator|AC": 12549176.60249,
+   "Line|AC": 565.8408400000001,
+   "Link|AC": 10.600399999999993,
+   "StorageUnit|AC": 2087222.30299
+  },
+  "expanded_capex|carrier": {
+   "Generator|gas": 24573.963160000007,
+   "Generator|wind": 12524602.639330002,
+   "Line|AC": 565.8408400000001,
+   "Link|AC": 10.600399999999993,
+   "StorageUnit|battery": 2087222.30299
+  },
+  "expanded_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capex|location": {
+   "Generator|": 12549176.60249,
+   "Line|": 565.8408400000001,
+   "Link|": 10.600399999999993,
+   "StorageUnit|": 2087222.30299
+  },
+  "expanded_capex|name": {
+   "Generator|Gas 0": 0.0,
+   "Generator|Gas 1": 24573.96316,
+   "Generator|Wind 0": 0.0,
+   "Generator|Wind 1": 3270393.35983,
+   "Generator|Wind 2": 0.0,
+   "Generator|Wind 3": 0.0,
+   "Generator|Wind 4": 0.0,
+   "Generator|Wind 5": 9254209.2795,
+   "Line|0": 10.14105,
+   "Line|1": 73.30119,
+   "Line|2": 0.0,
+   "Line|3": 81.33602,
+   "Line|4": 196.79718,
+   "Line|5": 204.2654,
+   "Link|TL 0": 10.6004,
+   "Link|TL 1": 0.0,
+   "StorageUnit|Storage 0": 12738.88269,
+   "StorageUnit|Storage 1": 0.0,
+   "StorageUnit|Storage 2": 486776.8962,
+   "StorageUnit|Storage 3": 5720.84106,
+   "StorageUnit|Storage 4": 1567613.4196,
+   "StorageUnit|Storage 5": 14372.26343
+  },
+  "expanded_capex|unit": {
+   "Generator|": 12549176.60249,
+   "Line|": 565.8408400000001,
+   "Link|": 10.600399999999993,
+   "StorageUnit|": 2087222.30299
+  },
+  "installed_capex|bus": {
+   "Generator|0": 297802.53496,
+   "Generator|1": 287638.91523,
+   "Generator|2": 363166.14375,
+   "Generator|3": 201828.82773,
+   "Generator|4": 244789.35262,
+   "Generator|5": 221162.8116,
+   "Line|2": 3.69354,
+   "Link|0": 40.89045,
+   "Link|1": 52.68705,
+   "StorageUnit|1": 7835.60445
+  },
+  "installed_capex|bus_carrier": {
+   "Generator|AC": 1616388.5859,
+   "Line|AC": 3.69354,
+   "Link|AC": 93.5775,
+   "StorageUnit|AC": 7835.60445
+  },
+  "installed_capex|carrier": {
+   "Generator|gas": 41933.55212,
+   "Generator|wind": 1574455.03378,
+   "Line|AC": 3.69354,
+   "Link|AC": 93.5775,
+   "StorageUnit|battery": 7835.60445
+  },
+  "installed_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capex|location": {
+   "Generator|": 1616388.5859,
+   "Line|": 3.69354,
+   "Link|": 93.5775,
+   "StorageUnit|": 7835.60445
+  },
+  "installed_capex|name": {
+   "Generator|Gas 0": 41933.55212,
+   "Generator|Wind 0": 255868.98284,
+   "Generator|Wind 1": 287638.91523,
+   "Generator|Wind 2": 363166.14375,
+   "Generator|Wind 3": 201828.82773,
+   "Generator|Wind 4": 244789.35262,
+   "Generator|Wind 5": 221162.8116,
+   "Line|2": 3.69354,
+   "Link|TL 0": 40.89045,
+   "Link|TL 1": 52.68705,
+   "StorageUnit|Storage 1": 7835.60445
+  },
+  "installed_capex|unit": {
+   "Generator|": 1616388.5859,
+   "Line|": 3.69354,
+   "Link|": 93.5775,
+   "StorageUnit|": 7835.60445
+  },
   "opex|bus": {
    "Generator|0": 653.7395,
    "Generator|1": 6912.48546,

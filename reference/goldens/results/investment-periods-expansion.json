@@ -978,6 +978,90 @@
   }
  },
  "statistics": {
+  "capex|bus": {
+   "Generator|b|2030": 7200.0,
+   "Generator|b|2040": 4800.0
+  },
+  "capex|bus_carrier": {
+   "Generator|AC|2030": 7200.0,
+   "Generator|AC|2040": 4800.0
+  },
+  "capex|carrier": {
+   "Generator|-|2030": 7200.0,
+   "Generator|-|2040": 4800.0
+  },
+  "capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capex|location": {
+   "Generator||2030": 7200.0,
+   "Generator||2040": 4800.0
+  },
+  "capex|name": {
+   "Generator|late|2040": 1200.0,
+   "Generator|wind|2030": 7200.0,
+   "Generator|wind|2040": 3600.0
+  },
+  "capex|unit": {
+   "Generator||2030": 7200.0,
+   "Generator||2040": 4800.0
+  },
+  "expanded_capex|bus": {
+   "Generator|b|2030": 4800.0,
+   "Generator|b|2040": 3300.0
+  },
+  "expanded_capex|bus_carrier": {
+   "Generator|AC|2030": 4800.0,
+   "Generator|AC|2040": 3300.0
+  },
+  "expanded_capex|carrier": {
+   "Generator|-|2030": 4800.0,
+   "Generator|-|2040": 3300.0
+  },
+  "expanded_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capex|location": {
+   "Generator||2030": 4800.0,
+   "Generator||2040": 3300.0
+  },
+  "expanded_capex|name": {
+   "Generator|late|2040": 900.0,
+   "Generator|wind|2030": 4800.0,
+   "Generator|wind|2040": 2400.0
+  },
+  "expanded_capex|unit": {
+   "Generator||2030": 4800.0,
+   "Generator||2040": 3300.0
+  },
+  "installed_capex|bus": {
+   "Generator|b|2030": 2400.0,
+   "Generator|b|2040": 1500.0
+  },
+  "installed_capex|bus_carrier": {
+   "Generator|AC|2030": 2400.0,
+   "Generator|AC|2040": 1500.0
+  },
+  "installed_capex|carrier": {
+   "Generator|-|2030": 2400.0,
+   "Generator|-|2040": 1500.0
+  },
+  "installed_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capex|location": {
+   "Generator||2030": 2400.0,
+   "Generator||2040": 1500.0
+  },
+  "installed_capex|name": {
+   "Generator|late|2040": 300.0,
+   "Generator|wind|2030": 2400.0,
+   "Generator|wind|2040": 1200.0
+  },
+  "installed_capex|unit": {
+   "Generator||2030": 2400.0,
+   "Generator||2040": 1500.0
+  },
   "opex|bus": {
    "Generator|b|2030": 8000.0,
    "Generator|b|2040": 175.0

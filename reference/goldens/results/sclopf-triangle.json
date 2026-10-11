@@ -788,6 +788,33 @@
   "status": "ok"
  },
  "statistics": {
+  "capex|bus": {},
+  "capex|bus_carrier": {},
+  "capex|carrier": {},
+  "capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capex|location": {},
+  "capex|name": {},
+  "capex|unit": {},
+  "expanded_capex|bus": {},
+  "expanded_capex|bus_carrier": {},
+  "expanded_capex|carrier": {},
+  "expanded_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capex|location": {},
+  "expanded_capex|name": {},
+  "expanded_capex|unit": {},
+  "installed_capex|bus": {},
+  "installed_capex|bus_carrier": {},
+  "installed_capex|carrier": {},
+  "installed_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capex|location": {},
+  "installed_capex|name": {},
+  "installed_capex|unit": {},
   "opex|bus": {
    "Generator|A": 6900.0
   },

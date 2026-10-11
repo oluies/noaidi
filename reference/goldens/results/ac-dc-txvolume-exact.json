@@ -1350,6 +1350,206 @@
   "error": "AttributeError: 'SubNetwork' object has no attribute 'Y'"
  },
  "statistics": {
+  "capex|bus": {
+   "Generator|Frankfurt": 3652178.28465,
+   "Generator|Manchester": 11428297.29458,
+   "Generator|Norway": 3349956.87679,
+   "Line|Bremen": 206.16975,
+   "Line|Bremen DC": 35.15951,
+   "Line|London": 99.12913,
+   "Line|Manchester": 199.87381,
+   "Line|Norway DC": 39.54575,
+   "Line|Norwich": 10.36143,
+   "Line|Norwich DC": 46.82456,
+   "Link|Bremen": 298.42543,
+   "Link|Norway": 215.98197,
+   "Link|Norwich": 284.19953
+  },
+  "capex|bus_carrier": {
+   "Generator|AC": 18430432.45602,
+   "Line|AC": 515.53413,
+   "Line|DC": 121.52982,
+   "Link|AC": 798.60693
+  },
+  "capex|carrier": {
+   "Generator|gas": 100832.30843,
+   "Generator|wind": 18329600.14758,
+   "Line|AC": 637.06396,
+   "Link|DC": 798.60693
+  },
+  "capex|country": {
+   "Generator|DE": 3652178.28465,
+   "Generator|NO": 3349956.87679,
+   "Generator|UK": 11428297.29458,
+   "Line|DE": 241.32927,
+   "Line|NO": 39.54575,
+   "Line|UK": 356.18894,
+   "Link|DE": 298.42543,
+   "Link|NO": 215.98197,
+   "Link|UK": 284.19953
+  },
+  "capex|location": {
+   "Generator|": 18430432.45602,
+   "Line|": 637.06396,
+   "Link|": 798.60693
+  },
+  "capex|name": {
+   "Generator|Frankfurt Gas": 100832.30843,
+   "Generator|Frankfurt Wind": 3551345.97622,
+   "Generator|Manchester Wind": 11428297.29458,
+   "Generator|Norway Wind": 3349956.87679,
+   "Line|0": 99.12913,
+   "Line|1": 199.87381,
+   "Line|2": 35.15951,
+   "Line|3": 46.82456,
+   "Line|4": 39.54575,
+   "Line|5": 10.36143,
+   "Line|6": 206.16975,
+   "Link|Bremen Converter": 298.42543,
+   "Link|Norway Converter": 215.98197,
+   "Link|Norwich Converter": 284.19953
+  },
+  "capex|unit": {
+   "Generator|": 18430432.45602,
+   "Line|": 637.06396,
+   "Link|": 798.60693
+  },
+  "expanded_capex|bus": {
+   "Generator|Frankfurt": -4796218.12943,
+   "Generator|Manchester": 1374046.7678899989,
+   "Generator|Norway": -33505.59715999989,
+   "Line|Bremen": -7793.83025,
+   "Line|Bremen DC": -311.77747,
+   "Line|London": -5369.50108,
+   "Line|Manchester": -5139.79331,
+   "Line|Norway DC": -2457.6491699999997,
+   "Line|Norwich": -863.7366499999999,
+   "Line|Norwich DC": -5118.2175,
+   "Link|Bremen": 108.42543,
+   "Link|London": -876.5342,
+   "Link|Norway": 15.98196999999999,
+   "Link|Norwich": 74.19952999999998
+  },
+  "expanded_capex|bus_carrier": {
+   "Generator|AC": -3455676.9586999975,
+   "Line|AC": -19166.86127,
+   "Line|DC": -7887.64414,
+   "Link|AC": -677.92727
+  },
+  "expanded_capex|carrier": {
+   "Generator|gas": -21109107.32497,
+   "Generator|wind": 17653430.366260003,
+   "Line|AC": -27054.505400000002,
+   "Link|DC": -677.92727
+  },
+  "expanded_capex|country": {
+   "Generator|DE": -4796218.12943,
+   "Generator|NO": -33505.59715999989,
+   "Generator|UK": 1374046.7678899989,
+   "Line|DE": -8105.60771,
+   "Line|NO": -2457.6491699999997,
+   "Line|UK": -16491.24852,
+   "Link|DE": 108.42543,
+   "Link|NO": 15.98196999999999,
+   "Link|UK": -802.3346700000001
+  },
+  "expanded_capex|location": {
+   "Generator|": -3455676.9586999975,
+   "Line|": -27054.505400000002,
+   "Link|": -677.92727
+  },
+  "expanded_capex|name": {
+   "Generator|Frankfurt Gas": -8113323.93218,
+   "Generator|Frankfurt Wind": 3317105.8027500003,
+   "Generator|Manchester Gas": -9830758.39846,
+   "Generator|Manchester Wind": 11204805.16635,
+   "Generator|Norway Gas": -3165024.99434,
+   "Generator|Norway Wind": 3131519.3971800003,
+   "Line|0": -5369.50108,
+   "Line|1": -5139.79331,
+   "Line|2": -311.77747,
+   "Line|3": -5118.2175,
+   "Line|4": -2457.6491699999997,
+   "Line|5": -863.7366499999999,
+   "Line|6": -7793.83025,
+   "Link|Bremen Converter": 108.42543,
+   "Link|DC link": -876.5342,
+   "Link|Norway Converter": 15.98196999999999,
+   "Link|Norwich Converter": 74.19952999999998
+  },
+  "expanded_capex|unit": {
+   "Generator|": -3455676.9586999975,
+   "Line|": -27054.505400000002,
+   "Link|": -677.92727
+  },
+  "installed_capex|bus": {
+   "Generator|Frankfurt": 8448396.41408,
+   "Generator|Manchester": 10054250.52669,
+   "Generator|Norway": 3383462.47395,
+   "Line|Bremen": 8000.0,
+   "Line|Bremen DC": 346.93698,
+   "Line|London": 5468.63021,
+   "Line|Manchester": 5339.66712,
+   "Line|Norway DC": 2497.19492,
+   "Line|Norwich": 874.09808,
+   "Line|Norwich DC": 5165.04206,
+   "Link|Bremen": 190.0,
+   "Link|London": 876.5342,
+   "Link|Norway": 200.0,
+   "Link|Norwich": 210.0
+  },
+  "installed_capex|bus_carrier": {
+   "Generator|AC": 21886109.41472,
+   "Line|AC": 19682.3954,
+   "Line|DC": 8009.17396,
+   "Link|AC": 1476.5342
+  },
+  "installed_capex|carrier": {
+   "Generator|gas": 21209939.6334,
+   "Generator|wind": 676169.78132,
+   "Line|AC": 27691.56936,
+   "Link|DC": 1476.5342
+  },
+  "installed_capex|country": {
+   "Generator|DE": 8448396.41408,
+   "Generator|NO": 3383462.47395,
+   "Generator|UK": 10054250.52669,
+   "Line|DE": 8346.93698,
+   "Line|NO": 2497.19492,
+   "Line|UK": 16847.43746,
+   "Link|DE": 190.0,
+   "Link|NO": 200.0,
+   "Link|UK": 1086.5342
+  },
+  "installed_capex|location": {
+   "Generator|": 21886109.41472,
+   "Line|": 27691.56936,
+   "Link|": 1476.5342
+  },
+  "installed_capex|name": {
+   "Generator|Frankfurt Gas": 8214156.24061,
+   "Generator|Frankfurt Wind": 234240.17347,
+   "Generator|Manchester Gas": 9830758.39846,
+   "Generator|Manchester Wind": 223492.12823,
+   "Generator|Norway Gas": 3165024.99434,
+   "Generator|Norway Wind": 218437.47961,
+   "Line|0": 5468.63021,
+   "Line|1": 5339.66712,
+   "Line|2": 346.93698,
+   "Line|3": 5165.04206,
+   "Line|4": 2497.19492,
+   "Line|5": 874.09808,
+   "Line|6": 8000.0,
+   "Link|Bremen Converter": 190.0,
+   "Link|DC link": 876.5342,
+   "Link|Norway Converter": 200.0,
+   "Link|Norwich Converter": 210.0
+  },
+  "installed_capex|unit": {
+   "Generator|": 21886109.41472,
+   "Line|": 27691.56936,
+   "Link|": 1476.5342
+  },
   "opex|bus": {
    "Generator|Frankfurt": 6701.5063,
    "Generator|Manchester": 1784.2019,

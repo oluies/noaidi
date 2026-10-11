@@ -2080,7 +2080,7 @@ NETWORKS = {
 # `snapshot_weightings.generators`, `opex` uses `snapshot_weightings.objective` times the
 # period's `objective` -- so a port that confused the two columns passes one and fails the
 # other. Recording a metric nothing compares against would be a golden with no reader.
-STATISTICS_METRICS = ("supply", "opex")
+STATISTICS_METRICS = ("supply", "opex", "capex", "installed_capex", "expanded_capex")
 
 # Every grouping dimension `statistics` offers, in the order its own container lists them.
 #

@@ -406,11 +406,8 @@ boundary a pinned list catches and a sentence about magnitudes does not.
 - **The other metrics.** Each is a query, and the corrections above are the argument for
   adding them against measured goldens a few at a time rather than in one pass. Three of the
   seventeen are done; see *The capital metrics* below for what they cost.
-- **Branches in `supply`.** PyPSA's `energy_balance` includes `Line`, `Link` and
-  `Transformer` at their ports with a sign per end, and the port matters: measured on
-  `statistics-dimensions`, `supply` groups a link by the bus at its *receiving* port while
-  `opex` groups it by `bus0`. The schema already carries `bus1`. `StatsSuite` asserts that the
-  uncovered component set is exactly the branch kinds, so adding them changes a test.
+- **A third port.** `bus2` and beyond are refused rather than dropped; see *Branches in
+  `supply`* below.
 - **The `HAVING` clause's rounding.** Replacing `ROUND(..., 5) <> 0` with a `1e-9` threshold
   fails no test, because the suite's solver floor hides exactly the artefacts the rounding
   removes. Measured and stated rather than counted as coverage; the rounding of the returned
@@ -523,6 +520,73 @@ capacity counted once at `bus0`: `ac-dc-meshed`'s seven lines report 280,000 MW 
 their plain `s_nom` sum rather than twice it, and `statistics-dimensions`' electrolyser
 reports 100 MW rather than 0.7 × 100. The same `bus0` placement `opex` uses — and not the
 per-port treatment `supply` needs, which is the next thing to build.
+
+## Branches in `supply`, and the determinacy measurement that had to come first
+
+`supply` now sums injections at **every port**, which is `energy_balance` with
+`at_port="all"`. Three schema additions carry it — a `port` view giving each port its bus, an
+`injection` view giving each port its signed contribution, and a `dimensions` view keyed by
+port as well as entity, so a flow is grouped by the bus that *receives* it while `opex` and
+the six capital metrics stay pinned at port 0.
+
+The sign rule is the bus balance's own: `-p0` at port 0, `+p0 × efficiency` at port 1. For a
+line the efficiency is 1, so the positive part sums to `|p0|` — `ac-dc-meshed`'s `Line|0` is
+3,846.70123 both ways. With an efficiency that is not 1, `statistics-dimensions`'
+electrolyser reports 25.0 against a 35.71429 MW flow. `efficiency` is a row in `fact` rather
+than a column on `entity`, for the same reason `marginal_cost` is: it is `static or series`.
+
+A branch with `bus2` is **refused**. `Lopf` builds one — `efficiency2` is read there — and
+this schema carries two ports, so such a network would be short by whatever the third port
+injects. No golden has one, so this refuses a shape it has never seen, deliberately.
+
+### Covering branches broke four goldens, none of them because of this code
+
+`StatsSuite` had excluded `Line`, `Link` and `Transformer` from every comparison and asserted
+that the excluded set was *exactly* those three — so that the day branches arrived, the
+assertion would fail rather than the agreement widening in silence. It failed. Measured with
+HiGHS simplex against interior point, crossover and presolve off:
+
+```
+ac-dc-co2           objective identical, generator dispatch differs by 537.96 MW
+storage-hvdc        dispatch to 2e-4, line flows differ by 165.08
+storage-cyclic-co2  dispatch to 1e-4, line flows differ by 136.46
+ac-dc-txcost        dispatch determinate; the expansion allocation is a face — its
+                    cost limit binds at 4800 and the per-line split is free
+```
+
+Two degenerate dispatches, two degenerate flow patterns, one degenerate capacity allocation.
+**Not one was marked**, because until branch coverage nothing compared a branch quantity.
+
+### Determinacy is measured per group, because every coarser rule throws away something real
+
+`DEGENERATE_DISPATCH` is a hand-written note per **network**, which is what `scigrid-de` was
+skipped under. Skipping those four whole would have cost every generator comparison they
+carry, which is most of what they are for.
+
+So `generate_goldens.py` solves every network twice and compares each metric **group by
+group**, recording only the keys that moved — 1,445 metric/grouping pairs measured, and the
+block is sparse, naming exactly what must not be compared. On three of the five affected
+networks the undetermined groups are *only* branches, which is what let branch coverage ship.
+
+Three things about the measurement:
+
+- **The tolerance is per element against its own magnitude**, `1e-2 + 1e-4 × max(|a|,|b|)`,
+  which is the shape the suite compares at. A tolerance scaled by the largest group in a
+  metric instead called a small group determinate while the suite rejected it:
+  `ac-dc-txcost`'s `capex|bus` has a 4,396 group and a 10.36 one, and the small group moves
+  by 14.48 — swallowed by a metric-scaled tolerance of 1,143.
+- **The floor is chosen from the measured distribution**, not picked. The worst agreement on
+  anything that is a point is 7e-3, on `ac-dc-meshed`'s flows; a face moves by 14 to 538. One
+  group sits in between: `storage-hvdc`'s `Generator|Gas 2` capex moves by 0.0236, 2.4× the
+  floor, and is treated as a face because that direction costs one skipped group while the
+  other costs a comparison that breaks on a tie-break.
+- **It skips whole component kinds, not individual keys.** The generator can only name keys
+  that moved between PyPSA's own two solves, so it cannot name one that *this* port produces
+  and neither of PyPSA's does — and on a degenerate flow pattern that happens, because which
+  lines carry anything at all is part of the face. Still far finer than a network skip.
+
+The measurement is itself reproducible: `results_drift.py` reports the whole block unchanged
+across two regenerations, so the probe is not adding a source of churn to the goldens.
 
 ## What this deliberately does not do
 

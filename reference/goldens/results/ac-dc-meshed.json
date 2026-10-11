@@ -80,6 +80,47 @@
    ]
   }
  },
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.009975226257560295
+   },
+   "Line": {
+    "determined": true,
+    "excess": -0.045522813164877364
+   },
+   "Link": {
+    "determined": true,
+    "excess": -0.008898921482903176
+   }
+  },
+  "objective": 0.005404699128121138,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": true,
+    "excess": -0.010008982082514464
+   },
+   "generator_p": {
+    "determined": true,
+    "excess": -0.00997565202679884
+   },
+   "line_p0": {
+    "determined": true,
+    "excess": -0.009315558334598616
+   },
+   "link_p0": {
+    "determined": true,
+    "excess": -0.005147090495646699
+   }
+  },
+  "statistics": {}
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [

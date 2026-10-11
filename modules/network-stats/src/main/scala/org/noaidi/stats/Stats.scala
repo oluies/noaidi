@@ -134,50 +134,50 @@ final class Stats private (
 
   /** Energy injected, in MWh, by whatever dimension `groupBy` names.
     *
-    * `w_generators`, and that is '''not''' the obvious choice — it is PyPSA's. `supply`
+    * `w_generators`, and that is '''not''' the obvious choice -- it is PyPSA's. `supply`
     * delegates to `energy_balance`, which weights with `n.snapshot_weightings.generators`
     * (`expressions.py:2305`), while `stores` is the elapsed hours the storage balance uses
     * inside the LOPF. Both are "hours" in some sense and the statistics layer picked
     * `generators`.
     *
     * The first version of this used `w_stores`, and `docs/network-stats-design.md` argued for
-    * it in so many words — "`stores` is the elapsed hours, so it is what turns MW into MWh;
+    * it in so many words -- "`stores` is the elapsed hours, so it is what turns MW into MWh;
     * `generators` is not". Backwards, and `operational-limit` is the fixture that says so: it
     * is the only golden whose three weightings differ (`generators` 3.0, the others 1.0), and
     * PyPSA reports gas supply as 120 against a dispatch of 40 MW at one snapshot. 40 x 3, not
     * 40 x 1. Asserted confidently, wrong, and caught only by running it against upstream.
     *
     * An absent carrier groups as `'-'`, which is PyPSA's rendering under `nice_names` and
-    * not a choice made here: `energy-budget`'s generators have no carrier and upstream
-    * reports `Generator|-`. Grouping them as the empty string gave a different key for every
-    * such network and failed the comparison on the group set rather than on a number, which
-    * is at least the right place to fail.
+    * not a choice made here.
     *
-    * '''Branches are not covered.''' PyPSA's `energy_balance` includes `Line`, `Link` and
-    * `Transformer` at their ports, with a sign per end; this sums injections from
-    * `Generator`, `StorageUnit` and `Store` only. `StatsSuite` asserts that the uncovered
-    * component set is exactly the branch kinds, so adding them later is a change the suite
-    * notices rather than a silent widening.
+    * ==Branches, at their ports==
+    *
+    * `energy_balance` is called with `at_port="all"`, so a component contributes at EVERY
+    * port with that port's sign, and `supply` keeps the positive part. The sign rule is the
+    * bus balance's -- see `injection` in [[StatsSchema]]. For a line the two ports give
+    * `-p0` and `+p0`, so the positive part sums to `|p0|`, which is what `ac-dc-meshed`
+    * records: 3,846.70123 for `Line|0` against a measured `sum |p0|` of 3,846.70123.
+    *
+    * This covered one-ports only for two releases, with `StatsSuite` asserting that the
+    * uncovered component set was exactly the branch kinds. That assertion is gone with the
+    * gap, and the suite now compares every component PyPSA reports.
+    *
+    * '''A third port is refused rather than dropped.''' `Lopf` builds a link with `bus2` --
+    * `efficiency2` is read there -- and this schema carries two ports, so such a network
+    * would lose a third of its branch supply silently. [[Stats.of]] turns it away by name.
     */
   def supply(groupBy: String = "carrier"): Map[String, Double] =
     grouped(s"""
-      |SELECT e.component                     AS component,
-      |       d.${dimension(groupBy)}          AS grp$periodSelect,
-      |       ROUND(SUM(f.value * s.w_generators), 5) AS value
-      |FROM fact f
-      |JOIN entity e USING (component, entity)
-      |JOIN dimensions d USING (component, entity)
+      |SELECT i.component                      AS component,
+      |       d.${dimension(groupBy)}           AS grp$periodSelect,
+      |       ROUND(SUM(i.value * s.w_generators), 5) AS value
+      |FROM injection i
+      |JOIN dimensions d
+      |  ON d.component = i.component AND d.entity = i.entity AND d.port = i.port
       |JOIN snapshot s USING (snapshot)
-      |-- One quantity per component kind, not a set union: a StorageUnit contributes BOTH
-      -- `p` and `discharge` to `fact`, and `quantity IN ('p','discharge')` counted it twice.
-      -- Every storage figure came out at exactly 2x PyPSA -- 1,200 against 600 on
-      -- `operational-limit`, 54,593 against 27,296 on `storage-cyclic-co2` -- which is the
-      -- kind of factor that looks like a weighting bug and is not.
-      |WHERE f.value > 0
-      |  AND ( (f.quantity = 'p'         AND e.component IN ('Generator', 'Store'))
-      |     OR (f.quantity = 'discharge' AND e.component = 'StorageUnit') )
-      |GROUP BY e.component, grp$periodGroup
-      |HAVING ROUND(SUM(f.value * s.w_generators), 5) <> 0
+      |WHERE i.value > 0
+      |GROUP BY i.component, grp$periodGroup
+      |HAVING ROUND(SUM(i.value * s.w_generators), 5) <> 0
       |""".stripMargin)
 
   /** Operating cost by `groupBy`.
@@ -238,7 +238,8 @@ final class Stats private (
       |       d.${dimension(groupBy)}                     AS grp$periodSelect,
       |       ROUND(SUM(p.cost * s.w_objective * s.p_objective), 5) AS value
       |FROM priced p
-      |JOIN dimensions d ON d.component = p.component AND d.entity = p.entity
+      |JOIN dimensions d
+      |  ON d.component = p.component AND d.entity = p.entity AND d.port = 0
       |JOIN snapshot s ON s.snapshot = p.snapshot
       |GROUP BY p.component, grp$periodGroup
       |HAVING ROUND(SUM(p.cost * s.w_objective * s.p_objective), 5) <> 0
@@ -382,8 +383,11 @@ final class Stats private (
       |       d.${dimension(groupBy)} AS grp$capitalPeriodSelect,
       |       ROUND(SUM($term), 5)    AS value
       |FROM entity e
-      |JOIN dimensions d USING (component, entity)
-      |JOIN capital_share cs USING (component, entity)
+      |JOIN dimensions d
+      |  ON d.component = e.component AND d.entity = e.entity AND d.port = 0
+      |-- Fully qualified rather than `USING`, because `dimensions` now carries a `component`
+      |-- of its own and a `USING` join against two tables that both have one is ambiguous.
+      |JOIN capital_share cs ON cs.component = e.component AND cs.entity = e.entity
       |GROUP BY e.component, grp$capitalPeriodGroup
       |HAVING ROUND(SUM($term), 5) <> 0
       |""".stripMargin)
@@ -439,6 +443,7 @@ object Stats:
     * size that matters and it is ~55k fact rows.
     */
   def of(result: LopfResult): Stats =
+    rejectExtraPorts(result.network)
     val conn = DriverManager.getConnection("jdbc:duckdb:")
     try
       val st = conn.createStatement()
@@ -456,6 +461,31 @@ object Stats:
       case e: Throwable =>
         conn.close()
         throw e
+
+  /** Refuse a branch with a third port, which this schema cannot carry.
+    *
+    * `port` and `injection` give a branch two ports, `bus0` and `bus1`. `Lopf` builds more
+    * than that -- `Topology.branchPorts` walks every `busN` and `efficiency2` is read there --
+    * so a three-port link would contribute two thirds of its `supply` here and no error.
+    * Silently short by a term nobody named is the failure this repository is arranged
+    * against, so it is refused.
+    *
+    * No golden has one: no `links.csv` in `reference/goldens` carries a `bus2` column,
+    * checked before writing this. `Stats` is therefore refusing a network it has never seen,
+    * which is deliberate -- the alternative is a wrong number the first time one appears.
+    */
+  private def rejectExtraPorts(n: Network): Unit =
+    n.tables.values.foreach { table =>
+      val extra = (2 to 9).map(i => s"bus$i").filter(table.static.contains)
+      if extra.nonEmpty then
+        val used = table.ids.filter(id => extra.exists(p => table.string(p, id).nonEmpty))
+        if used.nonEmpty then
+          throw new IllegalArgumentException(
+            s"${table.spec.name} '${used.head}' has ${extra.mkString(", ")}, and this module " +
+              "carries two ports per branch. Its supply would be short by whatever that port " +
+              "injects, so the network is refused rather than loaded."
+          )
+    }
 
   /** Everything the schema holds.
     *
@@ -666,7 +696,7 @@ object Stats:
     */
   private def quantitiesOf(spec: ComponentSpec): Seq[String] = Role.of(spec) match
     case Role.PassiveBranch      => Seq("p0")
-    case Role.ControllableBranch => Seq("p0", "marginal_cost")
+    case Role.ControllableBranch => Seq("p0", "marginal_cost", "efficiency")
     case Role.Bus | Role.None    => Seq.empty
     case Role.Attached =>
       spec.name match
@@ -709,7 +739,10 @@ object Stats:
       // The input cost series. `valueAt` is what resolves a static column against a
       // time-varying one, the way every LOPF builder resolves it -- and `operational-limit`
       // is the fixture that needs it: its run-of-river bids 1/2/3/4 across four snapshots.
-      case "marginal_cost" | "marginal_cost_storage" | "spill_cost" =>
+      // `efficiency` scales what a branch's receiving port injects, and it is `static or
+      // series` upstream, so it belongs beside the other input series rather than on
+      // `entity`. A passive branch has no such attribute and `injection` coalesces to 1.0.
+      case "marginal_cost" | "marginal_cost_storage" | "spill_cost" | "efficiency" =>
         if declares(table, quantity) then table.valueAt(quantity, id, t) else 0.0
       case other =>
         throw new IllegalStateException(s"no accessor for quantity '$other' on $component")

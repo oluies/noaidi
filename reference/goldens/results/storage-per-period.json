@@ -1,4 +1,74 @@
 {
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.04
+   },
+   "StorageUnit": {
+    "determined": true,
+    "excess": -0.014
+   }
+  },
+  "objective": 1.3723860320169479e-05,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": true,
+    "excess": -0.0104999999998348
+   },
+   "generator_p": {
+    "determined": true,
+    "excess": -0.01599964834922778
+   },
+   "storage_p": {
+    "determined": true,
+    "excess": -0.009999712671273118
+   },
+   "storage_p_dispatch": {
+    "determined": true,
+    "excess": -0.009997227228243538
+   },
+   "storage_p_store": {
+    "determined": true,
+    "excess": -0.00999751455697042
+   },
+   "storage_state_of_charge": {
+    "determined": true,
+    "excess": -0.00999609470876165
+   }
+  },
+  "statistics": {
+   "capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "opex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "optimal_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "supply|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   }
+  }
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [

@@ -1971,6 +1971,187 @@ NOMINAL_ATTRIBUTES = {
 }
 
 
+# The second solve that says which series are a point and which are a face.
+#
+# `DEGENERATE_DISPATCH` below is a hand-maintained note per NETWORK, and that granularity is
+# the problem it leaves behind: marking a whole network stops a reader comparing its
+# generators, which may be perfectly determinate, and it cannot say WHICH series moved. Four
+# networks were found to be degenerate in different series only when `network-stats` began
+# comparing branch quantities, having passed every comparison for as long as branches were
+# excluded from them.
+#
+# So determinacy is measured rather than listed. Every network is solved a second time with
+# an interior-point method, crossover and presolve off -- a different algorithm reaching a
+# different vertex of the same optimal face -- and each recorded series is compared
+# elementwise. A series the two solves agree on is a point; one they disagree on is a face,
+# and a comparison against it compares tie-breaks.
+#
+# `ipm` with `run_crossover=off` is the probe this repository already uses for a fixture it
+# is about to commit, and the reason it works is that crossover is what would move an
+# interior solution back onto a vertex: left off, the two methods have no reason to agree
+# anywhere the optimum is not unique.
+DETERMINACY_PROBE = {"solver": "ipm", "run_crossover": "off", "presolve": "off"}
+
+# What counts as agreement, per element: `|a - b| <= ABS + REL * max(|a|, |b|)`.
+#
+# Per ELEMENT and against its own magnitude, which is the shape the consuming suite compares
+# at -- `StatsSuite` asserts each group to `1e-4` relative. A tolerance scaled by the largest
+# group in a metric instead would call a small group determinate while the suite rejected it:
+# measured on `ac-dc-txcost`, whose `capex|bus` has a 4,396 group and a 10.36 one, the small
+# group moves by 14.48 between solves and a metric-scaled tolerance of 1,143 swallowed it.
+#
+# `ABS` is what keeps interior-point tolerance from reading as degeneracy, and the two cases
+# are separated by evidence rather than by taste. Measured across all 39 networks: the worst
+# agreement on anything that is a point is 7e-3, on `ac-dc-meshed`'s flows where the LP is
+# 60,000 variables, while a face differs by 14 to 538. So the floor sits at 1e-2 -- above the
+# noise and three orders below the smallest real disagreement.
+DETERMINACY_ABS = 1e-2
+DETERMINACY_REL = 1e-4
+
+
+def _series_deviation(a, b):
+    """The largest elementwise disagreement between two recorded frames, or None if empty."""
+    if a is None or b is None:
+        return None
+    try:
+        aligned_b = b.reindex(index=a.index, columns=a.columns)
+    except (TypeError, ValueError):
+        return None
+    if a.size == 0:
+        return None
+    diff = (a - aligned_b).abs()
+    # NaN where one side has no value: a column present in one solve and not the other is a
+    # structural difference rather than a tie-break, and `max()` over NaN would hide it.
+    if diff.isnull().to_numpy().any():
+        return float("inf")
+    # The excess over the per-element tolerance, so a scalar can carry an elementwise test:
+    # positive anywhere the two solves disagree by more than that element deserves.
+    # `np.maximum` rather than `DataFrame.combine`, which applies its function column by
+    # column and so gets a Series where this wants a scalar.
+    scale = np.maximum(a.abs().to_numpy(), aligned_b.abs().to_numpy())
+    allowed = DETERMINACY_ABS + DETERMINACY_REL * scale
+    return float((diff.to_numpy() - allowed).max())
+
+
+def determinacy(build, multi_invest: bool) -> dict:
+    """Which series of this network's solve are a point rather than a face.
+
+    One entry per series, each carrying the measured deviation as well as the verdict, so a
+    reader can see the margin rather than trust the threshold. A probe that fails to solve at
+    all records that instead of silently declaring everything determinate -- an interior-point
+    method can legitimately fail where simplex does not, and treating that as agreement is the
+    direction this whole apparatus exists to avoid.
+    """
+    first = build()
+    status, condition = first.optimize(
+        solver_name="highs", multi_investment_periods=multi_invest
+    )
+    if status != "ok" or condition != "optimal":
+        return {"error": f"reference solve did not converge: {status}/{condition}"}
+
+    second = build()
+    try:
+        status, condition = second.optimize(
+            solver_name="highs",
+            multi_investment_periods=multi_invest,
+            solver_options=DETERMINACY_PROBE,
+        )
+    except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    if status != "ok" or condition != "optimal":
+        return {"error": f"probe solve did not converge: {status}/{condition}"}
+
+    series = {
+        "generator_p": lambda n: n.generators_t.p,
+        "line_p0": lambda n: n.lines_t.p0,
+        "transformer_p0": lambda n: n.transformers_t.p0,
+        "link_p0": lambda n: n.links_t.p0,
+        "bus_marginal_price": lambda n: n.buses_t.marginal_price,
+        "storage_p": lambda n: n.storage_units_t.p,
+        "storage_p_dispatch": lambda n: n.storage_units_t.p_dispatch,
+        "storage_p_store": lambda n: n.storage_units_t.p_store,
+        "storage_state_of_charge": lambda n: n.storage_units_t.state_of_charge,
+        "storage_spill": lambda n: n.storage_units_t.spill,
+        "store_e": lambda n: n.stores_t.e,
+        "store_p": lambda n: n.stores_t.p,
+    }
+
+    out = {
+        "probe": dict(DETERMINACY_PROBE),
+        "objective": jsonable(abs(first.objective - second.objective)),
+        "series": {},
+    }
+    for label, read in series.items():
+        excess = _series_deviation(read(first), read(second))
+        if excess is None:
+            continue
+        # `excess` is already the overshoot of the per-element tolerance, so the verdict is a
+        # comparison against zero and the recorded number says by how much.
+        out["series"][label] = {"determined": bool(excess <= 0.0), "excess": jsonable(excess)}
+
+    # Chosen capacities, which are an answer rather than a by-product and can be degenerate on
+    # their own: `ac-dc-txcost`'s transmission cost limit binds at 4800 and the split between
+    # its lines is free, so every per-line capacity moves while the total does not.
+    nominal = {}
+    for component, attr in NOMINAL_ATTRIBUTES.items():
+        a = first.c[component].static.get(f"{attr}_opt")
+        if a is None or len(a) == 0:
+            continue
+        b = second.c[component].static.get(f"{attr}_opt")
+        aligned = b.reindex(a.index)
+        diff = (a - aligned).abs().to_numpy()
+        scale = np.maximum(a.abs().to_numpy(), aligned.abs().to_numpy())
+        excess = float((diff - (DETERMINACY_ABS + DETERMINACY_REL * scale)).max())
+        nominal[component] = {"determined": bool(excess <= 0.0), "excess": jsonable(excess)}
+    if nominal:
+        out["nominal_opt"] = nominal
+
+    # ==And then the metrics themselves, per GROUP, which is the granularity that matters==
+    #
+    # A series being a face does not make every statistic over it a face, and a statistic
+    # being a face does not make every group in it one. On `ac-dc-co2` the generators disagree
+    # by 538 MW between the two solves; `supply|carrier` moves by 844 because its branch
+    # groups move, while its generator groups are pinned. A rule at the series level would
+    # throw away every comparison on that network, and one at the metric level would throw
+    # away the generators with the lines.
+    #
+    # So each metric is computed on both solves and compared GROUP BY GROUP, and only the
+    # keys that moved are recorded. Sparse on purpose: a pair where everything agrees is
+    # absent, so the block names exactly what a suite must not compare and nothing else.
+    #
+    # This is the only determinacy measurement that is about the thing a suite actually
+    # asserts. Everything above it -- the series and the capacities -- is kept because it says
+    # WHY, which a list of group keys does not.
+    stats = {}
+    for metric in STATISTICS_METRICS:
+        for groupby in STATISTICS_GROUPINGS:
+            try:
+                left = getattr(first.statistics, metric)(groupby=groupby)
+                right = getattr(second.statistics, metric)(groupby=groupby)
+            except Exception as exc:  # noqa: BLE001 - the same shapes `capture_network` records
+                stats[f"{metric}|{groupby}"] = {"error": f"{type(exc).__name__}: {exc}"}
+                continue
+            if isinstance(left, pd.DataFrame):
+                left = left.stack(future_stack=True).dropna()
+            if isinstance(right, pd.DataFrame):
+                right = right.stack(future_stack=True).dropna()
+            keys = set(left.index) | set(right.index)
+            if not keys:
+                continue
+            moved = {}
+            for key in keys:
+                a = float(left.get(key, 0.0))
+                b = float(right.get(key, 0.0))
+                allowed = DETERMINACY_ABS + DETERMINACY_REL * max(abs(a), abs(b))
+                if abs(a - b) > allowed:
+                    label = "|".join(str(part) for part in key) if isinstance(key, tuple) else str(key)
+                    moved[label] = jsonable(abs(a - b))
+            if moved:
+                stats[f"{metric}|{groupby}"] = {"undetermined": dict(sorted(moved.items()))}
+    out["statistics"] = stats
+    return out
+
+
 # Fixtures whose optimal *dispatch* is not reproducible, with the evidence.
 #
 # Found by accident and then measured: adding this file's `standard-types`
@@ -2609,6 +2790,10 @@ def capture_network(name: str, build) -> dict:
                     }
         if name in DEGENERATE_DISPATCH:
             results["optimize"]["dispatch_note"] = DEGENERATE_DISPATCH[name]
+        # Measured per series, beside the hand-written note above rather than instead of it:
+        # the note carries the evidence a reader needs and this carries the verdict a suite
+        # can act on. See `determinacy`.
+        results["determinacy"] = determinacy(build, multi_invest)
         if name in NOT_A_TARGET:
             results["optimize"]["not_a_target"] = NOT_A_TARGET[name]
     except Exception as exc:  # noqa: BLE001

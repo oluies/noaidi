@@ -47,15 +47,14 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       .read(Files.readString(goldens.resolve("manifest.json")))("networks")
       .obj.keys.toList.sorted
 
-  /** The components whose injections [[Stats.supply]] sums.
+  /** Every component PyPSA reports a metric for, all of which this module now covers.
     *
-    * PyPSA's `energy_balance` also includes the branches at their ports, with a sign per end.
-    * This module does not, and the test below asserts the difference is '''exactly''' the
-    * branch kinds -- so covering them later changes a test rather than quietly widening an
-    * agreement.
+    * `uncovered` is gone with the gap it described. `supply` summed one-port injections only
+    * for two releases, and this suite asserted that the set PyPSA reported and the module did
+    * not was EXACTLY the branch kinds -- so that the day branches arrived, the assertion
+    * would fail rather than the agreement widening in silence. That is what happened.
     */
-  private val covered   = Set("Generator", "StorageUnit", "Store")
-  private val uncovered = Set("Line", "Link", "Transformer")
+  private val covered = Set("Generator", "StorageUnit", "Store", "Line", "Link", "Transformer")
 
   /** The component part of a `"Component|group"` or `"Component|group|period"` key. */
   private def component(key: String): String = key.takeWhile(_ != '|')
@@ -159,6 +158,35 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       else Some(frame.obj.map((k, v) => k -> v.num).toMap)
     }
 
+  /** The groups of one metric this network's optimum does not pin, measured by the generator.
+    *
+    * `generate_goldens.py` solves every network twice -- HiGHS simplex, then interior point
+    * with crossover and presolve off -- and compares each metric GROUP BY GROUP, recording
+    * only the keys that moved. A key in this set is one vertex of an optimal face, so
+    * comparing it compares tie-breaks between two solvers rather than two implementations of
+    * a metric.
+    *
+    * ==Per group, because the coarser rules all throw away something real==
+    *
+    * `DEGENERATE_DISPATCH` is per NETWORK, and that is what `scigrid-de` was skipped under.
+    * Four more networks turned out to be degenerate the moment branch groups began to be
+    * compared, and skipping those networks whole would have cost every generator comparison
+    * they carry -- which is most of what they are for. Measured, the undetermined groups on
+    * `ac-dc-co2`, `ac-dc-txcost`, `storage-hvdc` and `storage-cyclic-co2` are '''only''' the
+    * `Line` and `Link` ones; every one-port group on all four is a point.
+    *
+    * So this skips keys rather than metrics or networks, and the branch coverage that needed
+    * it is in the same change -- a marker with nothing to mark would have been untestable.
+    */
+  private def undetermined(name: String, metric: String, groupBy: String): Set[String] =
+    results(name).obj
+      .get("determinacy")
+      .flatMap(_.obj.get("statistics"))
+      .flatMap(_.obj.get(s"$metric|$groupBy"))
+      .flatMap(_.obj.get("undetermined"))
+      .map(_.obj.keys.toSet)
+      .getOrElse(Set.empty)
+
   /** Whether this golden is worth comparing at all, with the reason read from the golden. */
   private def comparable(name: String): Option[String] =
     val optimize = results(name)("optimize")
@@ -201,16 +229,26 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                   // same blank country", a group that does not exist.
                   intercept[IllegalArgumentException](run())
                 case Some(wanted) =>
-                  val mine    = run()
-                  val shared  = wanted.filter((key, _) => covered.contains(component(key)))
-                  val skipped = wanted.keySet.map(component) -- covered
+                  val mine  = run()
+                  // Whole COMPONENT KINDS, not individual keys, and the difference matters.
+                  // The generator measures which keys moved between PyPSA's own two solves,
+                  // so it cannot name a key my solve produces and neither of PyPSA's does --
+                  // and on a degenerate flow pattern that happens: which lines carry anything
+                  // at all is part of the face, not just how much. So if any group of a kind
+                  // moved, every group of that kind comes out of this comparison.
+                  //
+                  // Still far finer than the whole-network skip it replaces: on `ac-dc-co2`
+                  // only `Line` and `Link` are loose, and every generator group is compared.
+                  val loose = undetermined(name, metric, groupBy).map(component)
+                  val wantedHere = wanted.filterNot((key, _) => loose.contains(component(key)))
+                  val shared  = wantedHere.filter((key, _) => covered.contains(component(key)))
+                  val skipped = wantedHere.keySet.map(component) -- covered
 
-                  // The uncovered set is asserted, not ignored. If PyPSA ever reports a
-                  // component kind this module neither covers nor knows about, that is a gap
-                  // to see rather than a row quietly dropped from the comparison.
-                  assert(skipped.subsetOf(uncovered),
-                         s"$name/$metric|$groupBy: PyPSA reports ${skipped -- uncovered}, " +
-                           "which is neither covered nor a known branch kind")
+                  // Nothing is uncovered any more, so this asserts the comparison is whole
+                  // rather than that the hole is the expected shape. A component kind PyPSA
+                  // reports and this module does not know about is a gap to see.
+                  assertEquals(skipped, Set.empty[String],
+                    s"$name/$metric|$groupBy: PyPSA reports a component this module omits")
 
                   // A metric that agrees because both sides are empty proves nothing, so a
                   // trivial one is not counted. It does NOT abort the test: an `assume` here
@@ -221,7 +259,9 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                   if shared.values.exists(v => math.abs(v) > 1e-9) then
                     compared += 1
                     assertEquals(
-                      significant(mine).keySet.filter(k => covered.contains(component(k))),
+                      significant(mine).keySet
+                        .filterNot(k => loose.contains(component(k)))
+                        .filter(k => covered.contains(component(k))),
                       significant(shared).keySet,
                       s"$name/$metric|$groupBy: different groups from PyPSA")
                     shared.foreach { (key, want) =>
@@ -235,6 +275,49 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         assert(compared > 0, s"$name compared no metric at all")
       }
     }
+  }
+
+  test("every network records a determinacy measurement") {
+    assume(available, "goldens missing")
+    // The skip above reads this block and treats an absent one as "everything is a point".
+    // That is the right default for a key the generator found no disagreement on, and the
+    // wrong one for a generator that stopped measuring -- which would silently restore every
+    // comparison against a face. This is the difference.
+    val missing = networks.filterNot(n => results(n).obj.get("determinacy").exists(_.obj.contains("statistics")))
+    assertEquals(missing, List.empty[String])
+  }
+
+  test("the determinacy measurement finds the five networks it should") {
+    assume(available, "goldens missing")
+    // Pinned, for the reason the floor's own list is pinned: a measurement that silently
+    // started finding nothing would restore every comparison against a face and look like a
+    // pass.
+    val affected = networks.filter { n =>
+      groupings.exists(g => recordedMetrics.exists(m => undetermined(n, m, g).nonEmpty))
+    }
+    assertEquals(affected, List("ac-dc-co2", "ac-dc-txcost", "scigrid-de",
+                                "storage-cyclic-co2", "storage-hvdc"))
+
+    // Three of the five are degenerate in their BRANCHES alone, which is what let branch
+    // coverage ship: every one-port group on them is a point, so widening `covered` cost
+    // nothing on the components that were already compared.
+    Seq("ac-dc-co2", "ac-dc-txcost", "storage-cyclic-co2").foreach { n =>
+      val kinds = groupings.flatMap(g => recordedMetrics.flatMap(m => undetermined(n, m, g)))
+        .map(component).toSet
+      assertEquals(kinds -- Set("Line", "Link", "Transformer"), Set.empty[String],
+        s"$n was branch-only and now has an undetermined one-port group")
+    }
+
+    // `scigrid-de` is degenerate across four component kinds, which its `dispatch_note`
+    // already said. `storage-hvdc` has ONE one-port group, and it is worth naming rather
+    // than folding into the three above: `Generator|Gas 2`'s capex moves by 0.0236 between
+    // the two solves, which is 2.4x the 1e-2 floor rather than the 14-to-538 the other faces
+    // move by. It sits in the band where interior-point tolerance and a genuine face cannot
+    // be told apart, and it is treated as a face because that direction costs one skipped
+    // group while the other costs a comparison that breaks on a tie-break.
+    val hvdc = groupings.flatMap(g => recordedMetrics.flatMap(m => undetermined("storage-hvdc", m, g)))
+      .filter(k => component(k) == "Generator").toSet
+    assertEquals(hvdc, Set("Generator|Gas 2", "Generator|2"))
   }
 
   test("every metric the generator records has an implementation here") {
@@ -316,7 +399,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
           .groupMap(_._1)(_._2)
           .view.mapValues(_.toSet).toMap
         assertEquals(loaded("Generator"), Set("p", "marginal_cost"))
-        assertEquals(loaded("Link"), Set("p0", "marginal_cost"))
+        assertEquals(loaded("Link"), Set("p0", "marginal_cost", "efficiency"))
         assertEquals(loaded("Store"), Set("e", "p", "marginal_cost", "marginal_cost_storage"))
         // `Load` is a one-port with no solved series, listed explicitly in `quantitiesOf`
         // rather than falling through, so it contributes no rows at all.

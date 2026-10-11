@@ -1291,17 +1291,57 @@
    "Generator|b|2030": 6000.0,
    "Generator|b|2040": 14400.0
   },
+  "opex|bus_carrier": {
+   "Generator|AC|2030": 6000.0,
+   "Generator|AC|2040": 14400.0
+  },
   "opex|carrier": {
    "Generator|-|2030": 6000.0,
    "Generator|-|2040": 14400.0
+  },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator||2030": 6000.0,
+   "Generator||2040": 14400.0
+  },
+  "opex|name": {
+   "Generator|new|2040": 10800.0,
+   "Generator|old|2030": 6000.0,
+   "Generator|old|2040": 3600.0
+  },
+  "opex|unit": {
+   "Generator||2030": 6000.0,
+   "Generator||2040": 14400.0
   },
   "supply|bus": {
    "Generator|b|2030": 300.0,
    "Generator|b|2040": 300.0
   },
+  "supply|bus_carrier": {
+   "Generator|AC|2030": 300.0,
+   "Generator|AC|2040": 300.0
+  },
   "supply|carrier": {
    "Generator|-|2030": 300.0,
    "Generator|-|2040": 300.0
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator||2030": 300.0,
+   "Generator||2040": 300.0
+  },
+  "supply|name": {
+   "Generator|new|2040": 120.0,
+   "Generator|old|2030": 300.0,
+   "Generator|old|2040": 180.0
+  },
+  "supply|unit": {
+   "Generator||2030": 300.0,
+   "Generator||2040": 300.0
   }
  }
 }

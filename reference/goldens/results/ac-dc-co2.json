@@ -1354,9 +1354,29 @@
    "Generator|Manchester": 1623.02172,
    "Generator|Norway": 695.07926
   },
+  "opex|bus_carrier": {
+   "Generator|AC": 3178.55177
+  },
   "opex|carrier": {
    "Generator|gas": 146.52744,
    "Generator|wind": 3032.02433
+  },
+  "opex|country": {
+   "Generator|DE": 860.45079,
+   "Generator|NO": 695.07926,
+   "Generator|UK": 1623.02172
+  },
+  "opex|location": {
+   "Generator|": 3178.55177
+  },
+  "opex|name": {
+   "Generator|Frankfurt Gas": 146.52744,
+   "Generator|Frankfurt Wind": 713.92335,
+   "Generator|Manchester Wind": 1623.02172,
+   "Generator|Norway Wind": 695.07926
+  },
+  "opex|unit": {
+   "Generator|": 3178.55177
   },
   "supply|bus": {
    "Generator|Frankfurt": 10069.78226,
@@ -1377,11 +1397,55 @@
    "Link|Norwich": 974.15805,
    "Link|Norwich DC": 1190.10731
   },
+  "supply|bus_carrier": {
+   "Generator|AC": 32547.62808,
+   "Line|AC": 17992.0262,
+   "Line|DC": 6716.24373,
+   "Link|AC": 5318.26272,
+   "Link|DC": 5318.26272
+  },
   "supply|carrier": {
    "Generator|gas": 2930.54877,
    "Generator|wind": 29617.07931,
    "Line|AC": 24708.26994,
    "Link|DC": 10636.52544
+  },
+  "supply|country": {
+   "Generator|DE": 10069.78226,
+   "Generator|NO": 7723.10294,
+   "Generator|UK": 14754.74288,
+   "Line|DE": 10392.1246,
+   "Line|NO": 1035.04692,
+   "Line|UK": 13281.09841,
+   "Link|DE": 4087.31256,
+   "Link|NO": 4384.94752,
+   "Link|UK": 2164.26536
+  },
+  "supply|location": {
+   "Generator|": 32547.62808,
+   "Line|": 24708.26994,
+   "Link|": 10636.52544
+  },
+  "supply|name": {
+   "Generator|Frankfurt Gas": 2930.54877,
+   "Generator|Frankfurt Wind": 7139.23349,
+   "Generator|Manchester Wind": 14754.74288,
+   "Generator|Norway Wind": 7723.10294,
+   "Line|0": 3444.70626,
+   "Line|1": 6136.95503,
+   "Line|2": 2331.29622,
+   "Line|3": 1835.66659,
+   "Line|4": 2549.28092,
+   "Line|5": 1723.93035,
+   "Line|6": 6686.43456,
+   "Link|Bremen Converter": 4087.31256,
+   "Link|Norway Converter": 4384.94752,
+   "Link|Norwich Converter": 2164.26536
+  },
+  "supply|unit": {
+   "Generator|": 32547.62808,
+   "Line|": 24708.26994,
+   "Link|": 10636.52544
   }
  }
 }

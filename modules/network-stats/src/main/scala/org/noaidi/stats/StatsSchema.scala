@@ -81,10 +81,34 @@ private[stats] object StatsSchema:
       |  p_years      DOUBLE NOT NULL
       |)""".stripMargin,
 
+    // One row per bus. `carrier`, `country`, `location` and `unit` are here rather than on
+    // `entity` because four of PyPSA's seven grouping dimensions are read off the component's
+    // BUS and not off the component -- `grouping.py`'s `bus_carrier`, `country`, `location`
+    // and `unit` all map `n.c[c].static[bus]` through a column of `n.c.buses.static`.
+    //
+    // `country` is nullable for a reason that is not uniformity: it is NOT a declared PyPSA
+    // attribute, only a column real datasets add, and the grouper reaches for it unguarded.
+    // On a network without one upstream raises
+    // `AttributeError: 'DataFrame' object has no attribute 'country'`, which is why
+    // `Stats.dimension` refuses that grouping rather than grouping everything under the empty
+    // string. `location` and `unit` are declared, default to the empty string, and group as
+    // it.
     """CREATE TABLE bus (
-      |  name    VARCHAR PRIMARY KEY,
-      |  carrier VARCHAR,
-      |  v_nom   DOUBLE
+      |  name     VARCHAR PRIMARY KEY,
+      |  carrier  VARCHAR,
+      |  v_nom    DOUBLE,
+      |  country  VARCHAR,
+      |  location VARCHAR,
+      |  unit     VARCHAR
+      |)""".stripMargin,
+
+    // `carriers.csv`, for one column of it. `nice_name` is what PyPSA's `carrier` grouper
+    // maps through before it renders anything, so a carrier named `wind` with a nice name of
+    // `Wind power` groups as the latter -- and a port that read the raw column agreed with
+    // upstream on every golden until `statistics-dimensions` set one.
+    """CREATE TABLE carrier (
+      |  name      VARCHAR PRIMARY KEY,
+      |  nice_name VARCHAR
       |)""".stripMargin,
 
     // Which periods an asset exists in, for the per-period capital factor that
@@ -95,4 +119,42 @@ private[stats] object StatsSchema:
       |  entity    VARCHAR NOT NULL,
       |  period    VARCHAR NOT NULL
       |)""".stripMargin,
+
+    // Every grouping dimension, resolved once per entity.
+    //
+    // A view rather than seven expressions repeated in nineteen queries, which is the shape
+    // this module exists to avoid: a metric names a dimension by column, and the joins and
+    // the `nice_name` fall-back live in one place. `Stats.dimension` validates the name
+    // against this view, so an unknown grouper is refused rather than interpolated.
+    //
+    // ==The carrier chain is three steps and every one of them is PyPSA's==
+    //
+    // `nice_name` where it is set, else the carrier's own name, else a dash. Upstream writes
+    // it as `_map_with_multiindex(...).fillna(carrier).replace("", "-")` over a `nice_name`
+    // column already filtered by `[lambda ds: ds != ""]` -- so a carrier with an EMPTY nice
+    // name falls back to its own name rather than to the dash, and only a component with no
+    // carrier at all becomes the dash. Two nested `NULLIF`s in that order are that
+    // expression.
+    //
+    // `bus_carrier` goes through the same chain against the bus's carrier, because the
+    // grouper calls `self.carrier(n, "Bus")` rather than reading the column. `location` and
+    // `unit` do NOT: they have no dash rendering, so an unset one groups as the empty string,
+    // which is what the goldens record.
+    """CREATE VIEW dimensions AS
+      |SELECT e.component AS component,
+      |       e.entity    AS entity,
+      |       COALESCE(NULLIF(COALESCE(NULLIF(c.nice_name, ''), e.carrier), ''), '-')
+      |         AS carrier,
+      |       COALESCE(NULLIF(COALESCE(NULLIF(bc.nice_name, ''), b.carrier), ''), '-')
+      |         AS bus_carrier,
+      |       e.bus                     AS bus,
+      |       COALESCE(b.country, '')   AS country,
+      |       COALESCE(b.location, '')  AS location,
+      |       COALESCE(b.unit, '')      AS unit,
+      |       e.entity                  AS name,
+      |       e.component               AS component_group
+      |FROM entity e
+      |LEFT JOIN bus b      ON b.name = e.bus
+      |LEFT JOIN carrier c  ON c.name = e.carrier
+      |LEFT JOIN carrier bc ON bc.name = b.carrier""".stripMargin,
   )

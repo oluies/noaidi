@@ -3,7 +3,7 @@ package org.noaidi.stats
 import java.sql.{Connection, DriverManager}
 import org.duckdb.DuckDBConnection
 import org.noaidi.lopf.{Expansion, LopfResult, Periods}
-import org.noaidi.network.{ComponentTable, Network, Role}
+import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role}
 
 /** Statistics over a solved result, answered in SQL.
   *
@@ -23,16 +23,34 @@ import org.noaidi.network.{ComponentTable, Network, Role}
   * browser demo that solves an LP in-page. A JNI dependency underneath either of those buys
   * nothing and costs the cross-build.
   *
-  * ==Skeleton==
+  * ==Two metrics, seven groupings, every golden==
   *
-  * Two metrics, chosen because they weight differently and so pin the schema's central
-  * claim: [[supply]] uses `w_generators` and [[opex]] uses `w_objective` times
-  * `p_objective`, which is `Periods.objectiveWeight`. A port that reached for one weighting
-  * for both would pass one metric and fail the other, and `operational-limit` -- the only
-  * golden whose three snapshot weightings differ -- is the fixture that separates them. The
-  * remaining seventeen metrics are listed in the design note.
+  * [[supply]] and [[opex]] of the nineteen, and they are the pair worth having first because
+  * they weight DIFFERENTLY: `supply` uses `w_generators` and `opex` uses `w_objective` times
+  * `p_objective`. A port that reached for one weighting for both would pass one metric and
+  * fail the other, and `operational-limit` -- the only golden whose three snapshot weightings
+  * differ -- is the fixture that separates them.
+  *
+  * Both answer all seven of PyPSA's grouping dimensions, and four of those are read off the
+  * component's BUS rather than off the component, which is a different kind of mistake to
+  * make: `bus_carrier`, `country`, `location` and `unit` all map the component's bus through
+  * a column of `n.c.buses.static`. `statistics-dimensions` is the fixture, because
+  * `location` and `unit` were carried by no golden at all and `country` only by one that is
+  * skipped for degeneracy.
+  *
+  * Both group by investment period as well, so no golden is skipped for having periods --
+  * eleven were. The period is the third level of the key, which is what upstream returns: a
+  * multi-period frame has a column per period rather than a single series.
+  *
+  * The remaining seventeen metrics are listed in the design note, along with what is still
+  * missing from these two: branches at their ports in `supply`, which PyPSA's
+  * `energy_balance` includes with a sign per end.
   */
-final class Stats private (private val conn: Connection) extends AutoCloseable:
+final class Stats private (
+    private val conn: Connection,
+    private val multiPeriod: Boolean,
+    private val hasCountry: Boolean,
+) extends AutoCloseable:
 
   /** One row per result row, columns by name. For anything the named metrics do not cover.
     *
@@ -51,24 +69,49 @@ final class Stats private (private val conn: Connection) extends AutoCloseable:
       out.result()
     finally st.close()
 
-  /** One `"Component|group" -> value` entry per group.
+  /** One `"Component|group"` entry per group, or `"Component|group|period"` on periods.
     *
-    * Keyed by component '''and''' group, because PyPSA does not aggregate across components
-    * by default (`aggregate_across_components=False`). A network with hydro generators and
-    * hydro reservoirs gets two hydro rows, one per component, and a reader that summed them
-    * would be comparing against a number upstream never produced.
+    * Keyed by component AND group, because PyPSA does not aggregate across components by
+    * default (`aggregate_across_components=False`). A network with hydro generators and hydro
+    * reservoirs gets two hydro rows, one per component, and a reader that summed them would
+    * be comparing against a number upstream never produced.
+    *
+    * ==The period is a third part of the key, not a fourth table==
+    *
+    * On a multi-period network `statistics` returns a frame with a column per investment
+    * period rather than a series, so every number is per period and every key carries the
+    * period as its last level. `StatsSuite` used to detect that key shape and SKIP the
+    * network -- eleven of them -- because these queries summed over the whole horizon and
+    * would have compared one number against several.
+    *
+    * It is one `GROUP BY` term, added by [[periodColumns]] when the snapshot table has
+    * periods at all. Worth saying why it is not a per-period variant of each metric: the
+    * grouping is a property of the index, not of the metric, so nineteen metrics would
+    * otherwise need thirty-eight queries, which is the duplication this module's whole
+    * argument is against.
     */
   private def grouped(sql: String): Map[String, Double] =
     query(sql).map { row =>
       val component = Option(row("component")).map(_.toString).getOrElse("")
       val group     = Option(row("grp")).map(_.toString).getOrElse("")
+      val period    = row.get("period").flatMap(Option(_)).map(_.toString)
       val value = row("value") match
         case null                => 0.0
         case n: java.lang.Number => n.doubleValue
         case other =>
           throw new IllegalStateException(s"metric returned a non-numeric value: $other")
-      s"$component|$group" -> value
+      (component +: group +: period.toSeq).mkString("|") -> value
     }.toMap
+
+  /** `", s.period AS period"` on a multi-period network, and nothing on a flat index.
+    *
+    * Two strings rather than a branch per metric, so a query reads as one statement with a
+    * term that is sometimes empty. The alternative -- selecting `period` always and dropping
+    * a NULL in Scala -- would make every flat-index group carry a NULL level that only the
+    * key builder knows to ignore.
+    */
+  private val periodSelect: String = if multiPeriod then ", s.period AS period" else ""
+  private val periodGroup: String  = if multiPeriod then ", s.period" else ""
 
   /** Energy injected, in MWh, by whatever dimension `groupBy` names.
     *
@@ -99,11 +142,12 @@ final class Stats private (private val conn: Connection) extends AutoCloseable:
     */
   def supply(groupBy: String = "carrier"): Map[String, Double] =
     grouped(s"""
-      |SELECT e.component                                            AS component,
-      |       COALESCE(NULLIF(e.${dimension(groupBy)}, ''), '-')      AS grp,
-      |       SUM(f.value * s.w_generators)                           AS value
+      |SELECT e.component                     AS component,
+      |       d.${dimension(groupBy)}          AS grp$periodSelect,
+      |       ROUND(SUM(f.value * s.w_generators), 5) AS value
       |FROM fact f
       |JOIN entity e USING (component, entity)
+      |JOIN dimensions d USING (component, entity)
       |JOIN snapshot s USING (snapshot)
       |-- One quantity per component kind, not a set union: a StorageUnit contributes BOTH
       -- `p` and `discharge` to `fact`, and `quantity IN ('p','discharge')` counted it twice.
@@ -113,8 +157,8 @@ final class Stats private (private val conn: Connection) extends AutoCloseable:
       |WHERE f.value > 0
       |  AND ( (f.quantity = 'p'         AND e.component IN ('Generator', 'Store'))
       |     OR (f.quantity = 'discharge' AND e.component = 'StorageUnit') )
-      |GROUP BY e.component, grp
-      |HAVING SUM(f.value * s.w_generators) > 1e-9
+      |GROUP BY e.component, grp$periodGroup
+      |HAVING ROUND(SUM(f.value * s.w_generators), 5) <> 0
       |""".stripMargin)
 
   /** Operating cost by `groupBy`.
@@ -171,35 +215,59 @@ final class Stats private (private val conn: Connection) extends AutoCloseable:
       |        OR (f.quantity = 'e'   AND f.component = 'Store')))
       |     OR (c.quantity = 'spill_cost' AND f.quantity = 'spill')
       |)
-      |SELECT e.component                                       AS component,
-      |       COALESCE(NULLIF(e.${dimension(groupBy)}, ''), '-') AS grp,
-      |       SUM(p.cost * s.w_objective * s.p_objective)        AS value
+      |SELECT p.component                                AS component,
+      |       d.${dimension(groupBy)}                     AS grp$periodSelect,
+      |       ROUND(SUM(p.cost * s.w_objective * s.p_objective), 5) AS value
       |FROM priced p
-      |JOIN entity e ON e.component = p.component AND e.entity = p.entity
+      |JOIN dimensions d ON d.component = p.component AND d.entity = p.entity
       |JOIN snapshot s ON s.snapshot = p.snapshot
-      |GROUP BY e.component, grp
-      |HAVING ABS(SUM(p.cost * s.w_objective * s.p_objective)) > 1e-9
+      |GROUP BY p.component, grp$periodGroup
+      |HAVING ROUND(SUM(p.cost * s.w_objective * s.p_objective), 5) <> 0
       |""".stripMargin)
 
-  /** The grouping dimensions this skeleton carries, validated rather than interpolated.
+  /** A grouping dimension, validated against the `dimensions` view rather than interpolated.
     *
     * `groupBy` reaches a query as a column name, so an unchecked value is SQL injection
-    * through a parameter that looks like an enum. Rejected by name against the columns
-    * `entity` actually has -- PyPSA's `country`, `location` and `unit` groupers are not
-    * modelled here yet and say so rather than producing an unknown-column error from DuckDB.
+    * through a parameter that looks like an enum.
+    *
+    * All seven of PyPSA's are here -- `carrier`, `bus_carrier`, `bus`, `country`, `location`,
+    * `unit` and `name` -- plus `component`, which upstream has no grouper for because every
+    * frame is already keyed by it.
+    *
+    * ==`country` is refused where the buses do not carry one==
+    *
+    * It is the one dimension that is not a declared PyPSA attribute. The grouper reads
+    * `n.c.buses.static.country` unguarded, so on a network whose `buses.csv` has no such
+    * column upstream raises `AttributeError: 'DataFrame' object has no attribute 'country'` --
+    * which `generate_goldens.py` records as an error for 37 of the 39 networks. Grouping them
+    * all under the empty string would be answering a question PyPSA declines, so this
+    * declines it too, and says which column is missing.
     */
   private def dimension(groupBy: String): String =
-    val known = Set("carrier", "bus", "component", "entity")
-    if known.contains(groupBy) then groupBy
-    else
+    if !Stats.Dimensions.contains(groupBy) then
       throw new IllegalArgumentException(
-        s"no grouping dimension '$groupBy'; this module carries ${known.toSeq.sorted.mkString(", ")}. " +
-          "PyPSA also groups by bus_carrier, country, location and unit, which are not loaded yet."
+        s"no grouping dimension '$groupBy'; PyPSA groups by " +
+          s"${Stats.Dimensions.toSeq.sorted.mkString(", ")}"
       )
+    else if groupBy == "country" && !hasCountry then
+      throw new IllegalArgumentException(
+        "this network's buses carry no `country` column, and PyPSA's own grouper raises " +
+          "AttributeError on such a network rather than grouping it under one empty country"
+      )
+    else groupBy
 
   override def close(): Unit = conn.close()
 
 object Stats:
+
+  /** Every grouping dimension a metric accepts.
+    *
+    * PyPSA's seven, plus `component`. Upstream has no `component` grouper because every frame
+    * it returns is keyed by component already -- see `grouped` -- so grouping by it alone is
+    * this module's own convenience and is named here rather than left as a surprise.
+    */
+  val Dimensions: Set[String] =
+    Set("carrier", "bus_carrier", "bus", "country", "location", "unit", "name", "component")
 
   /** Load one solved result into an in-memory DuckDB.
     *
@@ -214,7 +282,13 @@ object Stats:
       try StatsSchema.ddl.foreach(st.execute)
       finally st.close()
       load(conn.asInstanceOf[DuckDBConnection], result)
-      new Stats(conn)
+      // Both read off the network rather than out of SQL, because both are questions about
+      // what the network HAS rather than about what it holds: a flat index has no period
+      // column to be NULL, and a `buses.csv` without a `country` is a different thing from
+      // one whose countries are all empty -- which is the distinction PyPSA's own grouper
+      // makes by raising.
+      val n = result.network
+      new Stats(conn, n.isMultiPeriod, n.table("Bus").exists(_.static.contains("country")))
     catch
       case e: Throwable =>
         conn.close()
@@ -282,11 +356,30 @@ object Stats:
     })
 
     n.table("Bus").foreach { buses =>
-      insert("bus", 3)(buses.ids.map { id =>
+      insert("bus", 6)(buses.ids.map { id =>
         Seq(
           id,
           if declares(buses, "carrier") then buses.string("carrier", id) else null,
           buses.float("v_nom", id),
+          // NULL where the column is absent, not the empty string, and the difference is
+          // load-bearing for `country`: PyPSA's grouper raises on a network that has no such
+          // column, so `Stats.dimension` has to be able to tell that from a network whose
+          // countries happen to be blank.
+          if declares(buses, "country") then buses.string("country", id) else null,
+          if declares(buses, "location") then buses.string("location", id) else null,
+          if declares(buses, "unit") then buses.string("unit", id) else null,
+        )
+      })
+    }
+
+    // `carriers.csv`, for `nice_name` alone. A network with no `Carrier` table leaves this
+    // empty and the view's `LEFT JOIN` then falls back to the raw carrier, which is what
+    // PyPSA's `fillna(carrier)` does -- so the absent case needs no branch here.
+    n.table("Carrier").foreach { carriers =>
+      insert("carrier", 2)(carriers.ids.map { id =>
+        Seq(
+          id,
+          if declares(carriers, "nice_name") then carriers.string("nice_name", id) else null,
         )
       })
     }
@@ -320,7 +413,7 @@ object Stats:
 
     // Only components with a solved series. A `Carrier` or a `LineType` has no rows in
     // `fact`, and putting them in `entity` would make every unqualified count wrong.
-    val modelled = n.tables.values.filter(t => quantitiesOf(t.spec.name).nonEmpty).toSeq
+    val modelled = n.tables.values.filter(t => quantitiesOf(t.spec).nonEmpty).toSeq
 
     modelled.foreach { table =>
       val component = table.spec.name
@@ -359,7 +452,7 @@ object Stats:
       modelled.foreach { table =>
         val component = table.spec.name
         table.ids.foreach { id =>
-          quantitiesOf(component).foreach { quantity =>
+          quantitiesOf(table.spec).foreach { quantity =>
             n.snapshots.indices.foreach { t =>
               facts.beginRow()
               facts.append(component)
@@ -383,25 +476,51 @@ object Stats:
   /** Which series a component contributes, by the name the queries use.
     *
     * `marginal_cost` is in here beside the solved series, which deserves a word: it is an
-    * '''input''', not an output, and it is in `fact` rather than on `entity` because PyPSA
-    * lets it vary per snapshot. `opex` joins it fact-to-fact for that reason. Any other
-    * time-varying attribute a metric needs belongs here on the same grounds.
+    * INPUT, not an output, and it is in `fact` rather than on `entity` because PyPSA lets it
+    * vary per snapshot. `opex` joins it fact-to-fact for that reason. Any other time-varying
+    * attribute a metric needs belongs here on the same grounds.
     *
-    * Driven by the component name rather than by the schema's category, and that is a
-    * skeleton shortcut worth flagging: `Lopf.build` selects its tables by [[Role]] so a
-    * component added upstream lands correctly without being named, and this does not. A
-    * `Process` -- already a second controllable branch -- would contribute no rows here and
-    * no error either.
+    * ==Branches by `Role`, one-ports by name, and nothing silently empty==
+    *
+    * The branch cases are selected the way `Lopf.build` selects its tables, so `Process` --
+    * PyPSA's second controllable branch -- contributes `p0` and its cost without being named.
+    * The first version of this matched on `"Line" | "Transformer"` and `"Link"`, which was
+    * correct for every component that exists today and would have let a new branch contribute
+    * no rows and no error either.
+    *
+    * The one-ports cannot be keyed that way and it is worth being precise about why: `Role`
+    * does not distinguish them, because PyPSA's own category does not. `Generator`,
+    * `StorageUnit`, `Store` and `Load` are all one-ports, and their variable sets are not
+    * variations on a theme -- a generator has one series, a storage unit five, a store two,
+    * and a load is data rather than a variable at all. There is nothing to generalise over,
+    * so they stay named.
+    *
+    * What changed with them is the fall-through. It used to be `case _ => Seq.empty`, so a
+    * one-port added upstream would contribute nothing to `fact`, appear in no metric, and
+    * raise nothing -- the silent-omission failure this repository is arranged against. An
+    * unknown one-port now refuses by name. `Load` is the one exception and is listed
+    * explicitly, because "data rather than a variable" is a decision and not an absence.
     */
-  private def quantitiesOf(component: String): Seq[String] = component match
-    case "Generator"            => Seq("p", "marginal_cost")
-    case "Line" | "Transformer" => Seq("p0")
-    case "Link"                 => Seq("p0", "marginal_cost")
-    case "StorageUnit" =>
-      Seq("p", "soc", "charge", "discharge", "spill",
-          "marginal_cost", "marginal_cost_storage", "spill_cost")
-    case "Store"                => Seq("e", "p", "marginal_cost", "marginal_cost_storage")
-    case _                      => Seq.empty
+  private def quantitiesOf(spec: ComponentSpec): Seq[String] = Role.of(spec) match
+    case Role.PassiveBranch      => Seq("p0")
+    case Role.ControllableBranch => Seq("p0", "marginal_cost")
+    case Role.Bus | Role.None    => Seq.empty
+    case Role.Attached =>
+      spec.name match
+        case "Generator" => Seq("p", "marginal_cost")
+        case "StorageUnit" =>
+          Seq("p", "soc", "charge", "discharge", "spill",
+              "marginal_cost", "marginal_cost_storage", "spill_cost")
+        case "Store" => Seq("e", "p", "marginal_cost", "marginal_cost_storage")
+        // Consumption, which enters the bus balance as a constant. It has no solved series
+        // and so no row in `fact`; `withdrawal` will read it off the network when it exists.
+        case "Load" => Seq.empty
+        case other =>
+          throw new IllegalStateException(
+            s"'$other' is a one-port this module has no series for. Every other one-port " +
+              "contributes to `fact` and to every metric over it; returning nothing here " +
+              "would leave it out of all nineteen with no diagnostic."
+          )
 
   /** One value, for one quantity of one entity at one snapshot.
     *

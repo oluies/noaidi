@@ -321,6 +321,84 @@ assertions that says the equality is right. Breadth of coverage found a correctn
 another module, and then confirmed its fix, which is an argument for the module that the
 nineteen-metrics argument does not make.
 
+## Every golden, every grouping
+
+The skeleton compared two metrics on two groupings over 23 of 36 networks. It now compares
+two metrics on **all seven** groupings over 39 of 41, and the three things that took are each
+worth recording because none of them was in the plan above.
+
+### Four of the seven dimensions are read off the bus, and four had nothing to compare
+
+`carrier`, `bus` and `name` come off the component. `bus_carrier`, `country`, `location` and
+`unit` map the component's bus through a column of `n.c.buses.static` — a different kind of
+mistake to make, and one no fixture could catch: `location` and `unit` were carried by no
+golden at all, and `country` only by `scigrid-de`, which is skipped for degeneracy. So
+`statistics-dimensions` exists, with three buses, three bus carriers, two countries, two
+locations and two units, arranged so every dimension splits for a component this module
+covers. The Store on its hydrogen bus is what makes `unit` and `location` say anything:
+without it that bus has only links attached, and branches are not covered in `supply`.
+
+### `nice_name`, which is not a dimension and was the real gap
+
+PyPSA's `carrier` grouper maps each carrier through `carriers.nice_name` where that is
+non-empty, falls back to the raw name, and only then renders an empty carrier as `'-'`. No
+golden set a `nice_name`, so a port that skipped the mapping entirely agreed with upstream on
+all 38 networks — which this one did. `bus_carrier` goes through the same grouper rather than
+reading the column, so it inherits the mapping too.
+
+The chain is `COALESCE(NULLIF(COALESCE(NULLIF(nice_name, ''), carrier), ''), '-')`, and the
+order matters in a way worth stating: upstream filters `nice_name[lambda ds: ds != ""]`
+*before* mapping, so a carrier whose nice name is the empty string falls back to its own name
+rather than to the dash. Only a component with no carrier at all becomes `'-'`.
+
+### `country` is refused, because PyPSA raises
+
+It is the one dimension that is not a declared attribute. The grouper reads
+`n.c.buses.static.country` unguarded, so on a network whose `buses.csv` has no such column
+upstream raises `AttributeError: 'DataFrame' object has no attribute 'country'` — recorded as
+an error for 39 of the 41 goldens. Grouping them all under one empty country would be
+answering a question PyPSA declines, so this declines it too. `StatsSuite` asserts the
+refusal rather than inferring it from a missing golden block, because "no block and the module
+raised" is also what a module raising for the wrong reason looks like.
+
+### The period is the third level of the key
+
+Eleven networks were skipped for having investment periods: upstream returns a frame with a
+column per period there, so its numbers are per period and its keys carry the period as
+their last level, while these queries summed over the horizon.
+
+It is one `GROUP BY` term, added when the snapshot table has periods at all — not a
+per-period variant of each metric, which for nineteen metrics would be thirty-eight queries
+and is the duplication this module's whole argument is against.
+
+### `drop_zero` is round-to-five-then-drop, and that is only as reproducible as the solver
+
+The sketch had this as a threshold. Upstream's rule is `df.round(5)` followed by `df[df != 0]`
+— `options.params.statistics.round` is 5 — so a group at 1e-7 is dropped because it rounds
+away, not because it is small. The module reproduces that exactly, and the values it returns
+are rounded to five decimals, because upstream's are.
+
+What the rule is not is reproducible across solvers at that scale. On
+`ac-dc-txvolume-exact` HiGHS leaves two idle generators at exactly 0.0 while Prima — a
+first-order method at 1e-9 on a 60,000-variable LP — leaves them at 1.0e-5, which rounds to
+0.00001 and survives. So the suite compares group *sets* above a floor relative to the largest
+group in the same metric, five orders of magnitude below any real group on that network, and
+says in the code that this is a tolerance on the solver rather than on the metric.
+
+### What is still not covered
+
+- **The seventeen other metrics.** Each is a query, and the six corrections above are the
+  argument for adding them against measured goldens a few at a time rather than in one pass.
+- **Branches in `supply`.** PyPSA's `energy_balance` includes `Line`, `Link` and
+  `Transformer` at their ports with a sign per end, and the port matters: measured on
+  `statistics-dimensions`, `supply` groups a link by the bus at its *receiving* port while
+  `opex` groups it by `bus0`. The schema already carries `bus1`. `StatsSuite` asserts that the
+  uncovered component set is exactly the branch kinds, so adding them changes a test.
+- **The `HAVING` clause's rounding.** Replacing `ROUND(..., 5) <> 0` with a `1e-9` threshold
+  fails no test, because the suite's solver floor hides exactly the artefacts the rounding
+  removes. Measured and stated rather than counted as coverage; the rounding of the returned
+  *value* is separable and is asserted.
+
 ## What this deliberately does not do
 
 - **Back the network.** `Network` stays as it is. Nothing in `network-model`,

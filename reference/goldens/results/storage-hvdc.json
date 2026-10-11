@@ -3709,10 +3709,41 @@
    "StorageUnit|4": 18639.39237,
    "StorageUnit|5": 2388.61199
   },
+  "opex|bus_carrier": {
+   "Generator|AC": 8204.95941,
+   "StorageUnit|AC": 25328.51924
+  },
   "opex|carrier": {
    "Generator|gas": 7413.93849,
    "Generator|wind": 791.02092,
    "StorageUnit|battery": 25328.51924
+  },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator|": 8204.95941,
+   "StorageUnit|": 25328.51924
+  },
+  "opex|name": {
+   "Generator|Gas 0": 645.51003,
+   "Generator|Gas 1": 6768.42845,
+   "Generator|Wind 0": 8.22946,
+   "Generator|Wind 1": 144.05701,
+   "Generator|Wind 2": 1.66329,
+   "Generator|Wind 3": 12.69616,
+   "Generator|Wind 4": 1.76168,
+   "Generator|Wind 5": 622.61331,
+   "StorageUnit|Storage 0": 74.93245,
+   "StorageUnit|Storage 1": 687.6903,
+   "StorageUnit|Storage 2": 3485.08978,
+   "StorageUnit|Storage 3": 52.80234,
+   "StorageUnit|Storage 4": 18639.39237,
+   "StorageUnit|Storage 5": 2388.61199
+  },
+  "opex|unit": {
+   "Generator|": 8204.95941,
+   "StorageUnit|": 25328.51924
   },
   "supply|bus": {
    "Generator|0": 2224.05133,
@@ -3736,12 +3767,57 @@
    "StorageUnit|4": 16615.96691,
    "StorageUnit|5": 4592.47524
   },
+  "supply|bus_carrier": {
+   "Generator|AC": 120882.06248,
+   "Line|AC": 113329.9412,
+   "Link|AC": 33426.3145,
+   "StorageUnit|AC": 27242.08788
+  },
   "supply|carrier": {
    "Generator|gas": 1465.32212,
    "Generator|wind": 119416.74036,
    "Line|AC": 113329.9412,
    "Link|AC": 33426.3145,
    "StorageUnit|battery": 27242.08788
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator|": 120882.06248,
+   "Line|": 113329.9412,
+   "Link|": 33426.3145,
+   "StorageUnit|": 27242.08788
+  },
+  "supply|name": {
+   "Generator|Gas 0": 252.0,
+   "Generator|Gas 1": 1213.32212,
+   "Generator|Wind 0": 1972.05133,
+   "Generator|Wind 1": 20807.78605,
+   "Generator|Wind 2": 1691.25223,
+   "Generator|Wind 3": 1521.17989,
+   "Generator|Wind 4": 1706.62717,
+   "Generator|Wind 5": 91717.8437,
+   "Line|0": 2266.92678,
+   "Line|1": 15250.31828,
+   "Line|2": 6453.15664,
+   "Line|3": 18525.23831,
+   "Line|4": 36846.02884,
+   "Line|5": 33988.27235,
+   "Link|TL 0": 24526.1144,
+   "Link|TL 1": 8900.2001,
+   "StorageUnit|Storage 0": 684.0,
+   "StorageUnit|Storage 1": 177.55799,
+   "StorageUnit|Storage 2": 5130.24961,
+   "StorageUnit|Storage 3": 41.83814,
+   "StorageUnit|Storage 4": 16615.96691,
+   "StorageUnit|Storage 5": 4592.47524
+  },
+  "supply|unit": {
+   "Generator|": 120882.06248,
+   "Line|": 113329.9412,
+   "Link|": 33426.3145,
+   "StorageUnit|": 27242.08788
   }
  }
 }

@@ -1909,6 +1909,15 @@ NETWORKS = {
 }
 
 
+# The statistics metrics recorded per network.
+#
+# Two, not nineteen, and that is the skeleton's scope rather than a judgement about the rest:
+# `supply` and `opex` weight DIFFERENTLY -- `supply` delegates to `energy_balance` and uses
+# `snapshot_weightings.generators`, `opex` uses `snapshot_weightings.objective` times the
+# period's `objective` -- so a port that confused the two columns passes one and fails the
+# other. Recording a metric nothing compares against would be a golden with no reader.
+STATISTICS_METRICS = ("supply", "opex")
+
 # Networks solved with `multi_investment_periods=True`.
 #
 # PyPSA keys two different things off two different signals, and conflating them
@@ -2378,6 +2387,43 @@ def capture_network(name: str, build) -> dict:
                 if len(m.c[component].static) > 0
             },
         }
+        # PyPSA's own statistics, per metric rather than as one blob.
+        #
+        # Per metric because a drift diff has to name what moved: one `statistics` object
+        # holding nineteen frames reports "statistics changed" for a one-metric regression,
+        # which is the diagnosis `results_drift.py` exists to avoid.
+        #
+        # Keyed `<component>|<group>`, because PyPSA does NOT aggregate across components by
+        # default -- `aggregate_across_components=False` -- so `supply(groupby="carrier")` on
+        # a network with hydro generators and hydro reservoirs returns two rows for hydro,
+        # one per component. A reader that flattened to the carrier alone would be comparing
+        # against a number PyPSA never produced.
+        results["statistics"] = {}
+        for metric in STATISTICS_METRICS:
+            for groupby in ("carrier", "bus"):
+                try:
+                    frame = getattr(m.statistics, metric)(groupby=groupby)
+                    # Series on a flat index, DataFrame with a column PER PERIOD on a
+                    # multi-period one. `stack()` makes both a Series whose key is a tuple,
+                    # with the period appended as the last level where there is one.
+                    #
+                    # The first version here assumed a Series and did `for part in key`, which
+                    # on a DataFrame iterates COLUMNS and hands `key` the period as a bare
+                    # int: every multi-period network recorded
+                    # `TypeError: 'int' object is not iterable`. Nine of thirty-six goldens,
+                    # and it read exactly like a PyPSA limitation -- the generator records
+                    # errors rather than swallowing them, which is what made it look upstream
+                    # until the same call was run by hand and worked.
+                    if isinstance(frame, pd.DataFrame):
+                        frame = frame.stack(future_stack=True).dropna()
+                    results["statistics"][f"{metric}|{groupby}"] = {
+                        "|".join(str(part) for part in key): jsonable(value)
+                        for key, value in frame.items()
+                    }
+                except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+                    results["statistics"][f"{metric}|{groupby}"] = {
+                        "error": f"{type(exc).__name__}: {exc}"
+                    }
         if name in DEGENERATE_DISPATCH:
             results["optimize"]["dispatch_note"] = DEGENERATE_DISPATCH[name]
         if name in NOT_A_TARGET:

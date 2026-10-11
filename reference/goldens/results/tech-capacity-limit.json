@@ -532,5 +532,24 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|A": 4800.0
+  },
+  "opex|carrier": {
+   "Generator|gas": 4800.0
+  },
+  "supply|bus": {
+   "Generator|A": 230.0,
+   "Generator|B": 60.0,
+   "Line|B": 70.0
+  },
+  "supply|carrier": {
+   "Generator|gas": 60.0,
+   "Generator|solar": 50.0,
+   "Generator|wind": 180.0,
+   "Line|AC": 70.0
+  }
  }
 }

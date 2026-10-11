@@ -786,5 +786,22 @@
   },
   "objective": 14100.0,
   "status": "ok"
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|A": 6900.0
+  },
+  "opex|carrier": {
+   "Generator|-": 6900.0
+  },
+  "supply|bus": {
+   "Generator|A": 690.0,
+   "Line|B": 370.0,
+   "Line|C": 350.0
+  },
+  "supply|carrier": {
+   "Generator|-": 690.0,
+   "Line|AC": 720.0
+  }
  }
 }

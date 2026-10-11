@@ -1287,5 +1287,31 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b|2030": 8000.0,
+   "Generator|b|2040": 22800.0,
+   "Store|b|2030": 0.6,
+   "Store|b|2040": 0.6
+  },
+  "opex|carrier": {
+   "Generator|-|2030": 8000.0,
+   "Generator|-|2040": 22800.0,
+   "Store|AC|2030": 0.6,
+   "Store|AC|2040": 0.6
+  },
+  "supply|bus": {
+   "Generator|b|2030": 300.0,
+   "Generator|b|2040": 300.0,
+   "Store|b|2030": 60.0,
+   "Store|b|2040": 60.0
+  },
+  "supply|carrier": {
+   "Generator|-|2030": 300.0,
+   "Generator|-|2040": 300.0,
+   "Store|AC|2030": 60.0,
+   "Store|AC|2040": 60.0
+  }
  }
 }

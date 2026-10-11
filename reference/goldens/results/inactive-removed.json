@@ -807,5 +807,26 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|hv1": 19800.0
+  },
+  "opex|carrier": {
+   "Generator|-": 19800.0
+  },
+  "supply|bus": {
+   "Generator|hv1": 1320.0,
+   "Line|hv2": 152.22514,
+   "Line|hv3": 900.0,
+   "Line|mv2": 32.77486,
+   "Transformer|mv1": 267.77486,
+   "Transformer|mv2": 152.22514
+  },
+  "supply|carrier": {
+   "Generator|-": 1320.0,
+   "Line|AC": 1085.0,
+   "Transformer|-": 420.0
+  }
  }
 }

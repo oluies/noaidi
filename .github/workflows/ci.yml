@@ -204,7 +204,12 @@ jobs:
           # gets muted. A floor only fails when coverage goes backwards, which is
           # when someone should look. Raise it when the suite grows enough to be
           # worth re-anchoring; it does not need to track the total.
-          MINIMUM_TESTS=760
+          #
+          # Re-anchored from 760 to 1,040 when `network-stats` landed: the total
+          # is 1,072, and a floor left at 760 had grown 29% of slack -- enough to
+          # let the whole of `network-lopf` stop running and still pass, which is
+          # the failure the paragraph above says the floor exists to catch.
+          MINIMUM_TESTS=1040
           if [ "$total" -lt "$MINIMUM_TESTS" ]; then
             echo "::error::Only $total tests ran, below the floor of $MINIMUM_TESTS -- either the suite shrank or something stopped running."
             exit 1

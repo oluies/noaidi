@@ -920,5 +920,23 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b": 30514.63766,
+   "StorageUnit|b": 1078.06053
+  },
+  "opex|carrier": {
+   "Generator|-": 30514.63766,
+   "StorageUnit|-": 1078.06053
+  },
+  "supply|bus": {
+   "Generator|b": 589.2364,
+   "StorageUnit|b": 285.7636
+  },
+  "supply|carrier": {
+   "Generator|-": 589.2364,
+   "StorageUnit|-": 285.7636
+  }
  }
 }

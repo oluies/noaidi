@@ -837,5 +837,28 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|hv1": 7648.10588,
+   "Generator|hv3": 60759.47059
+  },
+  "opex|carrier": {
+   "Generator|-": 68407.57647
+  },
+  "supply|bus": {
+   "Generator|hv1": 509.87373,
+   "Generator|hv3": 810.12627,
+   "Line|hv2": 152.22514,
+   "Line|hv3": 89.87373,
+   "Line|mv2": 32.77486,
+   "Transformer|mv1": 267.77486,
+   "Transformer|mv2": 152.22514
+  },
+  "supply|carrier": {
+   "Generator|-": 1320.0,
+   "Line|AC": 274.87373,
+   "Transformer|-": 420.0
+  }
  }
 }

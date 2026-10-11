@@ -3693,5 +3693,55 @@
     ]
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|0": 653.7395,
+   "Generator|1": 6912.48546,
+   "Generator|2": 1.66329,
+   "Generator|3": 12.69616,
+   "Generator|4": 1.76168,
+   "Generator|5": 622.61331,
+   "StorageUnit|0": 74.93245,
+   "StorageUnit|1": 687.6903,
+   "StorageUnit|2": 3485.08978,
+   "StorageUnit|3": 52.80234,
+   "StorageUnit|4": 18639.39237,
+   "StorageUnit|5": 2388.61199
+  },
+  "opex|carrier": {
+   "Generator|gas": 7413.93849,
+   "Generator|wind": 791.02092,
+   "StorageUnit|battery": 25328.51924
+  },
+  "supply|bus": {
+   "Generator|0": 2224.05133,
+   "Generator|1": 22021.10817,
+   "Generator|2": 1691.25223,
+   "Generator|3": 1521.17989,
+   "Generator|4": 1706.62717,
+   "Generator|5": 91717.8437,
+   "Line|1": 2546.06135,
+   "Line|2": 21424.34035,
+   "Line|3": 46384.31806,
+   "Line|4": 41035.95732,
+   "Line|5": 1939.26413,
+   "Link|0": 24526.1144,
+   "Link|1": 8715.72115,
+   "Link|4": 184.47895,
+   "StorageUnit|0": 684.0,
+   "StorageUnit|1": 177.55799,
+   "StorageUnit|2": 5130.24961,
+   "StorageUnit|3": 41.83814,
+   "StorageUnit|4": 16615.96691,
+   "StorageUnit|5": 4592.47524
+  },
+  "supply|carrier": {
+   "Generator|gas": 1465.32212,
+   "Generator|wind": 119416.74036,
+   "Line|AC": 113329.9412,
+   "Link|AC": 33426.3145,
+   "StorageUnit|battery": 27242.08788
+  }
  }
 }

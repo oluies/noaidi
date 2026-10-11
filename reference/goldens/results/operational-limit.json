@@ -665,5 +665,25 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b": 800.0,
+   "StorageUnit|b": 2000.0
+  },
+  "opex|carrier": {
+   "Generator|gas": 480.0,
+   "Generator|hydro": 320.0,
+   "StorageUnit|hydro": 2000.0
+  },
+  "supply|bus": {
+   "Generator|b": 600.0,
+   "StorageUnit|b": 600.0
+  },
+  "supply|carrier": {
+   "Generator|gas": 120.0,
+   "Generator|hydro": 480.0,
+   "StorageUnit|hydro": 600.0
+  }
  }
 }

@@ -950,5 +950,27 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b|2030": 6100.0,
+   "Generator|b|2040": 8920.0
+  },
+  "opex|carrier": {
+   "Generator|clean|2030": 4500.0,
+   "Generator|clean|2040": 7200.0,
+   "Generator|gas|2030": 1600.0,
+   "Generator|gas|2040": 1720.0
+  },
+  "supply|bus": {
+   "Generator|b|2030": 200.0,
+   "Generator|b|2040": 200.0
+  },
+  "supply|carrier": {
+   "Generator|clean|2030": 50.0,
+   "Generator|clean|2040": 80.0,
+   "Generator|gas|2030": 150.0,
+   "Generator|gas|2040": 120.0
+  }
  }
 }

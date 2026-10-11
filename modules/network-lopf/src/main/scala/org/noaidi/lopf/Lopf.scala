@@ -125,6 +125,9 @@ object Lopf:
     // Beside `Periods.reject` rather than inside it: a snapshot weighting is not a period's,
     // and `Periods.reject` returns early on a flat index while every network has these.
     rejectSnapshotWeightings(network)
+    // Beside it for the same reason: a set point is a value on a component rather than a
+    // feature flag, so no other reject reaches it.
+    rejectDispatchSetPoints(network)
     // Only the delays PyPSA's own consistency check refuses. The rest are
     // modelled -- see `Delays`, and the shift applied in the balance rows below.
     //
@@ -1324,6 +1327,52 @@ object Lopf:
         s"network contains unmodelled component(s): " +
           unhandled.map(t => s"${t.spec.name} (${t.size})").mkString(", ")
       )
+
+  /** Refuse a dispatch set point that would pin a variable this model leaves free.
+    *
+    * `optimize` applies `define_fixed_operation_constraints` to '''every''' operational
+    * variable (`optimize.py:846`), so a `p_set` given on a generator or a controllable
+    * branch is an equality fixing its dispatch at each snapshot it covers. `StorageUnit` and
+    * `Store` already refuse theirs — [[Storage.reject]] and [[Stores.reject]], with the
+    * reasoning — and these two were the hole in that list.
+    *
+    * It was a silent hole, and `ac-pf-pv` is the fixture that measures it: its PV generator
+    * carries `generators-p_set.csv`, PyPSA pins it to 60/80 MW and pays 7,650, and this port
+    * dispatched it freely to 120/145 MW for 2,650 and reported `Optimal`. Cheaper by a third
+    * with no diagnostic, which is the exact failure every refusal here exists to prevent. It
+    * went unseen because nothing compared that network's LOPF result until `network-stats`
+    * ran a metric over it — a reminder that a fixture only guards what some suite reads.
+    *
+    * A `Load`'s `p_set` is '''not''' a set point in this sense: it is the consumption that
+    * enters the bus balance, and it is read as data. Hence selecting by [[Role]] — generators
+    * and controllable branches — rather than refusing everything that carries the column.
+    * Selecting by role also covers `Process`, PyPSA's second controllable branch and one
+    * `optimize.py` passes through the same loop — unreachable as things stand, because
+    * [[rejectUnhandled]] turns a network carrying one away first. By role rather than by name
+    * so that it stays covered if that ever stops being true.
+    */
+  private def rejectDispatchSetPoints(network: Network): Unit =
+    val pinnable = network.tables.values.filter { table =>
+      table.size > 0 && (Role.of(table.spec) match
+        case Role.ControllableBranch => true
+        case Role.Attached           => table.spec.name == "Generator"
+        case _                       => false)
+    }
+    pinnable.foreach { table =>
+      // A series or a finite static cell. `p_set` defaults to NaN on both components, which
+      // is what makes "not given" and "given as zero" distinguishable at all -- a zero
+      // `p_set` is a real constraint holding the unit off.
+      val pinned = table.ids.filter { id =>
+        table.series.get("p_set").exists(_.covers(id)) ||
+        (table.static.contains("p_set") && table.float("p_set", id).isFinite)
+      }
+      if pinned.nonEmpty then
+        throw new UnsupportedNetwork(
+          s"${table.spec.name} '${pinned.head}' sets p_set, which pins its dispatch at every " +
+            "snapshot the set point covers; that equality is not built here, and dropping it " +
+            "leaves the dispatch free and the answer cheaper"
+        )
+    }
 
   /** Refuse a snapshot weighting that cannot be a coefficient.
     *

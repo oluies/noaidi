@@ -1315,5 +1315,31 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b|2030": 9000.0,
+   "Generator|b|2040": 23200.0,
+   "StorageUnit|b|2030": 40.4,
+   "StorageUnit|b|2040": 40.4
+  },
+  "opex|carrier": {
+   "Generator|-|2030": 9000.0,
+   "Generator|-|2040": 23200.0,
+   "StorageUnit|-|2030": 40.4,
+   "StorageUnit|-|2040": 40.4
+  },
+  "supply|bus": {
+   "Generator|b|2030": 300.0,
+   "Generator|b|2040": 300.0,
+   "StorageUnit|b|2030": 40.0,
+   "StorageUnit|b|2040": 40.0
+  },
+  "supply|carrier": {
+   "Generator|-|2030": 300.0,
+   "Generator|-|2040": 300.0,
+   "StorageUnit|-|2030": 40.0,
+   "StorageUnit|-|2040": 40.0
+  }
  }
 }

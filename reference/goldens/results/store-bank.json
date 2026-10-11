@@ -836,5 +836,23 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b": 117124.52254,
+   "Store|b": 175.84356
+  },
+  "opex|carrier": {
+   "Generator|-": 117124.52254,
+   "Store|AC": 175.84356
+  },
+  "supply|bus": {
+   "Generator|b": 798.67271,
+   "Store|b": 295.23668
+  },
+  "supply|carrier": {
+   "Generator|-": 798.67271,
+   "Store|AC": 295.23668
+  }
  }
 }

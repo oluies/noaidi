@@ -1348,5 +1348,41 @@
  },
  "pf": {
   "error": "AttributeError: 'SubNetwork' object has no attribute 'Y'"
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|Frankfurt": 6701.5063,
+   "Generator|Manchester": 1784.2019,
+   "Generator|Norway": 695.07926
+  },
+  "opex|carrier": {
+   "Generator|gas": 5987.58295,
+   "Generator|wind": 3193.20451
+  },
+  "supply|bus": {
+   "Generator|Frankfurt": 8604.50788,
+   "Generator|Manchester": 16220.01727,
+   "Generator|Norway": 7723.10294,
+   "Line|Bremen": 4264.57341,
+   "Line|Bremen DC": 5049.75771,
+   "Line|Frankfurt": 1595.36013,
+   "Line|London": 5328.02059,
+   "Line|Manchester": 115.56845,
+   "Line|Norway DC": 1190.13729,
+   "Line|Norwich": 7464.12024,
+   "Line|Norwich DC": 1975.50677,
+   "Link|Bremen": 4752.77493,
+   "Link|Bremen DC": 756.6976,
+   "Link|Norway": 1035.04692,
+   "Link|Norway DC": 3349.9006,
+   "Link|Norwich": 974.15805,
+   "Link|Norwich DC": 2655.3817
+  },
+  "supply|carrier": {
+   "Generator|gas": 1465.27439,
+   "Generator|wind": 31082.3537,
+   "Line|AC": 26983.04459,
+   "Link|DC": 13523.95979
+  }
  }
 }

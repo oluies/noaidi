@@ -992,5 +992,31 @@
     []
    ]
   }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|b|2030": 8440.0,
+   "Generator|b|2040": 12020.0,
+   "StorageUnit|b|2030": 40.0
+  },
+  "opex|carrier": {
+   "Generator|-|2030": 8400.0,
+   "Generator|-|2040": 11900.0,
+   "Generator|hydro|2030": 40.0,
+   "Generator|hydro|2040": 120.0,
+   "StorageUnit|hydro|2030": 40.0
+  },
+  "supply|bus": {
+   "Generator|b|2030": 180.0,
+   "Generator|b|2040": 200.0,
+   "StorageUnit|b|2030": 40.0
+  },
+  "supply|carrier": {
+   "Generator|-|2030": 160.0,
+   "Generator|-|2040": 140.0,
+   "Generator|hydro|2030": 20.0,
+   "Generator|hydro|2040": 60.0,
+   "StorageUnit|hydro|2030": 40.0
+  }
  }
 }

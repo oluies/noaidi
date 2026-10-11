@@ -1,0 +1,397 @@
+{
+ "lpf": {
+  "bus_v_ang": {
+   "columns": [
+    "a",
+    "b",
+    "h"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "wind",
+    "gas"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     50.0,
+     160.0
+    ],
+    [
+     60.0,
+     150.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "link_p0": {
+   "columns": [
+    "tie",
+    "elec"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ]
+   ]
+  },
+  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  }
+ },
+ "optimize": {
+  "bus_marginal_price": {
+   "columns": [
+    "a",
+    "b",
+    "h"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     5.0,
+     60.0,
+     8.571428571428571
+    ],
+    [
+     5.0,
+     60.0,
+     8.571428571428571
+    ]
+   ]
+  },
+  "condition": "optimal",
+  "generator_p": {
+   "columns": [
+    "wind",
+    "gas"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     205.71428571428572,
+     40.0
+    ],
+    [
+     180.0,
+     30.0
+    ]
+   ]
+  },
+  "generator_status": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "global_constraint_mu": {},
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "link_p0": {
+   "columns": [
+    "tie",
+    "elec"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     120.0,
+     35.714285714285715
+    ],
+    [
+     120.0,
+     -0.0
+    ]
+   ]
+  },
+  "multi_investment_periods": false,
+  "nominal_opt": {
+   "Generator": {
+    "gas": 200.0,
+    "wind": 300.0
+   },
+   "Link": {
+    "elec": 100.0,
+    "tie": 120.0
+   },
+   "Store": {
+    "tank": 50.0
+   }
+  },
+  "objective": 6289.285714285714,
+  "objective_constant": 0.0,
+  "status": "ok",
+  "storage_p": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_p_dispatch": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_p_store": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_spill": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "storage_state_of_charge": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  },
+  "store_e": {
+   "columns": [
+    "tank"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     30.0
+    ],
+    [
+     -0.0
+    ]
+   ]
+  },
+  "store_p": {
+   "columns": [
+    "tank"
+   ],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [
+     -5.0
+    ],
+    [
+     30.0
+    ]
+   ]
+  },
+  "total_system_cost": 6289.285714285714,
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1
+   ],
+   "values": [
+    [],
+    []
+   ]
+  }
+ },
+ "pf": {
+  "error": "KeyError: None"
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|a": 1928.57143,
+   "Generator|b": 4200.0,
+   "Link|a": 155.71429,
+   "Store|h": 5.0
+  },
+  "opex|bus_carrier": {
+   "Generator|Alternating current": 6128.57143,
+   "Link|Alternating current": 155.71429,
+   "Store|H2": 5.0
+  },
+  "opex|carrier": {
+   "Generator|Fossil gas": 4200.0,
+   "Generator|Wind power": 1928.57143,
+   "Link|Alternating current": 120.0,
+   "Link|H2": 35.71429,
+   "Store|H2": 5.0
+  },
+  "opex|country": {
+   "Generator|NO": 4200.0,
+   "Generator|SE": 1928.57143,
+   "Link|SE": 155.71429,
+   "Store|NO": 5.0
+  },
+  "opex|location": {
+   "Generator|north": 1928.57143,
+   "Generator|south": 4200.0,
+   "Link|north": 155.71429,
+   "Store|south": 5.0
+  },
+  "opex|name": {
+   "Generator|gas": 4200.0,
+   "Generator|wind": 1928.57143,
+   "Link|elec": 35.71429,
+   "Link|tie": 120.0,
+   "Store|tank": 5.0
+  },
+  "opex|unit": {
+   "Generator|MW": 6128.57143,
+   "Link|MW": 155.71429,
+   "Store|t/h": 5.0
+  },
+  "supply|bus": {
+   "Generator|a": 385.71429,
+   "Generator|b": 70.0,
+   "Link|b": 240.0,
+   "Link|h": 25.0,
+   "Store|h": 30.0
+  },
+  "supply|bus_carrier": {
+   "Generator|Alternating current": 455.71429,
+   "Link|Alternating current": 240.0,
+   "Link|H2": 25.0,
+   "Store|H2": 30.0
+  },
+  "supply|carrier": {
+   "Generator|Fossil gas": 70.0,
+   "Generator|Wind power": 385.71429,
+   "Link|Alternating current": 240.0,
+   "Link|H2": 25.0,
+   "Store|H2": 30.0
+  },
+  "supply|country": {
+   "Generator|NO": 70.0,
+   "Generator|SE": 385.71429,
+   "Link|NO": 265.0,
+   "Store|NO": 30.0
+  },
+  "supply|location": {
+   "Generator|north": 385.71429,
+   "Generator|south": 70.0,
+   "Link|south": 265.0,
+   "Store|south": 30.0
+  },
+  "supply|name": {
+   "Generator|gas": 70.0,
+   "Generator|wind": 385.71429,
+   "Link|elec": 25.0,
+   "Link|tie": 240.0,
+   "Store|tank": 30.0
+  },
+  "supply|unit": {
+   "Generator|MW": 455.71429,
+   "Link|MW": 240.0,
+   "Link|t/h": 25.0,
+   "Store|t/h": 30.0
+  }
+ }
+}

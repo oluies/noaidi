@@ -1323,11 +1323,38 @@
    "StorageUnit|b|2030": 40.4,
    "StorageUnit|b|2040": 40.4
   },
+  "opex|bus_carrier": {
+   "Generator|AC|2030": 9000.0,
+   "Generator|AC|2040": 23200.0,
+   "StorageUnit|AC|2030": 40.4,
+   "StorageUnit|AC|2040": 40.4
+  },
   "opex|carrier": {
    "Generator|-|2030": 9000.0,
    "Generator|-|2040": 23200.0,
    "StorageUnit|-|2030": 40.4,
    "StorageUnit|-|2040": 40.4
+  },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator||2030": 9000.0,
+   "Generator||2040": 23200.0,
+   "StorageUnit||2030": 40.4,
+   "StorageUnit||2040": 40.4
+  },
+  "opex|name": {
+   "Generator|gas|2030": 9000.0,
+   "Generator|gas|2040": 23200.0,
+   "StorageUnit|su|2030": 40.4,
+   "StorageUnit|su|2040": 40.4
+  },
+  "opex|unit": {
+   "Generator||2030": 9000.0,
+   "Generator||2040": 23200.0,
+   "StorageUnit||2030": 40.4,
+   "StorageUnit||2040": 40.4
   },
   "supply|bus": {
    "Generator|b|2030": 300.0,
@@ -1335,11 +1362,38 @@
    "StorageUnit|b|2030": 40.0,
    "StorageUnit|b|2040": 40.0
   },
+  "supply|bus_carrier": {
+   "Generator|AC|2030": 300.0,
+   "Generator|AC|2040": 300.0,
+   "StorageUnit|AC|2030": 40.0,
+   "StorageUnit|AC|2040": 40.0
+  },
   "supply|carrier": {
    "Generator|-|2030": 300.0,
    "Generator|-|2040": 300.0,
    "StorageUnit|-|2030": 40.0,
    "StorageUnit|-|2040": 40.0
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator||2030": 300.0,
+   "Generator||2040": 300.0,
+   "StorageUnit||2030": 40.0,
+   "StorageUnit||2040": 40.0
+  },
+  "supply|name": {
+   "Generator|gas|2030": 300.0,
+   "Generator|gas|2040": 300.0,
+   "StorageUnit|su|2030": 40.0,
+   "StorageUnit|su|2040": 40.0
+  },
+  "supply|unit": {
+   "Generator||2030": 300.0,
+   "Generator||2040": 300.0,
+   "StorageUnit||2030": 40.0,
+   "StorageUnit||2040": 40.0
   }
  }
 }

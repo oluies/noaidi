@@ -1,0 +1,4 @@
+name,v_nom,carrier,unit,location,control,generator,sub_network,country
+a,110.0,AC,MW,north,Slack,wind,0,SE
+b,110.0,AC,MW,south,Slack,gas,1,NO
+h,1.0,H2,t/h,south,Slack,,2,NO

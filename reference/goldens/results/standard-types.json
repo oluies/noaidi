@@ -846,8 +846,23 @@
   "opex|bus": {
    "Generator|hv1": 19800.0
   },
+  "opex|bus_carrier": {
+   "Generator|AC": 19800.0
+  },
   "opex|carrier": {
    "Generator|-": 19800.0
+  },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator|": 19800.0
+  },
+  "opex|name": {
+   "Generator|slack": 19800.0
+  },
+  "opex|unit": {
+   "Generator|": 19800.0
   },
   "supply|bus": {
    "Generator|hv1": 1320.0,
@@ -857,10 +872,37 @@
    "Transformer|mv1": 304.09267,
    "Transformer|mv2": 115.90733
   },
+  "supply|bus_carrier": {
+   "Generator|AC": 1320.0,
+   "Line|AC": 1568.92011,
+   "Transformer|AC": 420.0
+  },
   "supply|carrier": {
    "Generator|-": 1320.0,
    "Line|AC": 1568.92011,
    "Transformer|-": 420.0
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator|": 1320.0,
+   "Line|": 1568.92011,
+   "Transformer|": 420.0
+  },
+  "supply|name": {
+   "Generator|slack": 1320.0,
+   "Line|hv12": 599.82744,
+   "Line|hv23": 483.92011,
+   "Line|hv31": 416.07989,
+   "Line|mv12": 69.09267,
+   "Transformer|tr1": 304.09267,
+   "Transformer|tr2": 115.90733
+  },
+  "supply|unit": {
+   "Generator|": 1320.0,
+   "Line|": 1568.92011,
+   "Transformer|": 420.0
   }
  }
 }

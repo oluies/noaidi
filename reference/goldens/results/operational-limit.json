@@ -671,19 +671,59 @@
    "Generator|b": 800.0,
    "StorageUnit|b": 2000.0
   },
+  "opex|bus_carrier": {
+   "Generator|AC": 800.0,
+   "StorageUnit|AC": 2000.0
+  },
   "opex|carrier": {
    "Generator|gas": 480.0,
    "Generator|hydro": 320.0,
    "StorageUnit|hydro": 2000.0
   },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator|": 800.0,
+   "StorageUnit|": 2000.0
+  },
+  "opex|name": {
+   "Generator|gas": 480.0,
+   "Generator|ror": 320.0,
+   "StorageUnit|res": 2000.0
+  },
+  "opex|unit": {
+   "Generator|": 800.0,
+   "StorageUnit|": 2000.0
+  },
   "supply|bus": {
    "Generator|b": 600.0,
    "StorageUnit|b": 600.0
+  },
+  "supply|bus_carrier": {
+   "Generator|AC": 600.0,
+   "StorageUnit|AC": 600.0
   },
   "supply|carrier": {
    "Generator|gas": 120.0,
    "Generator|hydro": 480.0,
    "StorageUnit|hydro": 600.0
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator|": 600.0,
+   "StorageUnit|": 600.0
+  },
+  "supply|name": {
+   "Generator|gas": 120.0,
+   "Generator|ror": 480.0,
+   "StorageUnit|res": 600.0
+  },
+  "supply|unit": {
+   "Generator|": 600.0,
+   "StorageUnit|": 600.0
   }
  }
 }

@@ -999,6 +999,11 @@
    "Generator|b|2040": 12020.0,
    "StorageUnit|b|2030": 40.0
   },
+  "opex|bus_carrier": {
+   "Generator|AC|2030": 8440.0,
+   "Generator|AC|2040": 12020.0,
+   "StorageUnit|AC|2030": 40.0
+  },
   "opex|carrier": {
    "Generator|-|2030": 8400.0,
    "Generator|-|2040": 11900.0,
@@ -1006,10 +1011,35 @@
    "Generator|hydro|2040": 120.0,
    "StorageUnit|hydro|2030": 40.0
   },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator||2030": 8440.0,
+   "Generator||2040": 12020.0,
+   "StorageUnit||2030": 40.0
+  },
+  "opex|name": {
+   "Generator|gas|2030": 8400.0,
+   "Generator|gas|2040": 11900.0,
+   "Generator|ror|2030": 40.0,
+   "Generator|ror|2040": 120.0,
+   "StorageUnit|res|2030": 40.0
+  },
+  "opex|unit": {
+   "Generator||2030": 8440.0,
+   "Generator||2040": 12020.0,
+   "StorageUnit||2030": 40.0
+  },
   "supply|bus": {
    "Generator|b|2030": 180.0,
    "Generator|b|2040": 200.0,
    "StorageUnit|b|2030": 40.0
+  },
+  "supply|bus_carrier": {
+   "Generator|AC|2030": 180.0,
+   "Generator|AC|2040": 200.0,
+   "StorageUnit|AC|2030": 40.0
   },
   "supply|carrier": {
    "Generator|-|2030": 160.0,
@@ -1017,6 +1047,26 @@
    "Generator|hydro|2030": 20.0,
    "Generator|hydro|2040": 60.0,
    "StorageUnit|hydro|2030": 40.0
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator||2030": 180.0,
+   "Generator||2040": 200.0,
+   "StorageUnit||2030": 40.0
+  },
+  "supply|name": {
+   "Generator|gas|2030": 160.0,
+   "Generator|gas|2040": 140.0,
+   "Generator|ror|2030": 20.0,
+   "Generator|ror|2040": 60.0,
+   "StorageUnit|res|2030": 40.0
+  },
+  "supply|unit": {
+   "Generator||2030": 180.0,
+   "Generator||2040": 200.0,
+   "StorageUnit||2030": 40.0
   }
  }
 }

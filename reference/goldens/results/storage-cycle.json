@@ -926,17 +926,61 @@
    "Generator|b": 30514.63766,
    "StorageUnit|b": 1078.06053
   },
+  "opex|bus_carrier": {
+   "Generator|AC": 30514.63766,
+   "StorageUnit|AC": 1078.06053
+  },
   "opex|carrier": {
    "Generator|-": 30514.63766,
    "StorageUnit|-": 1078.06053
+  },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator|": 30514.63766,
+   "StorageUnit|": 1078.06053
+  },
+  "opex|name": {
+   "Generator|cheap": 14207.97099,
+   "Generator|peak": 16306.66667,
+   "StorageUnit|battery": 200.99386,
+   "StorageUnit|cyclic": 272.0,
+   "StorageUnit|hydro": 605.06667
+  },
+  "opex|unit": {
+   "Generator|": 30514.63766,
+   "StorageUnit|": 1078.06053
   },
   "supply|bus": {
    "Generator|b": 589.2364,
    "StorageUnit|b": 285.7636
   },
+  "supply|bus_carrier": {
+   "Generator|AC": 589.2364,
+   "StorageUnit|AC": 285.7636
+  },
   "supply|carrier": {
    "Generator|-": 589.2364,
    "StorageUnit|-": 285.7636
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator|": 589.2364,
+   "StorageUnit|": 285.7636
+  },
+  "supply|name": {
+   "Generator|cheap": 548.46973,
+   "Generator|peak": 40.76667,
+   "StorageUnit|battery": 100.49693,
+   "StorageUnit|cyclic": 34.0,
+   "StorageUnit|hydro": 151.26667
+  },
+  "supply|unit": {
+   "Generator|": 589.2364,
+   "StorageUnit|": 285.7636
   }
  }
 }

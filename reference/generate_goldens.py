@@ -261,6 +261,12 @@ KNOWN_UNSUPPORTED = {
     ("ac-dc-txvolume", "pf"): "same as ac-dc-meshed, from which it is derived",
     ("ac-dc-txvolume-exact", "pf"): "same as ac-dc-meshed, from which it is derived",
     ("ac-dc-txcost", "pf"): "same as ac-dc-meshed, from which it is derived",
+    # The hydrogen bus is a sub-network of one bus with no generator, so there is no slack to
+    # pick and PyPSA's own `pf` raises `KeyError: None` choosing one. Not a gap in this port:
+    # the fixture exists for `statistics`, where a carrier that is not electricity is the
+    # whole point, and a non-linear AC power flow over a hydrogen node is not a thing either
+    # side computes. `lpf` succeeds and is recorded.
+    ("statistics-dimensions", "pf"): "a single-bus H2 sub-network has no slack generator, so PyPSA's own pf raises KeyError: None",
 }
 
 def unit_commitment():
@@ -1326,6 +1332,79 @@ def fixed_dispatch_periods():
     return n
 
 
+def statistics_dimensions():
+    """All seven of `statistics`' grouping dimensions, each splitting into more than one group.
+
+    Six of the seven were unreachable from any other golden. `carrier`, `bus` and `name` come
+    off the component; `bus_carrier`, `country`, `location` and `unit` are read off the
+    component's **bus**, and no fixture carried `location` or `unit` at all while `country`
+    existed only on `scigrid-de`, whose dispatch is degenerate and therefore skipped. So four
+    dimensions had nothing to compare against and a port could have read any of them from
+    anywhere.
+
+    **`nice_name` was the other blind spot, and it is not a dimension.** PyPSA's `carrier`
+    grouper maps each carrier through `carriers.nice_name` where that is non-empty, falls back
+    to the raw name, and only then renders an empty carrier as `'-'`. No golden set a
+    `nice_name`, so a port that skipped the mapping agreed with upstream on all 38 networks.
+    Here `wind` reports as `Wind power`, `gas` as `Fossil gas` and the bus carrier `AC` as
+    `Alternating current`, while `H2` has no nice name and reports as itself -- so the mapping
+    and its fall-back are both exercised, and `bus_carrier` goes through the same grouper
+    rather than reading the column raw.
+
+    Three buses and three bus carriers, arranged so that every dimension genuinely splits for
+    a component the statistics module covers:
+
+        bus  carrier  country  location  unit     attached
+        a    AC       SE       north     MW       wind
+        b    AC       NO       south     MW       gas
+        h    H2       NO       south     t/h      tank (a Store)
+
+    The Store is what makes `unit` and `location` say anything. Without it the H2 bus has
+    only links attached, and this module does not cover branches in `supply` -- so `unit`
+    would have compared one group, `MW`, which is the shape of agreement that proves nothing.
+    `tank` also carries **no carrier of its own**: PyPSA fills a store's empty carrier from
+    its bus in `calculate_dependent_values`, so it reports as `H2`, which is the one other
+    place that rule is measured.
+
+    The dispatch is a point rather than a face, checked rather than assumed: HiGHS simplex and
+    interior point with crossover and presolve off agree to 3e-7 on every series and on the
+    objective of 6,289.29. Two things make it so. `elec` bids 1.0 then 4.0, so the store has a
+    reason to prefer discharging at the second snapshot -- with a flat price its 25 units of
+    initial fill split any way at all and the trajectory is a tie, which is what the first
+    version of this did. And `tie` is capped at 120 below what bus `b` needs, so `gas` runs at
+    exactly the remainder and both AC prices are pinned by a marginal unit: 5 at `a`, 60 at
+    `b`, 8.571 at `h`.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+
+    n.add("Bus", "a", v_nom=110.0, carrier="AC", country="SE", location="north", unit="MW")
+    n.add("Bus", "b", v_nom=110.0, carrier="AC", country="NO", location="south", unit="MW")
+    n.add("Bus", "h", v_nom=1.0, carrier="H2", country="NO", location="south", unit="t/h")
+
+    # `AC` is a Carrier here only so that `bus_carrier` has a nice name to map through.
+    # `H2` is one with no nice name, which is the fall-back half of the same rule.
+    n.add("Carrier", "AC", nice_name="Alternating current")
+    n.add("Carrier", "wind", nice_name="Wind power")
+    n.add("Carrier", "gas", nice_name="Fossil gas")
+    n.add("Carrier", "H2")
+
+    n.add("Generator", "wind", bus="a", carrier="wind", p_nom=300.0, marginal_cost=5.0)
+    n.add("Generator", "gas", bus="b", carrier="gas", p_nom=200.0, marginal_cost=60.0)
+
+    n.add("Link", "tie", bus0="a", bus1="b", p_nom=120.0, p_min_pu=-1.0, carrier="AC",
+          marginal_cost=0.5)
+    n.add("Link", "elec", bus0="a", bus1="h", p_nom=100.0, efficiency=0.7, carrier="H2",
+          marginal_cost=[1.0, 4.0])
+
+    n.add("Store", "tank", bus="h", e_nom=50.0, e_initial=25.0, marginal_cost=0.2)
+
+    n.add("Load", "da", bus="a", p_set=[50.0, 60.0])
+    n.add("Load", "db", bus="b", p_set=[160.0, 150.0])
+    n.add("Load", "dh", bus="h", p_set=[20.0, 30.0])
+    return n
+
+
 def _per_period_prices(n):
     """A gas price that is cheap once inside the first period and dear throughout the second.
 
@@ -1971,6 +2050,7 @@ NETWORKS = {
     "ac-pf-pv": ac_pf_pv,
     "fixed-dispatch": fixed_dispatch,
     "fixed-dispatch-periods": fixed_dispatch_periods,
+    "statistics-dimensions": statistics_dimensions,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
     "ac-dc-txvolume": ac_dc_txvolume,
@@ -2001,6 +2081,15 @@ NETWORKS = {
 # period's `objective` -- so a port that confused the two columns passes one and fails the
 # other. Recording a metric nothing compares against would be a golden with no reader.
 STATISTICS_METRICS = ("supply", "opex")
+
+# Every grouping dimension `statistics` offers, in the order its own container lists them.
+#
+# All seven, not the two this started with. Four of them -- `bus_carrier`, `country`,
+# `location`, `unit` -- are read off the component's BUS rather than off the component, so a
+# port can get them wrong in a way the other three cannot show, and `location` and `unit` were
+# carried by no fixture at all. `statistics-dimensions` exists so that each one splits into
+# more than one group for a component the port covers.
+STATISTICS_GROUPINGS = ("carrier", "bus_carrier", "bus", "country", "location", "unit", "name")
 
 # Networks solved with `multi_investment_periods=True`.
 #
@@ -2485,7 +2574,7 @@ def capture_network(name: str, build) -> dict:
         # against a number PyPSA never produced.
         results["statistics"] = {}
         for metric in STATISTICS_METRICS:
-            for groupby in ("carrier", "bus"):
+            for groupby in STATISTICS_GROUPINGS:
                 try:
                     frame = getattr(m.statistics, metric)(groupby=groupby)
                     # Series on a flat index, DataFrame with a column PER PERIOD on a

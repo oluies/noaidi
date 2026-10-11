@@ -313,6 +313,48 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "expanded_capacity|bus": {
+   "Generator|a": 0.0,
+   "Generator|b": 0.0,
+   "Link|a": 0.0,
+   "Store|h": 0.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|Alternating current": 0.0,
+   "Link|Alternating current": 0.0,
+   "Store|H2": 0.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|Fossil gas": 0.0,
+   "Generator|Wind power": 0.0,
+   "Link|Alternating current": 0.0,
+   "Link|H2": 0.0,
+   "Store|H2": 0.0
+  },
+  "expanded_capacity|country": {
+   "Generator|NO": 0.0,
+   "Generator|SE": 0.0,
+   "Link|SE": 0.0,
+   "Store|NO": 0.0
+  },
+  "expanded_capacity|location": {
+   "Generator|north": 0.0,
+   "Generator|south": 0.0,
+   "Link|north": 0.0,
+   "Store|south": 0.0
+  },
+  "expanded_capacity|name": {
+   "Generator|gas": 0.0,
+   "Generator|wind": 0.0,
+   "Link|elec": 0.0,
+   "Link|tie": 0.0,
+   "Store|tank": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator|MW": 0.0,
+   "Link|MW": 0.0,
+   "Store|t/h": 0.0
+  },
   "expanded_capex|bus": {},
   "expanded_capex|bus_carrier": {},
   "expanded_capex|carrier": {},
@@ -320,6 +362,48 @@
   "expanded_capex|location": {},
   "expanded_capex|name": {},
   "expanded_capex|unit": {},
+  "installed_capacity|bus": {
+   "Generator|a": 300.0,
+   "Generator|b": 200.0,
+   "Link|a": 220.0,
+   "Store|h": 50.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|Alternating current": 500.0,
+   "Link|Alternating current": 220.0,
+   "Store|H2": 50.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|Fossil gas": 200.0,
+   "Generator|Wind power": 300.0,
+   "Link|Alternating current": 120.0,
+   "Link|H2": 100.0,
+   "Store|H2": 50.0
+  },
+  "installed_capacity|country": {
+   "Generator|NO": 200.0,
+   "Generator|SE": 300.0,
+   "Link|SE": 220.0,
+   "Store|NO": 50.0
+  },
+  "installed_capacity|location": {
+   "Generator|north": 300.0,
+   "Generator|south": 200.0,
+   "Link|north": 220.0,
+   "Store|south": 50.0
+  },
+  "installed_capacity|name": {
+   "Generator|gas": 200.0,
+   "Generator|wind": 300.0,
+   "Link|elec": 100.0,
+   "Link|tie": 120.0,
+   "Store|tank": 50.0
+  },
+  "installed_capacity|unit": {
+   "Generator|MW": 500.0,
+   "Link|MW": 220.0,
+   "Store|t/h": 50.0
+  },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
   "installed_capex|carrier": {},
@@ -368,6 +452,48 @@
    "Generator|MW": 6128.57143,
    "Link|MW": 155.71429,
    "Store|t/h": 5.0
+  },
+  "optimal_capacity|bus": {
+   "Generator|a": 300.0,
+   "Generator|b": 200.0,
+   "Link|a": 220.0,
+   "Store|h": 50.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|Alternating current": 500.0,
+   "Link|Alternating current": 220.0,
+   "Store|H2": 50.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|Fossil gas": 200.0,
+   "Generator|Wind power": 300.0,
+   "Link|Alternating current": 120.0,
+   "Link|H2": 100.0,
+   "Store|H2": 50.0
+  },
+  "optimal_capacity|country": {
+   "Generator|NO": 200.0,
+   "Generator|SE": 300.0,
+   "Link|SE": 220.0,
+   "Store|NO": 50.0
+  },
+  "optimal_capacity|location": {
+   "Generator|north": 300.0,
+   "Generator|south": 200.0,
+   "Link|north": 220.0,
+   "Store|south": 50.0
+  },
+  "optimal_capacity|name": {
+   "Generator|gas": 200.0,
+   "Generator|wind": 300.0,
+   "Link|elec": 100.0,
+   "Link|tie": 120.0,
+   "Store|tank": 50.0
+  },
+  "optimal_capacity|unit": {
+   "Generator|MW": 500.0,
+   "Link|MW": 220.0,
+   "Store|t/h": 50.0
   },
   "supply|bus": {
    "Generator|a": 385.71429,

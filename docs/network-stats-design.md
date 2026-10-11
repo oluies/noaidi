@@ -477,12 +477,52 @@ has an implementation.
 
 ### What is still not covered
 
-Fourteen metrics: `overnight_cost`, `fom`, `optimal_capacity`, `installed_capacity`,
-`expanded_capacity`, `system_cost`, `withdrawal`, `transmission`, `energy_balance`,
-`curtailment`, `capacity_factor`, `revenue`, `market_value`, `prices`. The three capacity
-metrics are the obvious next batch — they are `capital_share` without the cost factor — and
-`overnight_cost` is refused by the LOPF today, which is a decision to make rather than a
-query to write.
+Eleven metrics: `overnight_cost`, `fom`, `system_cost`, `withdrawal`, `transmission`,
+`energy_balance`, `curtailment`, `capacity_factor`, `revenue`, `market_value`, `prices`.
+`overnight_cost` is refused by the LOPF today, so it is a decision rather than a query.
+
+## The capacity metrics, where the two "expanded" metrics disagree
+
+`optimal_capacity`, `installed_capacity` and `expanded_capacity` are the same two sums over
+`capital_share` as the capex family, without the cost factor — and with two differences that
+no amount of reading the capex code would have suggested.
+
+### The period weighting is on the cost, not on the capacity
+
+`capex` multiplies each period by its `objective` weighting. The capacity metrics do **not**:
+there is no `has_investment_periods` branch in `optimal_capacity`, and the goldens agree.
+`investment-periods-expansion` has weightings 1.0 and 0.5 and reports 160 and 200 MW, which is
+`old 100 + wind 60` and then `+ late 40`, nothing scaled.
+
+Obvious once stated — a megawatt is not a cost, so there is nothing for a discount factor to
+discount — and not obvious from the four metrics sharing one view. A port that passed the
+weight through would be wrong by 2× on that fixture's second period and right on every
+single-period network.
+
+### `expanded_capacity` clips and `expanded_capex` does not
+
+```
+expanded_capex     = capex.sub(installed_capex, fill_value=0)
+expanded_capacity  = optimal.sub(installed).where(optimal.abs() > installed.abs(), 0)
+```
+
+So on `ac-dc-meshed`, which retires gas from 150,000 MW installed to 982.03 chosen, the two
+metrics report the same retirement as **-21,109,107.32** and as **0**. Both numbers are in
+that network's golden. The clip reads like a safety net and is load-bearing, so it has a case
+of its own asserting the disagreement.
+
+`reindex(optimal.index)` rather than a union is the second difference: a group present only in
+`installed_capacity` is dropped here where `expanded_capex` would carry it as a negative.
+Reproduced, and **unexercised** — it needs an extendable whose optimum is exactly zero beside
+a non-zero `p_nom`, and no golden has one.
+
+### Capacity counts at port 0
+
+`optimal_capacity` multiplies by `port_efficiency(n, c, port)`, and the goldens show branch
+capacity counted once at `bus0`: `ac-dc-meshed`'s seven lines report 280,000 MW installed,
+their plain `s_nom` sum rather than twice it, and `statistics-dimensions`' electrolyser
+reports 100 MW rather than 0.7 × 100. The same `bus0` placement `opex` uses — and not the
+per-port treatment `supply` needs, which is the next thing to build.
 
 ## What this deliberately does not do
 

@@ -89,6 +89,9 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     "capex"           -> ((s, g) => s.capex(g)),
     "installed_capex" -> ((s, g) => s.installedCapex(g)),
     "expanded_capex"  -> ((s, g) => s.expandedCapex(g)),
+    "optimal_capacity"   -> ((s, g) => s.optimalCapacity(g)),
+    "installed_capacity" -> ((s, g) => s.installedCapacity(g)),
+    "expanded_capacity"  -> ((s, g) => s.expandedCapacity(g)),
   )
 
   /** The floor below which a group is a solver's zero rather than a group.
@@ -375,12 +378,6 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // difference -- which is the kind of thing a pinned list catches and a sentence about
     // magnitudes does not.
     //
-    // EXACTLY ZERO, and there are about fifty, all of them `expanded_capex` in a network
-    // whose assets are not extendable. Those are PyPSA's own: it subtracts two already
-    // zero-dropped frames and does not re-drop the difference, so a group whose expansion is
-    // nothing is reported as `0.0` rather than omitted. `Stats.expandedCapex` reproduces that
-    // and the values are compared; the floor removes them from the SET comparison, where a
-    // zero group carries no information either way.
     val hidden  = allGoldenGroups.filter((_, _, _, v, _) => math.abs(v) <= GroupFloor)
     val nonZero = hidden.filter((_, _, _, v, _) => v != 0.0)
     assertEquals(nonZero.map((n, b, k, _, _) => s"$n/$b/$k").sorted,
@@ -393,11 +390,21 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       ))
     assert(nonZero.forall((_, _, _, _, skipped) => skipped),
       "the floor hides a non-zero group in a network this suite actually compares")
-    // The zeros are the rest of it, and they are asserted to be only `expanded_capex` so that
-    // a zero appearing in another metric -- where `drop_zero` should have removed it -- is a
-    // failure rather than an addition to this list.
-    val zeroBlocks = hidden.filter((_, _, _, v, _) => v == 0.0).map((_, b, _, _, _) => b.split('|').head).distinct
-    assertEquals(zeroBlocks.sorted, List("expanded_capex"))
+    // EXACTLY ZERO, and there are many, all of them from the two `expanded_*` metrics. Those
+    // are PyPSA's own and the two arrive at a zero differently, which is why both names are
+    // pinned rather than a prefix matched:
+    //
+    //   expanded_capex     subtracts two already zero-dropped frames and does not re-drop
+    //                      the difference, so a group whose expansion is nothing is 0.0
+    //   expanded_capacity  additionally CLIPS, reporting 0 wherever the chosen capacity does
+    //                      not exceed the installed one -- so it reports 0 for the same
+    //                      retired asset that `expanded_capex` reports as -21,109,107.32
+    //
+    // Both are reproduced and their values are compared. The floor removes them from the SET
+    // comparison, where a zero group carries no information either way.
+    val zeroBlocks = hidden.filter((_, _, _, v, _) => v == 0.0)
+      .map((_, b, _, _, _) => b.split('|').head).distinct
+    assertEquals(zeroBlocks.sorted, List("expanded_capacity", "expanded_capex"))
   }
 
   test("expanded_capex reports a zero group, because PyPSA does not re-drop the difference") {
@@ -485,4 +492,32 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(significant(Map.empty), Map.empty[String, Double])
     assertEquals(significant(Map("a" -> 0.0)), Map.empty[String, Double])
     assertEquals(significant(Map("a" -> -5000.0)), Map("a" -> -5000.0))
+  }
+
+  test("the two expanded_* metrics disagree about the same retirement, as upstream does") {
+    assume(available, "goldens missing")
+    // `ac-dc-meshed` retires gas: 150,000 MW installed against 982.03 chosen. The two
+    // metrics report that differently and neither formula hints at the other:
+    //
+    //   expanded_capex     capex.sub(installed_capex, fill_value=0)
+    //                      -> -21,109,107.32, a negative
+    //   expanded_capacity  optimal.sub(installed).where(optimal.abs() > installed.abs(), 0)
+    //                      -> 0, because 982 does not exceed 150,000
+    //
+    // Both are in the goldens for that network, so the network-wide comparison already
+    // covers them. This case exists because the clip is the kind of term that reads like a
+    // safety net and is load-bearing: dropping it makes the capacity metric agree with the
+    // capex one in sign, which is exactly what upstream does not do.
+    scala.util.Using.resource(Stats.of(Lopf.solve(network("ac-dc-meshed"), params))) { stats =>
+      val cost     = stats.expandedCapex("carrier")
+      val capacity = stats.expandedCapacity("carrier")
+      assert(cost("Generator|gas") < -1e6,
+        s"gas was retired, so its expanded capex is a large negative: ${cost("Generator|gas")}")
+      assertEqualsDouble(capacity("Generator|gas"), 0.0, 1e-9,
+        "the same retirement is clipped to zero in capacity")
+      // And the metric is not uniformly zero, which a clip applied to everything would be:
+      // wind genuinely expands, 290 MW installed to 7,292.13 chosen.
+      assert(capacity("Generator|wind") > 7000.0,
+        s"wind expands and must not be clipped: ${capacity("Generator|wind")}")
+    }
   }

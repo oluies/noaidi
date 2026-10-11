@@ -36,11 +36,16 @@ import org.noaidi.network.*
   *
   * ==What is not modelled==
   *
-  * Everything that makes capital cost something other than a per-unit constant:
-  * `overnight_cost` with its annuitisation over `lifetime` and `discount_rate`,
-  * modular capacity (`p_nom_mod`, an integer number of blocks), and
-  * multi-investment-period build years. None of the goldens use them, and each
-  * would be untested arithmetic that returns a plausible number.
+  * Modular capacity -- `p_nom_mod`, an integer number of blocks -- which is a
+  * mixed-integer problem rather than this linear one.
+  *
+  * `overnight_cost` was here and is built now: see [[periodizedCost]] and
+  * [[annuity]], with `annuitised-capital` as the fixture. Multi-period build
+  * years were here too and are built. What is left of the annuitised case is
+  * three refusals about values rather than features -- a missing
+  * `discount_rate`, a non-positive `lifetime`, and investment periods of
+  * unequal length -- each of which makes the coefficient not a number where
+  * PyPSA either warns and carries a NaN or raises outright.
   */
 object Expansion:
 
@@ -121,17 +126,128 @@ object Expansion:
     if !nominalAttribute.contains(table.spec.name) then IndexedSeq.empty
     else table.ids.filter(isExtendable(table, _))
 
-  /** Cost per unit of capacity over the modelled horizon.
+  /** Hours in a year, as PyPSA's `constants.HOURS_PER_YEAR` defines it. */
+  private val HoursPerYear = 8760.0
+
+  /** The modelled horizon in years: the `objective` weightings summed and divided by 8760.
     *
-    * `capital_cost` plus `fom_cost`, which is PyPSA's `periodized_cost` in the
-    * case where `overnight_cost` is unset — and it is unset by default, being
-    * NaN rather than zero. [[reject]] refuses the annuitised case rather than
-    * letting a NaN reach the objective.
+    * `Network.nyears`, and it is the factor that makes an annuitised cost comparable to a
+    * horizon of six snapshots. An annuity is a cost PER YEAR; a fixture whose snapshots carry
+    * a weighting of 1.0 each models six hours, which is 0.07% of a year, so its capital term
+    * is 0.07% of the annual one. Getting this wrong by leaving it out would overcharge
+    * capital by a factor of 1,460 on such a network -- not a rounding error, and not visible
+    * on a fixture whose weightings happen to sum to 8,760.
+    *
+    * Per period under multi-investment, where PyPSA groups the sum by period. [[nyears]]
+    * returns the distinct values, because an annuitised cost is only well defined when they
+    * agree -- see [[rejectUnequalHorizons]].
     */
-  def periodizedCost(table: ComponentTable, id: String): Double =
-    val capital = table.float("capital_cost", id)
-    val fom     = if table.static.contains("fom_cost") then table.float("fom_cost", id) else 0.0
-    (if capital.isFinite then capital else 0.0) + (if fom.isFinite then fom else 0.0)
+  def nyears(network: Network): IndexedSeq[Double] =
+    if !network.isMultiPeriod then
+      IndexedSeq(network.snapshots.indices.map(network.weighting("objective", _)).sum / HoursPerYear)
+    else
+      network.snapshotPeriods.distinct.map { period =>
+        network.snapshots.indices
+          .filter(t => network.periodOf(t).contains(period))
+          .map(network.weighting("objective", _))
+          .sum / HoursPerYear
+      }
+
+  /** PyPSA's annuity factor: `r / (1 - (1 + r)^-n)`, with three special cases.
+    *
+    * {{{
+    * r == 0, n finite    ->  1 / n           simple depreciation
+    * r == 0, n infinite  ->  0               no interest and no end, so no annual cost
+    * n infinite, r != 0  ->  max(r, 0)       a perpetuity
+    * }}}
+    *
+    * All three are upstream's (`costs.py`), and the second and third are reachable by
+    * default rather than exotic: `lifetime` defaults to '''+inf''', so an `overnight_cost`
+    * set with nothing else is a perpetuity at the discount rate. A negative rate is allowed
+    * and clipped to zero in the infinite case only, which is PyPSA's `clip(lower=0)` and
+    * reads as "a perpetual asset cannot be cheaper than free".
+    *
+    * The finite branch is written with `math.pow(1 + r, -n)` where PyPSA writes
+    * `1 / (1 + r) ** n`. Same value; said here because the two spellings differ in the last
+    * bit for some inputs and the goldens are compared to 1e-6 relative.
+    */
+  def annuity(discountRate: Double, lifetime: Double): Double =
+    if discountRate == 0.0 then (if lifetime.isInfinite then 0.0 else 1.0 / lifetime)
+    else if lifetime.isInfinite then math.max(discountRate, 0.0)
+    else discountRate / (1.0 - math.pow(1.0 + discountRate, -lifetime))
+
+  /** The annuitised capital cost alone, '''without''' `fom_cost`.
+    *
+    * PyPSA keeps two numbers here and the objective and the statistics read different ones:
+    *
+    * {{{
+    * Components.periodized_cost  ->  fom_cost = static["fom_cost"]   the objective's
+    * Components.capital_cost     ->  fom_cost = None                 the statistic's
+    * }}}
+    *
+    * So `statistics.capex` is `p_nom_opt x capital_cost` where `capital_cost` is the
+    * annuitised overnight cost with no fixed O&M, while the objective charges the same
+    * annuity plus `fom_cost`. Two coefficients, one function, distinguished by one argument.
+    *
+    * Found by implementing the annuity: `network-stats` loaded the raw `capital_cost` column,
+    * which agreed with upstream on every golden for as long as `overnight_cost` was refused
+    * and then reported 9,999,900 against PyPSA's 16,189.99 on `annuitised-capital` --
+    * `both`'s ignored `capital_cost` of 99,999 times its 100 MW.
+    */
+  def capitalCost(network: Network, table: ComponentTable, id: String): Double =
+    val overnight =
+      if table.static.contains("overnight_cost") then table.float("overnight_cost", id)
+      else Double.NaN
+    if !overnight.isFinite then
+      val capital = table.float("capital_cost", id)
+      if capital.isFinite then capital else 0.0
+    else
+      overnight * annuity(table.float("discount_rate", id), table.float("lifetime", id)) *
+        nyears(network).head
+
+  /** Cost per unit of capacity over the modelled horizon: PyPSA's `periodized_cost`.
+    *
+    * {{{
+    * overnight_cost unset  ->  capital_cost + fom_cost
+    * overnight_cost set    ->  overnight_cost x annuity(discount_rate, lifetime) x nyears
+    *                           + fom_cost
+    * }}}
+    *
+    * ==`overnight_cost` wins and `capital_cost` is ignored==
+    *
+    * Not averaged, not added, and not refused: upstream's consistency check '''warns''' that
+    * "when 'overnight_cost' is provided, it takes precedence and capital_cost is ignored",
+    * and `periodized_cost` reads one branch or the other. A network setting both is one PyPSA
+    * has an answer for, so this has the same answer rather than a refusal.
+    *
+    * `fom_cost` is added in '''both''' branches -- it is a cost for the horizon already, like
+    * `capital_cost`, and is not annuitised.
+    *
+    * ==What is refused, and why each would otherwise be silent==
+    *
+    * See [[reject]]. A missing `discount_rate` makes the annuity NaN, which reaches the
+    * objective as a coefficient; a non-positive `lifetime` is a `ValueError` upstream; and
+    * investment periods of unequal length make an annuitised cost ill-defined, which is a
+    * `ValueError` there too. The first is the one that matters, because `discount_rate`
+    * defaults to NaN: an `overnight_cost` set on its own with a finite `lifetime` produces
+    * NaN here and a warning upstream.
+    */
+  def periodizedCost(network: Network, table: ComponentTable, id: String): Double =
+    val fom =
+      if table.static.contains("fom_cost") then table.float("fom_cost", id) else 0.0
+    val fixed = if fom.isFinite then fom else 0.0
+    val overnight =
+      if table.static.contains("overnight_cost") then table.float("overnight_cost", id)
+      else Double.NaN
+    if !overnight.isFinite then
+      val capital = table.float("capital_cost", id)
+      (if capital.isFinite then capital else 0.0) + fixed
+    else
+      val rate     = table.float("discount_rate", id)
+      val lifetime = table.float("lifetime", id)
+      // `nyears` is a single value here because `rejectUnequalHorizons` has already refused
+      // the case where the periods disagree -- which is exactly when PyPSA raises.
+      overnight * annuity(rate, lifetime) * nyears(network).head + fixed
 
   /** The factor a capacity's [[periodizedCost]] is multiplied by.
     *
@@ -193,7 +309,8 @@ object Expansion:
     else
       nominalAttribute.keys.toIndexedSeq.sorted.flatMap { component =>
         network.table(component).toIndexedSeq.flatMap { table =>
-          extendables(table).map(id => periodizedCost(table, id) * table.float(nominalAttribute(component), id))
+          extendables(table).map(id =>
+            periodizedCost(network, table, id) * table.float(nominalAttribute(component), id))
         }
       }.sum
 
@@ -207,6 +324,8 @@ object Expansion:
   def reject(network: Network): Unit =
     def refuse(message: String): Nothing = throw new Lopf.UnsupportedNetwork(message)
 
+    rejectUnequalHorizons(network, refuse)
+
     nominalAttribute.foreach { (component, attribute) =>
       network.table(component).foreach { table =>
         val ext = extendables(table)
@@ -216,11 +335,29 @@ object Expansion:
           // wrong by the annuity factor -- a factor of ten on a 25-year asset --
           // and NaN is its *default*, so this cannot be handled by falling back.
           ext.foreach { id =>
-            if table.static.contains("overnight_cost") && table.float("overnight_cost", id).isFinite then
-              refuse(
-                s"$component '$id' sets overnight_cost, which PyPSA annuitises over lifetime and " +
-                  "discount_rate; only capital_cost, already scaled to the horizon, is modelled"
-              )
+            // An overnight cost is annuitised over `lifetime` at `discount_rate` and scaled
+            // by the modelled horizon -- see `periodizedCost`, which now builds it. What is
+            // refused is the three shapes that make the result not a number.
+            if table.static.contains("overnight_cost") && table.float("overnight_cost", id).isFinite
+            then
+              val rate     = table.float("discount_rate", id)
+              val lifetime = table.float("lifetime", id)
+              // `discount_rate` defaults to NaN, so this is the case an `overnight_cost` set
+              // on its own reaches. PyPSA's consistency check only WARNS and its annuity then
+              // returns NaN, which arrives in the objective as a coefficient -- a wrong answer
+              // reported as `Optimal`, which is the direction this port refuses.
+              if !rate.isFinite then
+                refuse(
+                  s"$component '$id' sets overnight_cost but no finite discount_rate, so its " +
+                    "annuity is not a number. PyPSA warns and carries the NaN into the objective."
+                )
+              // Upstream raises `ValueError: lifetime must be positive`. An infinite lifetime
+              // is fine and is the DEFAULT -- it makes the annuity a perpetuity at the rate.
+              if lifetime <= 0.0 then
+                refuse(
+                  s"$component '$id' sets overnight_cost with lifetime = $lifetime, which has to " +
+                    "be positive for an annuity to exist"
+                )
             val modular = s"${attribute}_mod"
             if table.static.contains(modular) && table.float(modular, id) != 0.0 then
               refuse(
@@ -247,3 +384,37 @@ object Expansion:
     // commitment. True, and it left the plain committable case unrefused and
     // silently solved as a linear program. `Commitment.reject` now covers every
     // committable entity, ahead of this, so the combination cannot reach here.
+
+  /** Refuse an annuitised cost on investment periods of unequal length.
+    *
+    * `periodized_cost` raises on exactly this -- "overnight_cost cannot be used when
+    * investment periods have different durations (nyears). Provide capital_cost instead, or
+    * use investment periods with equal duration" -- because an annuity is a cost per year and
+    * there is then no single number of years to scale it by.
+    *
+    * Reproduced as a refusal rather than left to produce a number, and the shape of the check
+    * is upstream's: the periods' durations are collapsed to their distinct values and the
+    * error fires when more than one survives, so two periods of equal length are fine however
+    * many snapshots each carries.
+    *
+    * Unreachable from any committed fixture -- every multi-period golden weights its
+    * snapshots equally -- which is why it is a named refusal rather than a tested branch.
+    */
+  private def rejectUnequalHorizons(network: Network, refuse: String => Nothing): Unit =
+    if !network.isMultiPeriod then return
+    val horizons = nyears(network).distinct
+    if horizons.length <= 1 then return
+    val annuitised = nominalAttribute.keys.exists { component =>
+      network.table(component).exists { table =>
+        extendables(table).exists { id =>
+          table.static.contains("overnight_cost") && table.float("overnight_cost", id).isFinite
+        }
+      }
+    }
+    if annuitised then
+      refuse(
+        s"an overnight_cost is set and this network's investment periods model " +
+          s"${horizons.map(y => f"$y%.6f").mkString(", ")} years, which are not equal. An annuity " +
+          "is a cost per year and there is no single horizon to scale it by; PyPSA raises here " +
+          "too, and says to provide capital_cost instead."
+      )

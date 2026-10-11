@@ -133,7 +133,10 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   }
 
   // Capacity expansion: the two forms of capital cost this model does not price.
-  refuses("annuitised overnight_cost", "overnight_cost") {
+  // An annuitised `overnight_cost` was here and is built now -- `annuitised-capital` is the
+  // fixture and `AnnuitySuite` compares it. What is left to refuse is a value that makes the
+  // annuity not a number, which is a different case and lives beside the builder.
+  refuses("an overnight_cost with no discount_rate", "discount_rate") {
     mutate("ac-dc-meshed", "generators.csv", setColumn(_, "overnight_cost", "1000.0"))
   }
   refuses("modular capacity (p_nom_mod)", "p_nom_mod") {
@@ -200,13 +203,14 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
   // coefficient, so it was a weighting and three masks rather than a different
   // formulation. `investment-periods-expansion` is the fixture, and `LopfSuite`
   // compares it. What is still refused on top of expansion is refused on every
-  // network, with or without periods -- `overnight_cost` and `p_nom_mod`, above --
-  // but the composition is checked here rather than assumed, since "refused
-  // elsewhere" is the reasoning this suite exists to stop trusting.
-  refuses("an annuitised overnight_cost on a multi-period network", "overnight_cost") {
-    mutate("investment-periods-expansion", "generators.csv",
-           setColumn(_, "overnight_cost", (id, c) => if id == "wind" then "1000.0" else c))
-  }
+  // network, with or without periods -- `p_nom_mod`, above -- but the composition is checked
+  // here rather than assumed, since "refused elsewhere" is the reasoning this suite exists
+  // to stop trusting.
+  //
+  // The `overnight_cost` case that was here is gone with the refusal: it is built now, and
+  // on a multi-period network it is built too. What remains refused there is an annuitised
+  // cost on periods of UNEQUAL length, which PyPSA raises on and no fixture produces -- see
+  // `Expansion.rejectUnequalHorizons`.
   refuses("a modular capacity on a multi-period network", "p_nom_mod") {
     mutate("investment-periods-expansion", "generators.csv",
            setColumn(_, "p_nom_mod", (id, m) => if id == "wind" then "10.0" else m))

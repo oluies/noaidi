@@ -215,7 +215,7 @@ object Lopf:
           // Weighted by the periods the asset is active in, which on a flat index
           // is 1.0 and changes nothing. One column per asset either way -- see
           // `Expansion.costWeight` for why a build year does not get its own.
-          Expansion.periodizedCost(table, id) * Expansion.costWeight(network, table, id),
+          Expansion.periodizedCost(network, table, id) * Expansion.costWeight(network, table, id),
         ): Unit
       }
     }

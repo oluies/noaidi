@@ -1405,6 +1405,73 @@ def statistics_dimensions():
     return n
 
 
+def annuitised_capital():
+    """An `overnight_cost` annuitised over `lifetime` at `discount_rate`, which was refused.
+
+    `periodized_cost` reads `capital_cost` only when `overnight_cost` is NaN, and
+    `overnight_cost` is NaN by default -- so this port charged `capital_cost` for every
+    network and refused the ones that set the other. The refusal was right to exist: read as a
+    per-unit cost, a 1000/MW overnight cost is wrong by the annuity factor, a factor of twelve
+    on a 25-year asset at 7%.
+
+    All three branches of PyPSA's `annuity`, because two of them are reachable by DEFAULT
+    rather than exotic -- `lifetime` defaults to +inf and `discount_rate` to NaN:
+
+        new    r=0.07  n=25     0.08581052  the ordinary case
+        depr   r=0.0   n=20     0.05        zero rate, so 1/n: simple depreciation
+        perp   r=0.05  n=inf    0.05        a perpetuity, which is max(r, 0)
+        both   r=0.06  n=30     0.07264891  and sets capital_cost=99999, which is IGNORED
+
+    `both` is the precedence case and upstream only WARNS about it: "when 'overnight_cost' is
+    provided, it takes precedence and capital_cost is ignored". Read as a sum instead, `both`
+    would be the dearest unit on the system rather than the third cheapest, and `perp` would
+    build 100 MW where it builds 50.
+
+    **`nyears` is what makes any of this comparable, and it is deliberately not 1.** An
+    annuity is a cost per year; the four snapshots carry an `objective` weighting of 1095
+    each, so the horizon is 4,380 hours and `nyears` is **0.5**. Left at 1.0 each it would be
+    four hours -- 0.046% of a year -- and the capital term would be 2,190 times too large
+    relative to the operating cost.
+
+    Half a year rather than a whole one because a factor of 1.0 cannot test a factor:
+    dropping `* nyears` entirely was an equivalent mutant while the horizon was a year, and
+    every assertion still passed. No other fixture here weights its snapshots at all, which
+    is why this one has to.
+
+    The merit order is by TOTAL cost per MW over the horizon and the caps bind, so all four
+    extendables are in the answer and three of them at their cap:
+
+        new    42.91 + 11.00*4380 =  48,222.91   ->  100 MW
+        depr   10.00 + 11.07*4380 =  48,496.60   ->  100 MW
+        both   21.79 + 11.10*4380 =  48,639.79   ->  100 MW
+        perp   12.50 + 11.20*4380 =  49,068.50   ->   50 MW  (the marginal one)
+
+    Separated by 0.5% rather than by an order of magnitude, deliberately: getting `new`'s
+    annuity wrong by a factor of ten reorders the merit list and moves 50 MW, where a fixture
+    with wide gaps would have absorbed it. `old` is the safety valve at 80 and never runs.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    n.snapshot_weightings.loc[:, :] = 8760.0 / 8
+
+    n.add("Bus", "a", v_nom=110.0)
+
+    n.add("Generator", "new", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
+          marginal_cost=11.00, overnight_cost=1000.0, discount_rate=0.07, lifetime=25.0)
+    n.add("Generator", "depr", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
+          marginal_cost=11.07, overnight_cost=400.0, discount_rate=0.0, lifetime=20.0)
+    n.add("Generator", "both", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
+          marginal_cost=11.10, overnight_cost=600.0, discount_rate=0.06, lifetime=30.0,
+          capital_cost=99999.0)
+    # No `lifetime`, so it keeps the +inf default and its annuity is the discount rate.
+    n.add("Generator", "perp", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
+          marginal_cost=11.20, overnight_cost=500.0, discount_rate=0.05)
+    n.add("Generator", "old", bus="a", p_nom=400.0, marginal_cost=80.0)
+
+    n.add("Load", "d", bus="a", p_set=[350.0] * 4)
+    return n
+
+
 def _per_period_prices(n):
     """A gas price that is cheap once inside the first period and dear throughout the second.
 
@@ -2232,6 +2299,7 @@ NETWORKS = {
     "fixed-dispatch": fixed_dispatch,
     "fixed-dispatch-periods": fixed_dispatch_periods,
     "statistics-dimensions": statistics_dimensions,
+    "annuitised-capital": annuitised_capital,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
     "ac-dc-txvolume": ac_dc_txvolume,

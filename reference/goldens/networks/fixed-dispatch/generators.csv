@@ -1,0 +1,5 @@
+name,bus,control,p_nom,marginal_cost
+cheap,a,Slack,300.0,10.0
+pinned,a,PQ,100.0,80.0
+local,b,Slack,300.0,50.0
+spare,b,PQ,300.0,200.0

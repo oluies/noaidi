@@ -1,0 +1,620 @@
+{
+ "lpf": {
+  "bus_v_ang": {
+   "columns": [
+    "a",
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "pinned",
+    "local",
+    "spare"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     170.0,
+     50.0,
+     80.0,
+     0.0
+    ],
+    [
+     200.0,
+     20.0,
+     80.0,
+     0.0
+    ],
+    [
+     150.0,
+     70.0,
+     80.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "link_p0": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     120.0
+    ],
+    [
+     120.0
+    ],
+    [
+     120.0
+    ]
+   ]
+  },
+  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "optimize": {
+  "bus_marginal_price": {
+   "columns": [
+    "a",
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     10.0,
+     50.0
+    ],
+    [
+     10.0,
+     50.0
+    ],
+    [
+     10.0,
+     50.0
+    ]
+   ]
+  },
+  "condition": "optimal",
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "pinned",
+    "local",
+    "spare"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     170.0,
+     50.0,
+     80.0,
+     -0.0
+    ],
+    [
+     200.0,
+     20.0,
+     80.0,
+     -0.0
+    ],
+    [
+     150.0,
+     70.0,
+     80.0,
+     -0.0
+    ]
+   ]
+  },
+  "generator_status": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "global_constraint_mu": {},
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "link_p0": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     120.0
+    ],
+    [
+     120.0
+    ],
+    [
+     120.0
+    ]
+   ]
+  },
+  "multi_investment_periods": false,
+  "nominal_opt": {
+   "Generator": {
+    "cheap": 300.0,
+    "local": 300.0,
+    "pinned": 100.0,
+    "spare": 300.0
+   },
+   "Link": {
+    "tie": 200.0
+   }
+  },
+  "objective": 28400.0,
+  "objective_constant": 0.0,
+  "status": "ok",
+  "storage_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_p_dispatch": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_p_store": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_spill": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_state_of_charge": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "store_e": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "store_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "total_system_cost": 28400.0,
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "pf": {
+  "bus_p": {
+   "columns": [
+    "a",
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "bus_q": {
+   "columns": [
+    "a",
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "bus_v_ang": {
+   "columns": [
+    "a",
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "bus_v_mag_pu": {
+   "columns": [
+    "a",
+    "b"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     1.0,
+     1.0
+    ],
+    [
+     1.0,
+     1.0
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ]
+  },
+  "converged": {
+   "columns": [
+    "0",
+    "1"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     1.0,
+     1.0
+    ],
+    [
+     1.0,
+     1.0
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "pinned",
+    "local",
+    "spare"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     {
+      "$nan": true
+     },
+     50.0,
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     20.0,
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     70.0,
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ]
+   ]
+  },
+  "generator_q": {
+   "columns": [
+    "cheap",
+    "pinned",
+    "local",
+    "spare"
+   ],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "line_p1": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "line_q0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  },
+  "line_q1": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2
+   ],
+   "values": [
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "statistics": {
+  "opex|bus": {
+   "Generator|a": 16400.0,
+   "Generator|b": 12000.0
+  },
+  "opex|carrier": {
+   "Generator|-": 28400.0
+  },
+  "supply|bus": {
+   "Generator|a": 660.0,
+   "Generator|b": 240.0,
+   "Link|b": 360.0
+  },
+  "supply|carrier": {
+   "Generator|-": 900.0,
+   "Link|AC": 360.0
+  }
+ }
+}

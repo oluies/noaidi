@@ -797,6 +797,40 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "expanded_capacity|bus": {
+   "Generator|A": 0.0,
+   "Generator|B": 0.0,
+   "Generator|C": 0.0,
+   "Line|A": 0.0,
+   "Line|B": 0.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC": 0.0,
+   "Line|AC": 0.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|-": 0.0,
+   "Line|AC": 0.0
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator|": 0.0,
+   "Line|": 0.0
+  },
+  "expanded_capacity|name": {
+   "Generator|cheap": 0.0,
+   "Generator|dear": 0.0,
+   "Generator|mid": 0.0,
+   "Line|AB": 0.0,
+   "Line|AC": 0.0,
+   "Line|BC": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator|": 0.0,
+   "Line|": 0.0
+  },
   "expanded_capex|bus": {},
   "expanded_capex|bus_carrier": {},
   "expanded_capex|carrier": {},
@@ -806,6 +840,40 @@
   "expanded_capex|location": {},
   "expanded_capex|name": {},
   "expanded_capex|unit": {},
+  "installed_capacity|bus": {
+   "Generator|A": 400.0,
+   "Generator|B": 300.0,
+   "Generator|C": 300.0,
+   "Line|A": 300.0,
+   "Line|B": 150.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC": 1000.0,
+   "Line|AC": 450.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|-": 1000.0,
+   "Line|AC": 450.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator|": 1000.0,
+   "Line|": 450.0
+  },
+  "installed_capacity|name": {
+   "Generator|cheap": 400.0,
+   "Generator|dear": 300.0,
+   "Generator|mid": 300.0,
+   "Line|AB": 150.0,
+   "Line|AC": 150.0,
+   "Line|BC": 150.0
+  },
+  "installed_capacity|unit": {
+   "Generator|": 1000.0,
+   "Line|": 450.0
+  },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
   "installed_capex|carrier": {},
@@ -835,6 +903,40 @@
   },
   "opex|unit": {
    "Generator|": 6900.0
+  },
+  "optimal_capacity|bus": {
+   "Generator|A": 400.0,
+   "Generator|B": 300.0,
+   "Generator|C": 300.0,
+   "Line|A": 300.0,
+   "Line|B": 150.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC": 1000.0,
+   "Line|AC": 450.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|-": 1000.0,
+   "Line|AC": 450.0
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator|": 1000.0,
+   "Line|": 450.0
+  },
+  "optimal_capacity|name": {
+   "Generator|cheap": 400.0,
+   "Generator|dear": 300.0,
+   "Generator|mid": 300.0,
+   "Line|AB": 150.0,
+   "Line|AC": 150.0,
+   "Line|BC": 150.0
+  },
+  "optimal_capacity|unit": {
+   "Generator|": 1000.0,
+   "Line|": 450.0
   },
   "supply|bus": {
    "Generator|A": 690.0,

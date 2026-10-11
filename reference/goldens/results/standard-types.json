@@ -852,6 +852,49 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "expanded_capacity|bus": {
+   "Generator|hv1": 0.0,
+   "Generator|hv3": 0.0,
+   "Line|hv1": 0.0,
+   "Line|hv2": 0.0,
+   "Line|hv3": 0.0,
+   "Line|mv1": 0.0,
+   "Transformer|hv1": 0.0,
+   "Transformer|hv2": 0.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC": 0.0,
+   "Line|AC": 0.0,
+   "Transformer|AC": 0.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|-": 0.0,
+   "Line|AC": 0.0,
+   "Transformer|-": 0.0
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator|": 0.0,
+   "Line|": 0.0,
+   "Transformer|": 0.0
+  },
+  "expanded_capacity|name": {
+   "Generator|peak": 0.0,
+   "Generator|slack": 0.0,
+   "Line|hv12": 0.0,
+   "Line|hv23": 0.0,
+   "Line|hv31": 0.0,
+   "Line|mv12": 0.0,
+   "Transformer|tr1": 0.0,
+   "Transformer|tr2": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator|": 0.0,
+   "Line|": 0.0,
+   "Transformer|": 0.0
+  },
   "expanded_capex|bus": {},
   "expanded_capex|bus_carrier": {},
   "expanded_capex|carrier": {},
@@ -861,6 +904,49 @@
   "expanded_capex|location": {},
   "expanded_capex|name": {},
   "expanded_capex|unit": {},
+  "installed_capacity|bus": {
+   "Generator|hv1": 900.0,
+   "Generator|hv3": 400.0,
+   "Line|hv1": 1700.0,
+   "Line|hv2": 3400.0,
+   "Line|hv3": 1700.0,
+   "Line|mv1": 300.0,
+   "Transformer|hv1": 160.0,
+   "Transformer|hv2": 160.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC": 1300.0,
+   "Line|AC": 7100.0,
+   "Transformer|AC": 320.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|-": 1300.0,
+   "Line|AC": 7100.0,
+   "Transformer|-": 320.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator|": 1300.0,
+   "Line|": 7100.0,
+   "Transformer|": 320.0
+  },
+  "installed_capacity|name": {
+   "Generator|peak": 400.0,
+   "Generator|slack": 900.0,
+   "Line|hv12": 1700.0,
+   "Line|hv23": 3400.0,
+   "Line|hv31": 1700.0,
+   "Line|mv12": 300.0,
+   "Transformer|tr1": 160.0,
+   "Transformer|tr2": 160.0
+  },
+  "installed_capacity|unit": {
+   "Generator|": 1300.0,
+   "Line|": 7100.0,
+   "Transformer|": 320.0
+  },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
   "installed_capex|carrier": {},
@@ -890,6 +976,49 @@
   },
   "opex|unit": {
    "Generator|": 19800.0
+  },
+  "optimal_capacity|bus": {
+   "Generator|hv1": 900.0,
+   "Generator|hv3": 400.0,
+   "Line|hv1": 1700.0,
+   "Line|hv2": 3400.0,
+   "Line|hv3": 1700.0,
+   "Line|mv1": 300.0,
+   "Transformer|hv1": 160.0,
+   "Transformer|hv2": 160.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC": 1300.0,
+   "Line|AC": 7100.0,
+   "Transformer|AC": 320.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|-": 1300.0,
+   "Line|AC": 7100.0,
+   "Transformer|-": 320.0
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator|": 1300.0,
+   "Line|": 7100.0,
+   "Transformer|": 320.0
+  },
+  "optimal_capacity|name": {
+   "Generator|peak": 400.0,
+   "Generator|slack": 900.0,
+   "Line|hv12": 1700.0,
+   "Line|hv23": 3400.0,
+   "Line|hv31": 1700.0,
+   "Line|mv12": 300.0,
+   "Transformer|tr1": 160.0,
+   "Transformer|tr2": 160.0
+  },
+  "optimal_capacity|unit": {
+   "Generator|": 1300.0,
+   "Line|": 7100.0,
+   "Transformer|": 320.0
   },
   "supply|bus": {
    "Generator|hv1": 1320.0,

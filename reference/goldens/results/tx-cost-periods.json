@@ -768,6 +768,55 @@
    "Line||2030": 840.0,
    "Line||2040": 460.0
   },
+  "expanded_capacity|bus": {
+   "Generator|A|2030": 0.0,
+   "Generator|A|2040": 0.0,
+   "Generator|B|2030": 0.0,
+   "Generator|B|2040": 0.0,
+   "Generator|C|2030": 0.0,
+   "Generator|C|2040": 0.0,
+   "Line|A|2030": 0.0,
+   "Line|A|2040": 0.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC|2030": 0.0,
+   "Generator|AC|2040": 0.0,
+   "Line|AC|2030": 0.0,
+   "Line|AC|2040": 0.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|-|2030": 0.0,
+   "Generator|-|2040": 0.0,
+   "Line|AC|2030": 0.0,
+   "Line|AC|2040": 0.0
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator||2030": 0.0,
+   "Generator||2040": 0.0,
+   "Line||2030": 0.0,
+   "Line||2040": 0.0
+  },
+  "expanded_capacity|name": {
+   "Generator|cheap|2030": 0.0,
+   "Generator|cheap|2040": 0.0,
+   "Generator|dearB|2030": 0.0,
+   "Generator|dearB|2040": 0.0,
+   "Generator|dearC|2030": 0.0,
+   "Generator|dearC|2040": 0.0,
+   "Line|early|2030": 0.0,
+   "Line|early|2040": 0.0,
+   "Line|late|2030": 0.0,
+   "Line|late|2040": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator||2030": 0.0,
+   "Generator||2040": 0.0,
+   "Line||2030": 0.0,
+   "Line||2040": 0.0
+  },
   "expanded_capex|bus": {
    "Line|A|2030": 840.0,
    "Line|A|2040": 460.0
@@ -795,6 +844,41 @@
   "expanded_capex|unit": {
    "Line||2030": 840.0,
    "Line||2040": 460.0
+  },
+  "installed_capacity|bus": {
+   "Generator|A|2030": 400.0,
+   "Generator|A|2040": 400.0,
+   "Generator|B|2030": 300.0,
+   "Generator|B|2040": 300.0,
+   "Generator|C|2030": 300.0,
+   "Generator|C|2040": 300.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC|2030": 1000.0,
+   "Generator|AC|2040": 1000.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|-|2030": 1000.0,
+   "Generator|-|2040": 1000.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 1000.0
+  },
+  "installed_capacity|name": {
+   "Generator|cheap|2030": 400.0,
+   "Generator|cheap|2040": 400.0,
+   "Generator|dearB|2030": 300.0,
+   "Generator|dearB|2040": 300.0,
+   "Generator|dearC|2030": 300.0,
+   "Generator|dearC|2040": 300.0
+  },
+  "installed_capacity|unit": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 1000.0
   },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
@@ -837,6 +921,54 @@
   "opex|unit": {
    "Generator||2030": 11860.0,
    "Generator||2040": 590.0
+  },
+  "optimal_capacity|bus": {
+   "Generator|A|2030": 400.0,
+   "Generator|A|2040": 400.0,
+   "Generator|B|2030": 300.0,
+   "Generator|B|2040": 300.0,
+   "Generator|C|2030": 300.0,
+   "Generator|C|2040": 300.0,
+   "Line|A|2030": 84.0,
+   "Line|A|2040": 184.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC|2030": 1000.0,
+   "Generator|AC|2040": 1000.0,
+   "Line|AC|2030": 84.0,
+   "Line|AC|2040": 184.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|-|2030": 1000.0,
+   "Generator|-|2040": 1000.0,
+   "Line|AC|2030": 84.0,
+   "Line|AC|2040": 184.0
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 1000.0,
+   "Line||2030": 84.0,
+   "Line||2040": 184.0
+  },
+  "optimal_capacity|name": {
+   "Generator|cheap|2030": 400.0,
+   "Generator|cheap|2040": 400.0,
+   "Generator|dearB|2030": 300.0,
+   "Generator|dearB|2040": 300.0,
+   "Generator|dearC|2030": 300.0,
+   "Generator|dearC|2040": 300.0,
+   "Line|early|2030": 84.0,
+   "Line|early|2040": 84.0,
+   "Line|late|2040": 100.0
+  },
+  "optimal_capacity|unit": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 1000.0,
+   "Line||2030": 84.0,
+   "Line||2040": 184.0
   },
   "supply|bus": {
    "Generator|A|2030": 84.0,

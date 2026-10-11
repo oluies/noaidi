@@ -859,6 +859,36 @@
   "capex|unit": {
    "Store|": 720.0
   },
+  "expanded_capacity|bus": {
+   "Generator|b": 0.0,
+   "Store|b": 60.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC": 0.0,
+   "Store|AC": 60.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|-": 0.0,
+   "Store|AC": 60.0
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator|": 0.0,
+   "Store|": 60.0
+  },
+  "expanded_capacity|name": {
+   "Generator|cheap": 0.0,
+   "Generator|peak": 0.0,
+   "Store|grow": 60.0,
+   "Store|swing": 0.0,
+   "Store|tank": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator|": 0.0,
+   "Store|": 60.0
+  },
   "expanded_capex|bus": {
    "Store|b": 720.0
   },
@@ -879,6 +909,35 @@
   },
   "expanded_capex|unit": {
    "Store|": 720.0
+  },
+  "installed_capacity|bus": {
+   "Generator|b": 520.0,
+   "Store|b": 350.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC": 520.0,
+   "Store|AC": 350.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|-": 520.0,
+   "Store|AC": 350.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator|": 520.0,
+   "Store|": 350.0
+  },
+  "installed_capacity|name": {
+   "Generator|cheap": 120.0,
+   "Generator|peak": 400.0,
+   "Store|swing": 150.0,
+   "Store|tank": 200.0
+  },
+  "installed_capacity|unit": {
+   "Generator|": 520.0,
+   "Store|": 350.0
   },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
@@ -918,6 +977,36 @@
   "opex|unit": {
    "Generator|": 117124.52254,
    "Store|": 175.84356
+  },
+  "optimal_capacity|bus": {
+   "Generator|b": 520.0,
+   "Store|b": 410.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC": 520.0,
+   "Store|AC": 410.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|-": 520.0,
+   "Store|AC": 410.0
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator|": 520.0,
+   "Store|": 410.0
+  },
+  "optimal_capacity|name": {
+   "Generator|cheap": 120.0,
+   "Generator|peak": 400.0,
+   "Store|grow": 60.0,
+   "Store|swing": 150.0,
+   "Store|tank": 200.0
+  },
+  "optimal_capacity|unit": {
+   "Generator|": 520.0,
+   "Store|": 410.0
   },
   "supply|bus": {
    "Generator|b": 798.67271,

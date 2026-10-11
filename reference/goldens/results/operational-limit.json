@@ -676,6 +676,36 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "expanded_capacity|bus": {
+   "Generator|b": 0.0,
+   "StorageUnit|b": 0.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC": 0.0,
+   "StorageUnit|AC": 0.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|gas": 0.0,
+   "Generator|hydro": 0.0,
+   "StorageUnit|hydro": 0.0
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator|": 0.0,
+   "StorageUnit|": 0.0
+  },
+  "expanded_capacity|name": {
+   "Generator|gas": 0.0,
+   "Generator|ror": 0.0,
+   "StorageUnit|pump": 0.0,
+   "StorageUnit|res": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator|": 0.0,
+   "StorageUnit|": 0.0
+  },
   "expanded_capex|bus": {},
   "expanded_capex|bus_carrier": {},
   "expanded_capex|carrier": {},
@@ -685,6 +715,36 @@
   "expanded_capex|location": {},
   "expanded_capex|name": {},
   "expanded_capex|unit": {},
+  "installed_capacity|bus": {
+   "Generator|b": 400.0,
+   "StorageUnit|b": 140.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC": 400.0,
+   "StorageUnit|AC": 140.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|gas": 300.0,
+   "Generator|hydro": 100.0,
+   "StorageUnit|hydro": 140.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator|": 400.0,
+   "StorageUnit|": 140.0
+  },
+  "installed_capacity|name": {
+   "Generator|gas": 300.0,
+   "Generator|ror": 100.0,
+   "StorageUnit|pump": 20.0,
+   "StorageUnit|res": 120.0
+  },
+  "installed_capacity|unit": {
+   "Generator|": 400.0,
+   "StorageUnit|": 140.0
+  },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
   "installed_capex|carrier": {},
@@ -722,6 +782,36 @@
   "opex|unit": {
    "Generator|": 800.0,
    "StorageUnit|": 2000.0
+  },
+  "optimal_capacity|bus": {
+   "Generator|b": 400.0,
+   "StorageUnit|b": 140.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC": 400.0,
+   "StorageUnit|AC": 140.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|gas": 300.0,
+   "Generator|hydro": 100.0,
+   "StorageUnit|hydro": 140.0
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator|": 400.0,
+   "StorageUnit|": 140.0
+  },
+  "optimal_capacity|name": {
+   "Generator|gas": 300.0,
+   "Generator|ror": 100.0,
+   "StorageUnit|pump": 20.0,
+   "StorageUnit|res": 120.0
+  },
+  "optimal_capacity|unit": {
+   "Generator|": 400.0,
+   "StorageUnit|": 140.0
   },
   "supply|bus": {
    "Generator|b": 600.0,

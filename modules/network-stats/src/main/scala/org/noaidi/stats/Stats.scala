@@ -23,7 +23,7 @@ import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role}
   * browser demo that solves an LP in-page. A JNI dependency underneath either of those buys
   * nothing and costs the cross-build.
   *
-  * ==Five metrics, seven groupings, every golden==
+  * ==Eight metrics, seven groupings, every golden==
   *
   * [[supply]] and [[opex]] of the nineteen were the pair worth having first because they
   * weight DIFFERENTLY: `supply` uses `w_generators` and `opex` uses `w_objective` times
@@ -49,9 +49,11 @@ import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role}
   * eleven were. The period is the third level of the key, which is what upstream returns: a
   * multi-period frame has a column per period rather than a single series.
   *
-  * The remaining fourteen metrics are listed in the design note, along with what is still
-  * missing from these five: branches at their ports in `supply`, which PyPSA's
-  * `energy_balance` includes with a sign per end.
+  * The remaining eleven metrics are listed in the design note, along with what is still
+  * missing from these eight: branches at their ports in `supply`, which PyPSA's
+  * `energy_balance` includes with a sign per end -- measured as `SUM |p0| x w_generators` for
+  * a line, and the port's own bus for the grouping, which is the one thing the `dimensions`
+  * view does not yet resolve.
   */
 final class Stats private (
     private val conn: Connection,
@@ -300,7 +302,65 @@ final class Stats private (
       .map(key => key -> (chosen.getOrElse(key, 0.0) - installed.getOrElse(key, 0.0)))
       .toMap
 
-  /** The shared body of the two capital metrics that are a single sum.
+  /** The capacity the solve chose, in MW, by `groupBy`.
+    *
+    * `p_nom_opt`, summed, per period on a multi-period network -- and '''not''' weighted,
+    * which is the one thing that distinguishes this from [[capex]]. `capex` multiplies each
+    * period by its `objective` weighting and these three do not: there is no
+    * `has_investment_periods` branch in `optimal_capacity`, and the goldens agree.
+    * `investment-periods-expansion` has weightings 1.0 and 0.5 and reports 160 and 200 MW,
+    * which is `old 100 + wind 60` and then `+ late 40` with nothing scaled.
+    *
+    * A megawatt is not a cost, so there is nothing for a discount factor to discount. Obvious
+    * once stated and not obvious from the three metrics sharing a view -- a port that passed
+    * the weight through here would be wrong by 2x on the second period of that fixture and
+    * right on every single-period network.
+    *
+    * ==Capacity counts at port 0==
+    *
+    * `optimal_capacity` multiplies by `port_efficiency(n, c, port)`, which is 1 at `bus0`, and
+    * the goldens show branch capacity counted ONCE: `ac-dc-meshed`'s seven lines report
+    * 280,000 MW installed, which is their plain `s_nom` sum rather than twice it, and
+    * `statistics-dimensions`' electrolyser reports 100 MW rather than its 0.7 efficiency
+    * times that. So this is the same `bus0` placement [[opex]] uses, and not the per-port
+    * treatment `supply` needs.
+    */
+  def optimalCapacity(groupBy: String = "carrier"): Map[String, Double] =
+    capital(groupBy, "e.nominal", weighted = false)
+
+  /** The capacity the network came with, in MW, by `groupBy`. */
+  def installedCapacity(groupBy: String = "carrier"): Map[String, Double] =
+    capital(groupBy, "COALESCE(e.nominal_in, 0)", weighted = false)
+
+  /** The capacity the solve ADDED, in MW, by `groupBy` -- never negative.
+    *
+    * The asymmetry with [[expandedCapex]] is real and is upstream's:
+    *
+    * {{{
+    * expanded_capex    = capex.sub(installed_capex, fill_value=0)
+    * expanded_capacity = optimal.sub(installed).where(optimal.abs() > installed.abs(), 0)
+    * }}}
+    *
+    * So the capex one reports a '''negative''' where capacity was retired -- `ac-dc-meshed`'s
+    * gas comes out at -21,109,107.32 -- and the capacity one reports '''zero''' for the same
+    * asset, because 982 MW is not more than the 150,000 MW it started with. Both are in the
+    * goldens for that network and the two disagree about the same retirement, which is not
+    * something either formula hints at.
+    *
+    * `reindex(optimal.index)` rather than a union, which is the second difference: a group
+    * present only in `installed_capacity` is '''dropped''' here, where `expanded_capex` would
+    * carry it as a negative. Reproduced, and unexercised -- it needs an extendable whose
+    * optimum is exactly zero beside a non-zero `p_nom`, and no golden has one.
+    */
+  def expandedCapacity(groupBy: String = "carrier"): Map[String, Double] =
+    val optimal   = optimalCapacity(groupBy)
+    val installed = installedCapacity(groupBy)
+    optimal.map { (key, chosen) =>
+      val had = installed.getOrElse(key, 0.0)
+      key -> (if math.abs(chosen) > math.abs(had) then chosen - had else 0.0)
+    }
+
+  /** The shared body of the four metrics that are a single sum over `capital_share`.
     *
     * `cost` is an expression over `entity`, interpolated -- which is safe only because the
     * three call sites are the only ones and each passes a literal. It is not a parameter in
@@ -310,16 +370,22 @@ final class Stats private (
     * what makes these three the first metrics here whose period axis comes from
     * `capital_share` rather than from the snapshot index.
     */
-  private def capital(groupBy: String, cost: String): Map[String, Double] =
+  private def capital(groupBy: String, cost: String, weighted: Boolean = true): Map[String, Double] =
+    // The period weighting is a factor on a COST and not on a capacity. `capex` carries it
+    // and the three capacity metrics do not -- there is no `has_investment_periods` branch in
+    // `optimal_capacity` upstream, and `investment-periods-expansion` reports 160 and 200 MW
+    // against weightings of 1.0 and 0.5. Passing it through unconditionally is wrong by 2x on
+    // that fixture's second period and right on every flat-index network.
+    val term = if weighted then s"($cost) * cs.weight" else s"($cost)"
     grouped(s"""
-      |SELECT e.component                      AS component,
-      |       d.${dimension(groupBy)}           AS grp$capitalPeriodSelect,
-      |       ROUND(SUM(($cost) * cs.weight), 5) AS value
+      |SELECT e.component            AS component,
+      |       d.${dimension(groupBy)} AS grp$capitalPeriodSelect,
+      |       ROUND(SUM($term), 5)    AS value
       |FROM entity e
       |JOIN dimensions d USING (component, entity)
       |JOIN capital_share cs USING (component, entity)
       |GROUP BY e.component, grp$capitalPeriodGroup
-      |HAVING ROUND(SUM(($cost) * cs.weight), 5) <> 0
+      |HAVING ROUND(SUM($term), 5) <> 0
       |""".stripMargin)
 
   /** A grouping dimension, validated against the `dimensions` view rather than interpolated.

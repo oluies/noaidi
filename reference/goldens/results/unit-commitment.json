@@ -1051,6 +1051,29 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "expanded_capacity|bus": {
+   "Generator|bus": 0.0
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC": 0.0
+  },
+  "expanded_capacity|carrier": {
+   "Generator|-": 0.0
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator|": 0.0
+  },
+  "expanded_capacity|name": {
+   "Generator|base": 0.0,
+   "Generator|mid": 0.0,
+   "Generator|peak": 0.0
+  },
+  "expanded_capacity|unit": {
+   "Generator|": 0.0
+  },
   "expanded_capex|bus": {},
   "expanded_capex|bus_carrier": {},
   "expanded_capex|carrier": {},
@@ -1060,6 +1083,29 @@
   "expanded_capex|location": {},
   "expanded_capex|name": {},
   "expanded_capex|unit": {},
+  "installed_capacity|bus": {
+   "Generator|bus": 330.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC": 330.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|-": 330.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator|": 330.0
+  },
+  "installed_capacity|name": {
+   "Generator|base": 150.0,
+   "Generator|mid": 100.0,
+   "Generator|peak": 80.0
+  },
+  "installed_capacity|unit": {
+   "Generator|": 330.0
+  },
   "installed_capex|bus": {},
   "installed_capex|bus_carrier": {},
   "installed_capex|carrier": {},
@@ -1090,6 +1136,29 @@
   },
   "opex|unit": {
    "Generator|": 17000.0
+  },
+  "optimal_capacity|bus": {
+   "Generator|bus": 330.0
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC": 330.0
+  },
+  "optimal_capacity|carrier": {
+   "Generator|-": 330.0
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator|": 330.0
+  },
+  "optimal_capacity|name": {
+   "Generator|base": 150.0,
+   "Generator|mid": 100.0,
+   "Generator|peak": 80.0
+  },
+  "optimal_capacity|unit": {
+   "Generator|": 330.0
   },
   "supply|bus": {
    "Generator|bus": 1210.0

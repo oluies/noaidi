@@ -292,22 +292,42 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     }
   }
 
-  /** Every golden statistics group, as `(network, block, key, value, skipped)`. */
+  /** Every golden statistics group of a COVERED component, as `(network, block, key, value,
+    * skipped)`.
+    *
+    * The covered filter matters and the review that asked for it was right: the key-set
+    * comparison only ever looks at `Generator`, `StorageUnit` and `Store`, so a `Line` group
+    * is never compared and counting one here would let the two cases below fail about a
+    * comparison that does not happen.
+    *
+    * `skipped` is `comparable` ALONE, which is narrower than the per-network test's own skip
+    * set -- that also skips a `Lopf` refusal and a non-optimal status, and `unit-commitment`
+    * is refused for committable units while shipping a `statistics` block. So these two cases
+    * are deliberately stricter than the comparison: a golden that gains a tiny group in a
+    * LOPF-refused network fails the first one. That is the safe direction -- over-strict,
+    * never falsely green -- and it is stated here because the failure message would otherwise
+    * send a reader looking for a comparison that is not running. Folding the refusals in
+    * would mean solving every network inside a case about the goldens, which is a worse
+    * trade than this sentence.
+    */
   private lazy val allGoldenGroups: List[(String, String, String, Double, Boolean)] =
     networks.flatMap { name =>
       val json = results(name)
       val skip = comparable(name).isDefined
       json.obj.get("statistics").toList.flatMap(_.obj.toList).flatMap { (block, frame) =>
         if frame.obj.contains("error") then Nil
-        else frame.obj.toList.map((key, v) => (name, block, key, v.num, skip))
+        else
+          frame.obj.toList
+            .filter((key, _) => covered.contains(component(key)))
+            .map((key, v) => (name, block, key, v.num, skip))
       }
     }
 
   test("the solver floor removes exactly five golden groups, all in a skipped network") {
     assume(available, "goldens missing")
     // The floor is a judgement, so this pins what it actually does rather than arguing that
-    // it is small. Every group PyPSA reports below it, across all 41 networks and both
-    // metrics and all seven groupings:
+    // it is small. Every group PyPSA reports below it, over every network in the manifest --
+    // 39 of them -- and both metrics and all seven groupings:
     //
     //   1e-05   scigrid-de/supply|name  Generator|320 Wind Onshore
     //   1e-05   scigrid-de/supply|name  Generator|434 Wind Onshore
@@ -342,16 +362,26 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
 
   test("the smallest group in a compared network is far above the floor") {
     assume(available, "goldens missing")
-    // The other half, and the one that says the margin is not a coincidence of the four
+    // The other half, and the one that says the margin is not a coincidence of the five
     // above. `store-per-period`'s 0.6 is the smallest group PyPSA reports in any network this
     // suite compares, which is 6,000x the floor. Asserted as a floor on the margin rather
     // than as the exact number, because a new fixture may legitimately lower it -- but not by
     // three orders of magnitude without someone looking.
-    val smallest = allGoldenGroups
+    //
+    // Exact zeros are excluded here and counted as hidden by the case above, which is not an
+    // inconsistency: a zero is not a group whose margin can be measured, and PyPSA's own
+    // `drop_zero` means a recorded zero can only come from a `round(5)` that did not reach
+    // one. The case above wants every value the floor removes; this one wants the smallest
+    // value it keeps.
+    val compared = allGoldenGroups
       .filterNot((_, _, _, _, skipped) => skipped)
       .map((_, _, _, v, _) => math.abs(v))
       .filter(_ > 0.0)
-      .min
+    // Explicit, because `.min` on an empty list throws `UnsupportedOperationException` and
+    // names nothing -- and an empty list here is exactly what a suite that stopped reading
+    // the goldens looks like.
+    assert(compared.nonEmpty, "no compared golden group to measure the floor against")
+    val smallest = compared.min
     assert(smallest > 100.0 * GroupFloor,
       s"the smallest compared group is $smallest, within 100x of the floor $GroupFloor")
   }

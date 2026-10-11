@@ -324,7 +324,7 @@ nineteen-metrics argument does not make.
 ## Every golden, every grouping
 
 The skeleton compared two metrics on two groupings over 23 of 36 networks. It now compares
-two metrics on **all seven** groupings over 39 of 41, and the three things that took are each
+two metrics on **all seven** groupings over 36 of 39, and the three things that took are each
 worth recording because none of them was in the plan above.
 
 ### Four of the seven dimensions are read off the bus, and four had nothing to compare
@@ -393,7 +393,7 @@ as low as 1.6e-10. Upstream's rule is five decimal places, so the smallest value
 
 Nothing separates a real 1e-5 group from a solver artefact, and the floor does not pretend to.
 What makes it safe is four cases that pin what it removes rather than arguing that it is
-small: exactly five golden groups across all 41 networks, all five in the one network the
+small: exactly five golden groups across every network in the manifest, all five in the one network the
 suite skips for a degenerate dispatch, against a smallest *compared* group of 0.6 — six
 thousand times the floor. A future golden with a genuinely tiny group in a compared network
 fails a test instead of being quietly dropped. The fifth of those five sits exactly on the

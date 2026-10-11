@@ -2305,10 +2305,51 @@ column that is not there, or a row too short to have the cell. No committed fixt
 an empty or non-numeric weighting cell, checked before the change, so nothing was
 silently relying on the old fallback.
 
-One mistake inside the test for that, worth recording because the reader cannot see it
-either: the first version used `0,25`, the decimal comma a European spreadsheet
-produces. `splitCsv` turns it into two fields, so the row gains a column, `0` parses and
-nothing is refused. That is a separate gap, and this fix does not close it.
+One mistake inside the test for that, worth recording because the reader could not see it
+either: the first version used `0,25`, the decimal comma a European spreadsheet produces.
+`splitCsv` turns it into two fields, so the row gains a column, `1` parses as the weighting
+and nothing is refused. Recorded then as a separate gap that the fix did not close.
+
+#### Closed: a row with more fields than its header
+
+`CsvReader.rectangular` refuses it, above every reader rather than inside one. Measured
+three ways on a four-column generators file whose `marginal_cost` was written `0,25`:
+
+    truth    marginal_cost = 0.25
+    pandas   marginal_cost = 25      <- `g` becomes the index and all three columns shift
+    noaidi   marginal_cost = 0       <- read positionally, the trailing field dropped
+
+Three answers, none of them an error, and the two wrong ones wrong in different directions
+and by different magnitudes. **This is a deliberate divergence.** `pd.read_csv` accepts the
+file, so `import_from_csv_folder` accepts it, and refusing it stops a network PyPSA has an
+answer for -- the same argument `docs/pypsa-and-noaidi.md` makes for zone limits that cannot
+take effect, and sharper here, because upstream's reading is out by a factor of 100 rather
+than merely inert.
+
+Three things about where it sits:
+
+- **In `parse`, not in `staticTable`.** The gap was found in a weighting, and
+  `snapshots.csv` and `investment_periods.csv` do not go through `staticTable`. With the
+  check in the component path only, the snapshots fixture fails downstream with
+  `generators-p_max_pu has 10 rows but the network has 1 snapshots` -- an anonymous error
+  naming the wrong file, which is the failure mode this file keeps writing down.
+- **Long rows only.** A short row is *not* refused, and that is agreement rather than
+  leniency: pandas pads one with NaN, which is exactly how this reader already spells "not
+  set for this entity", so both sides resolve to the schema default. A `!=` here instead of
+  a `>` refuses every PyPSA file with a short row.
+- **It does not catch an embedded newline**, and `parse`'s docstring had claimed for a long
+  time that it did -- "fails loudly on field count rather than silently misaligning", about
+  a check that did not exist. Splitting one record across two lines conserves its fields and
+  adds a break, so both halves come out *short*. The sentence is corrected rather than
+  satisfied.
+
+The field counts, the line number and the decimal-comma hint are each asserted separately,
+because each is a different way for the message to be useless. Five mutants, five caught:
+dropping either call site, `>` to `!=`, removing the hint, and `i + 2` to `i + 1`.
+
+The limitation in `CsvFixtures.splitCsv` stands -- `setColumn` still cannot write a cell
+containing a comma -- but it is now self-reporting rather than silent: such a fixture is
+refused at read time instead of passing green against a different network.
 
 ### The other half of the reader fix: snapshot weightings
 

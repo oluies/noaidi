@@ -382,10 +382,14 @@ class GapRefusalSuite extends munit.FunSuite, CsvFixtures:
     // different network solved quietly. `parseWeighting` recognises the tokens
     // `CsvReader.parseFloat` recognises and refuses the rest, which is what a component column
     // has always done.
-    // A token with no comma in it. The first version of this test used `0,25` -- a decimal
-    // comma, which is the typo a European spreadsheet actually produces -- and `splitCsv` turns
-    // it into two fields, so the row gained a column, `0` parsed, and nothing was refused. The
-    // reader cannot see that mistake at all, which is a separate gap from this one.
+    // A token with no comma in it, and deliberately so. The first version of this test used
+    // `0,25` -- a decimal comma, which is the typo a European spreadsheet actually produces --
+    // and it never reached `parseWeighting`: `splitCsv` turns it into two fields, so the row
+    // gained a column, `1` parsed as the weighting and nothing was refused. That was a
+    // separate gap and `CsvReader.rectangular` now closes it, by refusing a row with more
+    // fields than the header. Still a different refusal from this one, with a different
+    // message, which is why this case keeps a comma-free token: asserting on the weighting
+    // refusal through a file the row-width refusal rejects first would test the wrong guard.
     val failure = intercept[CsvReader.MalformedNetwork] {
       mutate("tx-cost-periods", "investment_periods.csv",
              setColumn(_, "objective", (p, w) => if p == "2040" then "a quarter" else w))

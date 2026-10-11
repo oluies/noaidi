@@ -158,6 +158,13 @@ trait CsvFixtures extends munit.Suite, munit.Assertions:
     * `CsvReader.splitLine` is `private[network]`, and these fixtures have no
     * quoted fields, so a plain split is the honest local tool rather than a
     * reason to widen the reader's API.
+    *
+    * It follows that [[setColumn]] cannot write a cell '''containing''' a comma: the value
+    * goes in unquoted and the row gains a field. That used to be silent on both sides -- a
+    * fixture written with `0,25` read back as a different network and the test passed --
+    * and `CsvReader.rectangular` now refuses such a row by field count. So the limitation
+    * stands and is self-reporting: a test that needs a comma inside a cell fails loudly at
+    * read time rather than quietly asserting against the wrong network.
     */
   protected def splitCsv(line: String): IndexedSeq[String] = line.split(",", -1).toIndexedSeq
 

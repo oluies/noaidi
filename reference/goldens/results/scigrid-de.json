@@ -955537,6 +955537,456 @@
    ]
   }
  },
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.010000000002147047
+   },
+   "Line": {
+    "determined": true,
+    "excess": -0.0347683265482
+   },
+   "StorageUnit": {
+    "determined": true,
+    "excess": -0.010150000000000001
+   },
+   "Transformer": {
+    "determined": true,
+    "excess": -0.21000000000000002
+   }
+  },
+  "objective": 0.0011993050575256348,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": true,
+    "excess": -0.00997947960690514
+   },
+   "generator_p": {
+    "determined": false,
+    "excess": 784.921639603669
+   },
+   "line_p0": {
+    "determined": false,
+    "excess": 506.515306091588
+   },
+   "storage_p": {
+    "determined": false,
+    "excess": 472.79895163066624
+   },
+   "storage_p_dispatch": {
+    "determined": false,
+    "excess": 75.6439625877379
+   },
+   "storage_p_store": {
+    "determined": false,
+    "excess": 472.7989516461257
+   },
+   "storage_state_of_charge": {
+    "determined": false,
+    "excess": 1354.554356940875
+   },
+   "transformer_p0": {
+    "determined": false,
+    "excess": 259.85887128064223
+   }
+  },
+  "statistics": {
+   "capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "opex|bus": {
+    "undetermined": {
+     "Generator|225": 18.734699999999975,
+     "Generator|291": 4882.048750000016,
+     "Generator|328": 569.02376,
+     "Generator|347": 7910.592500000001,
+     "Generator|365": 7910.59246,
+     "Generator|417": 156.88744000000042,
+     "Generator|418": 725.9111900000003,
+     "Generator|428": 5404.45365,
+     "Generator|52_220kV": 1583.2158500000078,
+     "Generator|58": 1583.2090200000002,
+     "Generator|79": 6609.75483999998,
+     "Generator|81": 7132.159000000043,
+     "StorageUnit|293": 133.07657000000017,
+     "StorageUnit|78_220kV": 133.07655
+    }
+   },
+   "opex|carrier": {
+    "undetermined": {
+     "Generator|Run of River": 176.4261600000027,
+     "Generator|Storage Hydro": 176.4261600000027
+    }
+   },
+   "opex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "opex|name": {
+    "undetermined": {
+     "Generator|225 Hard Coal": 18.734699999999975,
+     "Generator|291 Brown Coal": 4882.048750000016,
+     "Generator|328 Run of River": 569.02376,
+     "Generator|329 Run of River": 56.34456999999975,
+     "Generator|329 Storage Hydro": 56.34457999999722,
+     "Generator|347 Hard Coal": 7910.592500000001,
+     "Generator|365 Hard Coal": 7910.592469999989,
+     "Generator|402 Run of River": 120.08158,
+     "Generator|402 Storage Hydro": 120.08158000000003,
+     "Generator|417 Run of River": 156.88744000000042,
+     "Generator|418 Run of River": 725.9111900000003,
+     "Generator|428 Brown Coal": 5404.45365,
+     "Generator|52_220kV Hard Coal": 1583.2158500000078,
+     "Generator|58 Hard Coal": 1583.2090200000002,
+     "Generator|79 Brown Coal": 6609.754840000009,
+     "Generator|81 Brown Coal": 7132.159000000043,
+     "StorageUnit|293 Pumped Hydro": 133.07657000000017,
+     "StorageUnit|78_220kV Pumped Hydro": 133.07655
+    }
+   },
+   "optimal_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "supply|bus": {
+    "undetermined": {
+     "Generator|1": 4.434849999999983,
+     "Generator|161": 281.33184000000006,
+     "Generator|225": 0.7493900000000622,
+     "Generator|22_220kV": 36.81427000000258,
+     "Generator|23": 213.52788999999996,
+     "Generator|24_220kV": 164.97214000000008,
+     "Generator|25": 238.19619999999986,
+     "Generator|26_220kV": 178.36675000000002,
+     "Generator|270": 496.5066400000014,
+     "Generator|271": 523.127050000001,
+     "Generator|272_220kV": 559.2285199999988,
+     "Generator|273": 70.56768999999998,
+     "Generator|274": 571.6418699999999,
+     "Generator|277": 6.9923,
+     "Generator|285": 350.8558200000002,
+     "Generator|291": 488.2048700000014,
+     "Generator|2_220kV": 4.434849999999997,
+     "Generator|328": 189.67458999999997,
+     "Generator|333": 2354.726910000001,
+     "Generator|34": 93.73667,
+     "Generator|347": 316.4237,
+     "Generator|35": 73.97824000000001,
+     "Generator|36": 1421.10212,
+     "Generator|365": 316.4236999999998,
+     "Generator|398": 265.59205,
+     "Generator|401": 92.29899,
+     "Generator|402": 81.93266999999969,
+     "Generator|412": 214.9006300000001,
+     "Generator|417": 52.295810000000074,
+     "Generator|418": 241.97039999999993,
+     "Generator|428": 540.4453699999999,
+     "Generator|440": 56.12836000000016,
+     "Generator|474": 24.989090000000033,
+     "Generator|475": 24.989090000000033,
+     "Generator|489": 28.373069999999984,
+     "Generator|490": 28.373069999999984,
+     "Generator|495": 624.4122200000002,
+     "Generator|52_220kV": 63.32863999999972,
+     "Generator|58": 63.328359999999975,
+     "Generator|79": 660.9754900000007,
+     "Generator|81": 713.2159000000029,
+     "Generator|82": 69.99660999999992,
+     "Generator|83": 25.65707999999995,
+     "Generator|84": 7.322969999999941,
+     "Line|1": 4.434849999999642,
+     "Line|11": 0.7062099999998281,
+     "Line|161": 104.20480999999927,
+     "Line|163": 2.738839999999982,
+     "Line|223": 1.4822199999998702,
+     "Line|224": 11.493420000000697,
+     "Line|225": 2.8093199999993885,
+     "Line|228": 50.90607,
+     "Line|229": 58.45742000000064,
+     "Line|22_220kV": 4.751280000000008,
+     "Line|23": 27.187580000001617,
+     "Line|231_220kV": 24.030879999999797,
+     "Line|24": 330.4191600000013,
+     "Line|24_220kV": 35.801180000000386,
+     "Line|25": 280.27103999999963,
+     "Line|26": 1.823350000000005,
+     "Line|264": 4.097580000000562,
+     "Line|264_220kV": 5.304159999999683,
+     "Line|26_220kV": 98.04264999999987,
+     "Line|270": 523.1270399999994,
+     "Line|272_220kV": 642.20957,
+     "Line|277": 6.992309999999975,
+     "Line|293": 55.971849999999904,
+     "Line|328": 189.67457999999897,
+     "Line|333": 52.89023999999998,
+     "Line|34": 1370.8851100000002,
+     "Line|346": 96.03975999999966,
+     "Line|347": 135.33395999999993,
+     "Line|35": 1390.9309999999998,
+     "Line|36": 13.10628,
+     "Line|362_220kV": 24.030880000000252,
+     "Line|365": 39.29419999999982,
+     "Line|398": 266.82700999999724,
+     "Line|401": 75.96101999999996,
+     "Line|402": 32.04594999999972,
+     "Line|403": 4.097510000000057,
+     "Line|403_220kV": 5.304200000000037,
+     "Line|405": 1.3890099999999848,
+     "Line|412": 186.33933000000002,
+     "Line|417": 241.97039999999993,
+     "Line|428": 249.54268000000002,
+     "Line|440": 44.90683000000172,
+     "Line|474": 24.989090000000033,
+     "Line|490": 28.373070000001462,
+     "Line|495": 838.3489899999986,
+     "Line|57": 32.21255000000019,
+     "Line|58": 63.328359999999975,
+     "Line|78_220kV": 51.17962,
+     "Line|79": 172.77053000000024,
+     "Line|81": 290.90272000000004,
+     "Line|83": 37.79543999999987,
+     "Line|84": 63.452529999999996,
+     "Line|87_220kV": 0.38031999999998334,
+     "StorageUnit|293": 44.358859999999936,
+     "StorageUnit|78_220kV": 44.35885000000002,
+     "Transformer|231": 16.473490000000027,
+     "Transformer|231_220kV": 16.473469999999907,
+     "Transformer|24_220kV": 330.4191600000013,
+     "Transformer|26": 78.27214999999978,
+     "Transformer|26_220kV": 1.823350000000005,
+     "Transformer|272": 1165.6369000000004
+    }
+   },
+   "supply|bus_carrier": {
+    "undetermined": {
+     "Generator|AC": 818.1423800000921,
+     "Line|AC": 2525.5165299996734,
+     "Transformer|AC": 791.661220000009
+    }
+   },
+   "supply|carrier": {
+    "undetermined": {
+     "Generator|Run of River": 58.8087200000009,
+     "Generator|Solar": 1091.148850000005,
+     "Generator|Storage Hydro": 58.8087200000009,
+     "Generator|Wind Offshore": 1812.7939900000056,
+     "Generator|Wind Onshore": 96.49718999996549,
+     "Line|AC": 2525.5165299996734,
+     "Transformer|-": 791.661220000009
+    }
+   },
+   "supply|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "supply|location": {
+    "undetermined": {
+     "Generator|": 818.1423800000921,
+     "Line|": 2525.5165299996734,
+     "Transformer|": 791.661220000009
+    }
+   },
+   "supply|name": {
+    "undetermined": {
+     "Generator|1 Solar": 5.09548,
+     "Generator|1 Wind Onshore": 9.530329999999935,
+     "Generator|161 Solar": 60.63975000000002,
+     "Generator|161 Wind Onshore": 220.69207000000006,
+     "Generator|179 Solar": 30.451300000000003,
+     "Generator|179 Wind Onshore": 30.451310000000376,
+     "Generator|225 Hard Coal": 0.7493899999999911,
+     "Generator|22_220kV Solar": 279.03188000000006,
+     "Generator|22_220kV Wind Offshore": 2953.883850000002,
+     "Generator|22_220kV Wind Onshore": 2638.0377100000005,
+     "Generator|23 Solar": 8.226100000000002,
+     "Generator|23 Wind Onshore": 221.75399,
+     "Generator|24_220kV Solar": 38.375550000000004,
+     "Generator|24_220kV Wind Onshore": 126.5965799999999,
+     "Generator|25 Solar": 16.50044,
+     "Generator|25 Wind Onshore": 221.69576000000006,
+     "Generator|26_220kV Solar": 27.75274,
+     "Generator|26_220kV Wind Onshore": 150.61401000000012,
+     "Generator|270 Solar": 71.99649,
+     "Generator|270 Wind Offshore": 55.00745000000006,
+     "Generator|270 Wind Onshore": 479.51760000000013,
+     "Generator|271 Solar": 23.27349,
+     "Generator|271 Wind Offshore": 1196.097310000001,
+     "Generator|271 Wind Onshore": 649.69677,
+     "Generator|272_220kV Solar": 184.45396,
+     "Generator|272_220kV Wind Onshore": 374.7745500000001,
+     "Generator|273 Solar": 3.5779300000000003,
+     "Generator|273 Wind Onshore": 66.98978,
+     "Generator|274 Solar": 43.331630000000004,
+     "Generator|274 Wind Onshore": 528.31024,
+     "Generator|277 Solar": 0.8080499999999999,
+     "Generator|277 Wind Onshore": 6.1842700000000015,
+     "Generator|285 Solar": 92.23659999999995,
+     "Generator|285 Wind Onshore": 258.6192199999996,
+     "Generator|29 Solar": 27.48666,
+     "Generator|29 Wind Onshore": 27.48667000000023,
+     "Generator|291 Brown Coal": 488.2048799999975,
+     "Generator|2_220kV Solar": 1.2744700000000002,
+     "Generator|2_220kV Wind Onshore": 3.1603700000000003,
+     "Generator|328 Run of River": 189.67459000000008,
+     "Generator|329 Run of River": 18.78152,
+     "Generator|329 Storage Hydro": 18.781530000000203,
+     "Generator|333 Solar": 67.50997000000001,
+     "Generator|333 Wind Onshore": 2287.216949999998,
+     "Generator|34 Solar": 3.6611499999999992,
+     "Generator|34 Wind Onshore": 97.39781999999998,
+     "Generator|347 Hard Coal": 316.4237,
+     "Generator|35 Solar": 3.508939999999999,
+     "Generator|35 Wind Onshore": 77.48719,
+     "Generator|36 Solar": 54.28293000000001,
+     "Generator|36 Wind Onshore": 1475.3850599999998,
+     "Generator|365 Hard Coal": 316.4237000000003,
+     "Generator|398 Solar": 89.09519,
+     "Generator|398 Wind Onshore": 176.49686999999994,
+     "Generator|401 Solar": 31.586939999999984,
+     "Generator|401 Wind Onshore": 60.71205000000009,
+     "Generator|402 Run of River": 40.02719,
+     "Generator|402 Solar": 147.16226,
+     "Generator|402 Storage Hydro": 40.02719,
+     "Generator|402 Wind Onshore": 65.22959999999989,
+     "Generator|412 Solar": 8.928529999999967,
+     "Generator|412 Wind Onshore": 205.97209999999995,
+     "Generator|417 Run of River": 52.295810000000074,
+     "Generator|418 Run of River": 241.97039999999993,
+     "Generator|428 Brown Coal": 540.44536,
+     "Generator|440 Solar": 17.786050000000003,
+     "Generator|440 Wind Onshore": 38.34231,
+     "Generator|474 Solar": 4.496680000000001,
+     "Generator|474 Wind Onshore": 29.485770000000002,
+     "Generator|475 Solar": 4.598379999999999,
+     "Generator|475 Wind Onshore": 20.390710000000013,
+     "Generator|489 Solar": 0.49897999999999954,
+     "Generator|489 Wind Onshore": 27.874090000000024,
+     "Generator|490 Solar": 0.24169000000000018,
+     "Generator|490 Wind Onshore": 28.614769999999965,
+     "Generator|495 Solar": 97.88064,
+     "Generator|495 Wind Onshore": 526.5315799999998,
+     "Generator|52_220kV Hard Coal": 63.328630000000885,
+     "Generator|58 Hard Coal": 63.32836,
+     "Generator|79 Brown Coal": 660.9754799999992,
+     "Generator|81 Brown Coal": 713.2159000000029,
+     "Generator|82 Solar": 24.6509,
+     "Generator|82 Wind Onshore": 94.64750000000004,
+     "Generator|83 Solar": 28.614220000000003,
+     "Generator|83 Wind Onshore": 2.9571399999999812,
+     "Generator|84 Solar": 20.731129999999993,
+     "Generator|84 Wind Onshore": 13.408170000000041,
+     "Generator|9 Solar": 19.665359999999993,
+     "Generator|9 Wind Onshore": 19.66534999999999,
+     "Line|1": 2.217319999999745,
+     "Line|142": 0.7617500000000064,
+     "Line|20": 4.366799999999785,
+     "Line|21": 76.44880000000012,
+     "Line|269": 5.477689999999711,
+     "Line|292": 648.8227699999999,
+     "Line|294": 648.7445300000002,
+     "Line|296": 1.4801899999999932,
+     "Line|298": 6.663859999999659,
+     "Line|299": 1.4842499999999745,
+     "Line|30": 730.4128399999998,
+     "Line|303": 101.81214999999997,
+     "Line|31": 696.2584400000001,
+     "Line|361": 523.1270399999994,
+     "Line|362": 698.63114,
+     "Line|363": 70.56768999999998,
+     "Line|364": 571.6418700000002,
+     "Line|367": 6.992309999999975,
+     "Line|368": 730.5378200000001,
+     "Line|387": 175.42791999999997,
+     "Line|388": 175.42791999999997,
+     "Line|389": 509.87932999999975,
+     "Line|390": 509.75437000000056,
+     "Line|403": 129.21527999999944,
+     "Line|404": 125.44502000000011,
+     "Line|405": 115.46856000000025,
+     "Line|406": 118.07603000000017,
+     "Line|413": 53.62895000000003,
+     "Line|414": 53.522519999999986,
+     "Line|419": 2.217519999999695,
+     "Line|512": 45.755779999999504,
+     "Line|54": 32.21255000000019,
+     "Line|540": 237.83529999999973,
+     "Line|546": 0.20611000000008062,
+     "Line|55": 32.212549999999965,
+     "Line|56": 31.115809999999783,
+     "Line|594": 201.99991999999838,
+     "Line|606": 75.96101999999996,
+     "Line|607": 16.33797000000004,
+     "Line|608": 27.294129999999313,
+     "Line|610": 48.06173000000035,
+     "Line|614": 2.77800000000002,
+     "Line|625": 157.7780399999997,
+     "Line|639": 94.73745000000008,
+     "Line|640": 94.93713000000002,
+     "Line|641": 121.16584,
+     "Line|642": 120.80454999999995,
+     "Line|646": 10.608230000000049,
+     "Line|647": 8.194970000000012,
+     "Line|648": 17.90016000000014,
+     "Line|649": 14.353289999999106,
+     "Line|673": 17.901009999999587,
+     "Line|685": 6.524230000000003,
+     "Line|686": 7.056030000000007,
+     "Line|687": 7.109579999999994,
+     "Line|688": 7.035260000000008,
+     "Line|689": 7.110640000000004,
+     "Line|690": 6.524230000000003,
+     "Line|7": 1.412409999999909,
+     "Line|706": 1.4965400000000955,
+     "Line|707": 22.567439999999806,
+     "Line|708": 48.90703000000008,
+     "Line|778": 24.989079999999944,
+     "Line|808": 28.373069999999984,
+     "Line|817": 1.4965400000000955,
+     "Line|818": 22.567439999999806,
+     "Line|819": 48.90703000000008,
+     "Line|82": 244.0081799999998,
+     "Line|823": 1165.6369,
+     "Line|824": 1951.0956600000027,
+     "Line|825": 266.82700999999724,
+     "Line|83": 244.19674000000032,
+     "Line|84": 86.39566999999988,
+     "Line|845": 330.4191600000013,
+     "Line|85": 86.3748300000002,
+     "Line|86": 69.99660000000017,
+     "Line|87": 134.22803000000005,
+     "Line|88": 49.31803000000036,
+     "StorageUnit|293 Pumped Hydro": 44.358859999999936,
+     "StorageUnit|78_220kV Pumped Hydro": 44.35885000000002,
+     "Transformer|231": 32.94697000000042,
+     "Transformer|24": 330.4191600000013,
+     "Transformer|26": 76.44880000000012,
+     "Transformer|272": 1165.6369
+    }
+   },
+   "supply|unit": {
+    "undetermined": {
+     "Generator|": 818.1423800000921,
+     "Line|": 2525.5165299996734,
+     "Transformer|": 791.661220000009
+    }
+   }
+  }
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [

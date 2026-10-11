@@ -80,6 +80,109 @@
    ]
   }
  },
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.01
+   },
+   "Line": {
+    "determined": true,
+    "excess": -0.046262677363795184
+   },
+   "Link": {
+    "determined": true,
+    "excess": -0.01
+   }
+  },
+  "objective": 2.4614505491626915e-06,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": false,
+    "excess": 1.4269656232909607
+   },
+   "generator_p": {
+    "determined": false,
+    "excess": 537.8967043088627
+   },
+   "line_p0": {
+    "determined": false,
+    "excess": 537.9003545808725
+   },
+   "link_p0": {
+    "determined": false,
+    "excess": 537.8942156148844
+   }
+  },
+  "statistics": {
+   "supply|bus": {
+    "undetermined": {
+     "Line|Bremen": 643.0001599999996,
+     "Line|Bremen DC": 13.333160000000134,
+     "Line|Frankfurt": 643.0000299999999,
+     "Line|London": 67.73211999999967,
+     "Line|Norway DC": 70.34616000000005,
+     "Line|Norwich": 67.73223000000053,
+     "Line|Norwich DC": 222.67621000000008,
+     "Link|Bremen": 80.52309999999989,
+     "Link|Bremen DC": 80.52296999999999,
+     "Link|Norwich": 210.97011999999995,
+     "Link|Norwich DC": 210.97028999999998
+    }
+   },
+   "supply|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 1150.53586,
+     "Line|DC": 306.3555299999998,
+     "Link|AC": 291.4932400000007,
+     "Link|DC": 291.4932400000007
+    }
+   },
+   "supply|carrier": {
+    "undetermined": {
+     "Line|AC": 844.1803299999992,
+     "Link|DC": 582.9864800000014
+    }
+   },
+   "supply|country": {
+    "undetermined": {
+     "Line|DE": 1272.667019999999,
+     "Line|NO": 70.34616000000005,
+     "Line|UK": 358.14052999999876,
+     "Link|DE": 161.04606999999987,
+     "Link|UK": 421.94041000000016
+    }
+   },
+   "supply|location": {
+    "undetermined": {
+     "Line|": 844.1803299999992,
+     "Link|": 582.9864800000014
+    }
+   },
+   "supply|name": {
+    "undetermined": {
+     "Line|2": 165.6632499999996,
+     "Line|3": 279.6893299999999,
+     "Line|4": 138.99704999999994,
+     "Line|5": 135.46421999999984,
+     "Line|6": 1286.00018,
+     "Link|Bremen Converter": 161.04606999999987,
+     "Link|Norwich Converter": 421.94041000000016
+    }
+   },
+   "supply|unit": {
+    "undetermined": {
+     "Line|": 844.1803299999992,
+     "Link|": 582.9864800000014
+    }
+   }
+  }
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [

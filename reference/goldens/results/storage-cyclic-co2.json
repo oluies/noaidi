@@ -67,6 +67,142 @@
    ]
   }
  },
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.009948846124421363
+   },
+   "Line": {
+    "determined": true,
+    "excess": -0.0166449612266901
+   },
+   "Link": {
+    "determined": true,
+    "excess": -0.04
+   },
+   "StorageUnit": {
+    "determined": true,
+    "excess": -0.010415823908214003
+   }
+  },
+  "objective": 0.027791162952780724,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": true,
+    "excess": -0.018602849064178917
+   },
+   "generator_p": {
+    "determined": true,
+    "excess": -0.009956812389993935
+   },
+   "line_p0": {
+    "determined": false,
+    "excess": 136.43694826349264
+   },
+   "link_p0": {
+    "determined": false,
+    "excess": 167.6960110452921
+   },
+   "storage_p": {
+    "determined": false,
+    "excess": 6.299066425975321
+   },
+   "storage_p_dispatch": {
+    "determined": true,
+    "excess": -0.009870856733672885
+   },
+   "storage_p_store": {
+    "determined": false,
+    "excess": 6.2990655517666045
+   },
+   "storage_spill": {
+    "determined": true,
+    "excess": -0.009999722999196613
+   },
+   "storage_state_of_charge": {
+    "determined": false,
+    "excess": 17.018329593548682
+   }
+  },
+  "statistics": {
+   "capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "opex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "optimal_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "supply|bus": {
+    "undetermined": {
+     "Line|1": 131.03364999999985,
+     "Line|3": 96.8429199999955,
+     "Line|4": 500.5033700000022,
+     "Link|0": 503.14060000000245,
+     "Link|1": 415.1569299999992,
+     "Link|4": 87.98329
+    }
+   },
+   "supply|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 274.2766499999998,
+     "Link|AC": 175.96695999999793
+    }
+   },
+   "supply|carrier": {
+    "undetermined": {
+     "Line|AC": 274.2766499999998,
+     "Link|AC": 175.96695999999793
+    }
+   },
+   "supply|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "supply|location": {
+    "undetermined": {
+     "Line|": 274.2766499999998,
+     "Link|": 175.96695999999793
+    }
+   },
+   "supply|name": {
+    "undetermined": {
+     "Line|0": 131.04734000000008,
+     "Line|1": 373.75683000000026,
+     "Line|2": 372.09328000000005,
+     "Line|3": 402.73948999999993,
+     "Line|4": 94.08590000000186,
+     "Line|5": 93.16495000000214,
+     "Link|TL 0": 503.14060000000245,
+     "Link|TL 1": 327.17363999999907
+    }
+   },
+   "supply|unit": {
+    "undetermined": {
+     "Line|": 274.2766499999998,
+     "Link|": 175.96695999999793
+    }
+   }
+  }
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [

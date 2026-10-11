@@ -80,6 +80,178 @@
    ]
   }
  },
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.00993833029125699
+   },
+   "Line": {
+    "determined": false,
+    "excess": 75483.64669742163
+   },
+   "Link": {
+    "determined": true,
+    "excess": -0.008405715265673734
+   }
+  },
+  "objective": 0.013839754741638899,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": true,
+    "excess": -0.010010205745383702
+   },
+   "generator_p": {
+    "determined": true,
+    "excess": -0.009939178383945313
+   },
+   "line_p0": {
+    "determined": true,
+    "excess": -0.010818362704699405
+   },
+   "link_p0": {
+    "determined": true,
+    "excess": -0.006374095326827022
+   }
+  },
+  "statistics": {
+   "capex|bus": {
+    "undetermined": {
+     "Line|Bremen": 3681.49807,
+     "Line|Bremen DC": 654.7680600000001,
+     "Line|London": 584.14039,
+     "Line|Manchester": 504.84296,
+     "Line|Norway DC": 646.84651,
+     "Line|Norwich": 655.57499,
+     "Line|Norwich DC": 635.33051
+    }
+   },
+   "capex|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 1936.9397400000003,
+     "Line|DC": 1936.94507
+    }
+   },
+   "capex|country": {
+    "undetermined": {
+     "Line|DE": 3026.7300200000004,
+     "Line|NO": 646.84651,
+     "Line|UK": 2379.88883
+    }
+   },
+   "capex|name": {
+    "undetermined": {
+     "Line|0": 584.14039,
+     "Line|1": 504.84296,
+     "Line|2": 654.7680600000001,
+     "Line|3": 635.33051,
+     "Line|4": 646.84651,
+     "Line|5": 655.57499,
+     "Line|6": 3681.49807
+    }
+   },
+   "expanded_capacity|bus": {
+    "undetermined": {
+     "Line|Bremen DC": 36381.70151
+    }
+   },
+   "expanded_capacity|name": {
+    "undetermined": {
+     "Line|2": 36381.70151
+    }
+   },
+   "expanded_capex|bus": {
+    "undetermined": {
+     "Line|Bremen": 3681.4980700000006,
+     "Line|Bremen DC": 654.7680600000001,
+     "Line|London": 584.1403899999996,
+     "Line|Manchester": 504.84295999999995,
+     "Line|Norway DC": 646.8465099999999,
+     "Line|Norwich": 655.57499,
+     "Line|Norwich DC": 635.3305099999998
+    }
+   },
+   "expanded_capex|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 1936.9397400000016,
+     "Line|DC": 1936.9450700000007
+    }
+   },
+   "expanded_capex|country": {
+    "undetermined": {
+     "Line|DE": 3026.73002,
+     "Line|NO": 646.8465099999999,
+     "Line|UK": 2379.88883
+    }
+   },
+   "expanded_capex|name": {
+    "undetermined": {
+     "Line|0": 584.1403899999996,
+     "Line|1": 504.84295999999995,
+     "Line|2": 654.7680600000001,
+     "Line|3": 635.3305099999998,
+     "Line|4": 646.8465099999999,
+     "Line|5": 655.57499,
+     "Line|6": 3681.4980700000006
+    }
+   },
+   "optimal_capacity|bus": {
+    "undetermined": {
+     "Line|Bremen": 18407.49036,
+     "Line|Bremen DC": 75491.29487,
+     "Line|London": 4272.66327,
+     "Line|Manchester": 3781.83091,
+     "Line|Norway DC": 10361.16983,
+     "Line|Norwich": 30000.06554,
+     "Line|Norwich DC": 4920.23491
+    }
+   },
+   "optimal_capacity|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 19647.06936,
+     "Line|DC": 90772.69961
+    }
+   },
+   "optimal_capacity|carrier": {
+    "undetermined": {
+     "Line|AC": 110419.76897
+    }
+   },
+   "optimal_capacity|country": {
+    "undetermined": {
+     "Line|DE": 57083.80451,
+     "Line|NO": 10361.16983,
+     "Line|UK": 42974.79462
+    }
+   },
+   "optimal_capacity|location": {
+    "undetermined": {
+     "Line|": 110419.76897
+    }
+   },
+   "optimal_capacity|name": {
+    "undetermined": {
+     "Line|0": 4272.66327,
+     "Line|1": 3781.83091,
+     "Line|2": 75491.29487,
+     "Line|3": 4920.23491,
+     "Line|4": 10361.16983,
+     "Line|5": 30000.06554,
+     "Line|6": 18407.49036
+    }
+   },
+   "optimal_capacity|unit": {
+    "undetermined": {
+     "Line|": 110419.76897
+    }
+   }
+  }
+ },
  "lpf": {
   "bus_v_ang": {
    "columns": [

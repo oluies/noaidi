@@ -160,12 +160,77 @@ private[stats] object StatsSchema:
       |FROM entity e
       |WHERE (SELECT COUNT(*) FROM active) = 0""".stripMargin,
 
-    // Every grouping dimension, resolved once per entity.
+    // One row per (entity, port): the bus that port attaches to.
+    //
+    // A one-port has port 0 and nothing else. A branch has port 0 at `bus0` and port 1 at
+    // `bus1`, which is what lets `supply` attribute a flow to the bus that RECEIVES it while
+    // `opex` and the capacity metrics stay at port 0. Measured, not assumed: on
+    // `statistics-dimensions`, `supply` groups the tie line under bus `b` and the
+    // electrolyser under bus `h` -- their `bus1` -- while `opex` groups both under `a`.
+    //
+    // Two ports and no more. A link with `bus2` is a shape `Lopf` builds -- `efficiency2` is
+    // read there -- and one this module would silently drop a third of, so `Stats.of` refuses
+    // such a network by name rather than loading it. No golden has one.
+    """CREATE VIEW port AS
+      |SELECT component, entity, 0 AS port, bus AS bus FROM entity WHERE bus IS NOT NULL
+      |UNION ALL
+      |SELECT component, entity, 1 AS port, bus1 AS bus FROM entity WHERE bus1 IS NOT NULL""".stripMargin,
+
+    // Signed injection into a bus, one row per (entity, port, snapshot).
+    //
+    // This is PyPSA's `energy_balance`, which `supply` delegates to with `at_port="all"`: a
+    // component contributes at EVERY port, with the sign of that port. `supply` then keeps
+    // the positive part.
+    //
+    // ==The branch sign rule is the bus balance's own==
+    //
+    // Port 0 sends, so its injection is `-p0`; port 1 receives `p0` scaled by that port's
+    // efficiency. For a line the efficiency is 1, so the two ports contribute `-p0` and
+    // `+p0` and the positive part sums to `|p0|` -- which is exactly what the goldens show.
+    // Measured on `ac-dc-meshed`:
+    //
+    //     Line 0   sum |p0| = 3846.70123   golden supply|name Line|0 = 3846.70123
+    //     Line 1   sum |p0| = 7200.23445   golden supply|name Line|1 = 7200.23445
+    //
+    // And with an efficiency that is not 1, on `statistics-dimensions`: the electrolyser
+    // carries 35.71429 MW at the first snapshot and its receiving port reports 25.0, which is
+    // 0.7 times that. A port efficiency read as 1 would have reported 35.71429 and agreed
+    // with upstream on every other network, because every other branch in the goldens either
+    // has efficiency 1 or never runs.
+    //
+    // `efficiency` is a row in `fact` rather than a column on `entity` for the same reason
+    // `marginal_cost` is: it is `static or series` upstream. `COALESCE(..., 1.0)` covers the
+    // passive branches, which have no such attribute at all.
+    """CREATE VIEW injection AS
+      |SELECT f.component, f.entity, f.snapshot, 0 AS port, f.value AS value
+      |FROM fact f
+      |WHERE (f.quantity = 'p'         AND f.component IN ('Generator', 'Store'))
+      |   OR (f.quantity = 'discharge' AND f.component = 'StorageUnit')
+      |UNION ALL
+      |SELECT f.component, f.entity, f.snapshot, 0 AS port, -f.value AS value
+      |FROM fact f
+      |WHERE f.quantity = 'p0'
+      |UNION ALL
+      |SELECT f.component, f.entity, f.snapshot, 1 AS port,
+      |       f.value * COALESCE(eff.value, 1.0) AS value
+      |FROM fact f
+      |LEFT JOIN fact eff
+      |  ON  eff.component = f.component AND eff.entity = f.entity
+      |  AND eff.snapshot  = f.snapshot  AND eff.quantity = 'efficiency'
+      |WHERE f.quantity = 'p0'""".stripMargin,
+
+    // Every grouping dimension, resolved once per entity AND PORT.
     //
     // A view rather than seven expressions repeated in nineteen queries, which is the shape
     // this module exists to avoid: a metric names a dimension by column, and the joins and
     // the `nice_name` fall-back live in one place. `Stats.dimension` validates the name
     // against this view, so an unknown grouper is refused rather than interpolated.
+    //
+    // Keyed by port as well, because four of the seven dimensions come from a BUS and a
+    // branch has two. `supply` joins on the injection's own port; `opex` and the four
+    // capital metrics pin `port = 0`, which is where upstream places them. The entity-level
+    // dimensions -- `carrier`, `name`, `component` -- are the same at every port, and come
+    // off `entity` rather than off `port` so that is visible in the SQL.
     //
     // ==The carrier chain is three steps and every one of them is PyPSA's==
     //
@@ -181,20 +246,22 @@ private[stats] object StatsSchema:
     // `unit` do NOT: they have no dash rendering, so an unset one groups as the empty string,
     // which is what the goldens record.
     """CREATE VIEW dimensions AS
-      |SELECT e.component AS component,
-      |       e.entity    AS entity,
+      |SELECT p.component AS component,
+      |       p.entity    AS entity,
+      |       p.port      AS port,
       |       COALESCE(NULLIF(COALESCE(NULLIF(c.nice_name, ''), e.carrier), ''), '-')
       |         AS carrier,
       |       COALESCE(NULLIF(COALESCE(NULLIF(bc.nice_name, ''), b.carrier), ''), '-')
       |         AS bus_carrier,
-      |       e.bus                     AS bus,
+      |       p.bus                     AS bus,
       |       COALESCE(b.country, '')   AS country,
       |       COALESCE(b.location, '')  AS location,
       |       COALESCE(b.unit, '')      AS unit,
       |       e.entity                  AS name,
       |       e.component               AS component_group
-      |FROM entity e
-      |LEFT JOIN bus b      ON b.name = e.bus
+      |FROM port p
+      |JOIN entity e USING (component, entity)
+      |LEFT JOIN bus b      ON b.name = p.bus
       |LEFT JOIN carrier c  ON c.name = e.carrier
       |LEFT JOIN carrier bc ON bc.name = b.carrier""".stripMargin,
   )

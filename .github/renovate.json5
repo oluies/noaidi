@@ -1,0 +1,92 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // Renovate covers GitHub Actions only. Scala dependencies belong to Scala Steward
+  // (`.github/workflows/scala-steward.yml`), which understands sbt builds, cross-versioned
+  // artifacts and Scala's binary-compatibility rules.
+  //
+  // ==Why the split is configured here rather than guaranteed==
+  //
+  // This replaces `.github/dependabot.yml`, whose comment could claim the split was "clean by
+  // construction rather than by configuration": Dependabot has no sbt ecosystem at all, so it
+  // could not see `build.sbt` even if asked. Renovate *does* have an sbt manager, so that
+  // structural guarantee is gone and `enabledManagers` is what replaces it. Removing the line
+  // below puts two bots on the same dependencies.
+  //
+  // It is also the right side of the trade on evidence rather than on preference. Renovate's
+  // own onboarding run against this repository could not resolve several of `build.sbt`'s
+  // dependencies, and two of the failures are parse failures rather than rate limits:
+  //
+  //     com.google.ortools:ortools-$p
+  //     org.lwjgl:undefined
+  //
+  // Both are real: `prima-ortools` excludes four platform natives by interpolating a platform
+  // string, and `prima-cyfra` builds its LWJGL set by mapping over a `Seq` of module names so
+  // that the three move together. Renovate's sbt manager reads the literal text. Scala
+  // Steward resolves the build.
+  enabledManagers: ["github-actions"],
+
+  extends: ["config:recommended"],
+
+  timezone: "Etc/UTC",
+  // Mondays, the same slot as Scala Steward's cron and the same one Dependabot used. Stated
+  // as a timezone plus a schedule rather than left implicit, because Actions' cron is UTC by
+  // definition while a bot's schedule is read in its configured zone.
+  schedule: ["* 6-7 * * 1"],
+
+  labels: ["dependencies"],
+
+  // Everything collapses into the group below, so this bites only if something fails to
+  // group. One PR either builds or it does not.
+  prConcurrentLimit: 1,
+
+  // Worth having precisely because of the `enabled: false` rules below: the dashboard is
+  // where a suppressed update is still visible. Dependabot had no equivalent, which is why
+  // its own comment had to reason at length about what its `ignore` list hid.
+  dependencyDashboard: true,
+
+  packageRules: [
+    {
+      // Actions move together often enough that separate PRs are mostly noise.
+      matchManagers: ["github-actions"],
+      groupName: "actions",
+    },
+    {
+      // Not dependencies. `setup-python`'s `python-version` and `setup-java`'s `java-version`
+      // are read by the github-actions manager as versions to bump, and both are pinned here
+      // deliberately: the Python interpreter is pinned exactly so a job whose whole subject is
+      // pinning discipline does not float, and the JDK matrix is `["21", "25"]` because 21 is
+      // the current LTS floor and 25 is what the modules are developed against. A bot
+      // proposing 3.15 and 26 is proposing to delete those decisions.
+      //
+      // Renovate's onboarding run proposed exactly those two, which is how they are named
+      // here rather than discovered later.
+      matchPackageNames: ["python", "java", "java-jdk"],
+      enabled: false,
+    },
+  ],
+
+  // ==What this does NOT need, and that is the argument for the migration==
+  //
+  // `dependabot.yml` carried a five-entry `ignore` list suppressing patch and minor updates
+  // for every action pinned to a floating major tag, because Dependabot proposes
+  // `actions/checkout@v4` -> `v4.2.1`: a commit that changes nothing about what runs, and
+  // against an open-PR limit of 1, a stream of them that crowds out the major bumps the
+  // ecosystem exists to catch.
+  //
+  // Renovate does not do that. For a single-component tag it offers the next major and
+  // nothing else, which is the behaviour this repository was configuring Dependabot to
+  // approximate. Taken from Renovate's own onboarding run here rather than from its docs: all
+  // five action updates it proposed were majors (`checkout` v7, `configure-pages` v6,
+  // `deploy-pages` v5, `setup-java` v6, `upload-pages-artifact` v5) and not one was a patch or
+  // minor of a floating tag.
+  //
+  // That list also cost something real, which is now recovered: Dependabot's `ignore` has no
+  // `applies-to`, so it suppressed *security* updates as well as version ones. For the five
+  // named actions an advisory fixed in a patch release produced no pull request at all. With
+  // no suppression there is nothing to leak through.
+  //
+  // `.github/scripts/check_action_pins.py` enforces the convention the whole arrangement
+  // rests on -- every `uses:` pin is a floating major tag -- and now enforces it directly
+  // rather than by cross-checking a list that no longer exists.
+}

@@ -29,10 +29,14 @@ jobs:
   # Both checks here are for defects that leave the build green, which is the
   # only reason either needs to exist.
   #
-  #   action pins   `.github/dependabot.yml` suppresses patch and minor updates
-  #                 for a named set of actions. That is sound only while each is
-  #                 pinned to a floating major tag: a SHA or exact pin gets no fix
-  #                 at run time, so ignoring its updates freezes it for ever.
+  #   action pins   Every `uses:` pin is a floating major tag, and Renovate is
+  #                 configured on that assumption -- it offers only the next major
+  #                 for such a tag, so patch and minor fixes arrive at run time and
+  #                 a commit is needed only when the major moves. A SHA or exact
+  #                 pin reverses both halves at once, silently. The job also checks
+  #                 that Renovate stays actions-only, which is one line of config
+  #                 standing in for the structural guarantee Dependabot gave by
+  #                 having no sbt ecosystem at all.
   #
   #   orphan docs   Scala attaches only the doc comment immediately above a
   #                 definition. A stack of two drops the first in silence, and it
@@ -43,11 +47,12 @@ jobs:
   #
   # The job keeps its `action-pins` id because nothing gains by churning it, but
   # the id is not what carries a check's identity: GitHub derives the status
-  # context from `name:`, so the rename below *did* retire the old
-  # "Dependabot ignore list matches the workflows" context and start a new one.
-  # That is safe here only because `main` has no branch protection and so no
-  # required check to strand -- verified rather than assumed. Adding protection
-  # later means naming the context below, not this id.
+  # context from `name:`, so an earlier rename *did* retire the old
+  # "Dependabot ignore list matches the workflows" context and start the one
+  # below. That is safe here only because `main` has no branch protection and so
+  # no required check to strand -- verified rather than assumed. Adding
+  # protection later means naming the context below, not this id. The move from
+  # Dependabot to Renovate did not rename it again, for the same reason.
   action-pins:
     name: Source checks the compiler does not make
     runs-on: ubuntu-latest
@@ -62,12 +67,18 @@ jobs:
         with:
           python-version: "3.13"
 
-      # Pinned exactly. A job whose whole subject is pinning discipline should
-      # not install its own dependency unpinned. Dependabot does not manage it:
-      # there is no `pip` ecosystem here, and adding one to track a single
-      # build-time package would pull every future Python dependency into a
-      # config that exists for GitHub Actions. Bump it by hand when it matters.
-      - run: pip install pyyaml==6.0.3
+      # Pinned exactly, both of them. A job whose whole subject is pinning
+      # discipline should not install its own dependencies unpinned. Neither bot
+      # manages them: Renovate is actions-only here by configuration, and there is
+      # no `pip` manifest to manage anyway -- adding one to track two build-time
+      # packages would pull every future Python dependency into an arrangement
+      # that exists for GitHub Actions. Bump them by hand when it matters.
+      #
+      # `json5` is for `.github/renovate.json5`, which is json5 rather than json
+      # so that it can carry its own reasoning in comments the way every other
+      # configuration file here does. The checker parses it rather than grepping
+      # it, for the reason the workflow-pattern test below exists.
+      - run: pip install pyyaml==6.0.3 json5==0.17.3
 
       # The check, and the tests for the check. The logic is glob matching, tree
       # walking and a set comparison, and its failure mode is passing while the

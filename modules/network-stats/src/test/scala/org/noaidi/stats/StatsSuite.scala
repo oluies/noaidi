@@ -70,6 +70,27 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     results("statistics-dimensions")("statistics").obj.keys
       .map(_.split('|').last).toList.distinct.sorted
 
+  /** Every metric the generator records, on the same argument as [[groupings]]. */
+  private lazy val recordedMetrics: List[String] =
+    results("statistics-dimensions")("statistics").obj.keys
+      .map(_.split('|').head).toList.distinct.sorted
+
+  /** The implementation behind each recorded metric name.
+    *
+    * Keyed by the name `generate_goldens.py` writes, which is PyPSA's own method name, so a
+    * metric added to `STATISTICS_METRICS` and not here fails the case below rather than
+    * silently going uncompared. That is the failure mode this map exists for: the previous
+    * version of the suite named `supply` and `opex` inline, so three new metrics would have
+    * been recorded in the goldens, read by nothing, and reported as a pass.
+    */
+  private val metrics: Map[String, (Stats, String) => Map[String, Double]] = Map(
+    "supply"          -> ((s, g) => s.supply(g)),
+    "opex"            -> ((s, g) => s.opex(g)),
+    "capex"           -> ((s, g) => s.capex(g)),
+    "installed_capex" -> ((s, g) => s.installedCapex(g)),
+    "expanded_capex"  -> ((s, g) => s.expandedCapex(g)),
+  )
+
   /** The floor below which a group is a solver's zero rather than a group.
     *
     * Absolute, and that is the whole point of it. PyPSA drops a zero group by rounding to
@@ -168,7 +189,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       scala.util.Using.resource(Stats.of(result)) { stats =>
         var compared = 0
         groupings.foreach { groupBy =>
-          Seq("supply" -> (() => stats.supply(groupBy)), "opex" -> (() => stats.opex(groupBy)))
+          recordedMetrics.map(m => m -> (() => metrics(m)(stats, groupBy)))
             .foreach { (metric, run) =>
               expected(name, metric, groupBy) match
                 case None =>
@@ -211,6 +232,14 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         assert(compared > 0, s"$name compared no metric at all")
       }
     }
+  }
+
+  test("every metric the generator records has an implementation here") {
+    assume(available, "goldens missing")
+    // `STATISTICS_METRICS` in the generator and `metrics` here are two lists, and a metric in
+    // the first and not the second would be recorded in every golden and read by nothing --
+    // reported as a pass. This is that failure.
+    assertEquals(recordedMetrics.toSet -- metrics.keySet, Set.empty[String])
   }
 
   test("every grouping PyPSA offers is one this module accepts") {
@@ -323,21 +352,22 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       }
     }
 
-  test("the solver floor removes exactly five golden groups, all in a skipped network") {
+  test("the solver floor removes no non-zero golden group outside a skipped network") {
     assume(available, "goldens missing")
     // The floor is a judgement, so this pins what it actually does rather than arguing that
-    // it is small. Every group PyPSA reports below it, over every network in the manifest --
-    // 39 of them -- and both metrics and all seven groupings:
+    // it is small. Two kinds of group fall below it, and only one of them is interesting.
     //
-    //   1e-05   scigrid-de/supply|name  Generator|320 Wind Onshore
-    //   1e-05   scigrid-de/supply|name  Generator|434 Wind Onshore
-    //   4e-05   scigrid-de/supply|name  Generator|264_220kV Wind Onshore
-    //   8e-05   scigrid-de/supply|name  Generator|378 Wind Onshore
-    //   0.0001  scigrid-de/supply|name  Generator|307_220kV Wind Onshore
+    // NON-ZERO, and there are five, every one in `scigrid-de`:
+    //
+    //   1e-05   supply|name  Generator|320 Wind Onshore
+    //   1e-05   supply|name  Generator|434 Wind Onshore
+    //   4e-05   supply|name  Generator|264_220kV Wind Onshore
+    //   8e-05   supply|name  Generator|378 Wind Onshore
+    //   0.0001  supply|name  Generator|307_220kV Wind Onshore
     //
     // All five are real -- upstream's round-to-five rule admits `1e-5` at any scale -- and
     // all five are in the one network this suite skips for a degenerate dispatch. So the
-    // floor currently hides nothing from any comparison that runs.
+    // floor hides no real number from any comparison that runs.
     //
     // The last one is exactly `GroupFloor`, and it is in this list because `significant`
     // keeps `> GroupFloor` rather than `>=`. The first version of this case said four,
@@ -345,10 +375,15 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // difference -- which is the kind of thing a pinned list catches and a sentence about
     // magnitudes does not.
     //
-    // A golden that gains a genuinely tiny group in a network that IS compared fails here,
-    // which is the point: the alternative is that it silently stops being compared.
-    val hidden = allGoldenGroups.filter((_, _, _, v, _) => math.abs(v) <= GroupFloor)
-    assertEquals(hidden.map((n, b, k, _, _) => s"$n/$b/$k").sorted,
+    // EXACTLY ZERO, and there are about fifty, all of them `expanded_capex` in a network
+    // whose assets are not extendable. Those are PyPSA's own: it subtracts two already
+    // zero-dropped frames and does not re-drop the difference, so a group whose expansion is
+    // nothing is reported as `0.0` rather than omitted. `Stats.expandedCapex` reproduces that
+    // and the values are compared; the floor removes them from the SET comparison, where a
+    // zero group carries no information either way.
+    val hidden  = allGoldenGroups.filter((_, _, _, v, _) => math.abs(v) <= GroupFloor)
+    val nonZero = hidden.filter((_, _, _, v, _) => v != 0.0)
+    assertEquals(nonZero.map((n, b, k, _, _) => s"$n/$b/$k").sorted,
       List(
         "scigrid-de/supply|name/Generator|264_220kV Wind Onshore",
         "scigrid-de/supply|name/Generator|307_220kV Wind Onshore",
@@ -356,8 +391,36 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         "scigrid-de/supply|name/Generator|378 Wind Onshore",
         "scigrid-de/supply|name/Generator|434 Wind Onshore",
       ))
-    assert(hidden.forall((_, _, _, _, skipped) => skipped),
-      "the floor hides a group in a network this suite actually compares")
+    assert(nonZero.forall((_, _, _, _, skipped) => skipped),
+      "the floor hides a non-zero group in a network this suite actually compares")
+    // The zeros are the rest of it, and they are asserted to be only `expanded_capex` so that
+    // a zero appearing in another metric -- where `drop_zero` should have removed it -- is a
+    // failure rather than an addition to this list.
+    val zeroBlocks = hidden.filter((_, _, _, v, _) => v == 0.0).map((_, b, _, _, _) => b.split('|').head).distinct
+    assertEquals(zeroBlocks.sorted, List("expanded_capex"))
+  }
+
+  test("expanded_capex reports a zero group, because PyPSA does not re-drop the difference") {
+    assume(available, "goldens missing")
+    // The behaviour the case above describes, asserted on the module rather than on the
+    // goldens. `ac-dc-dispatch` has capacity fixed, so every generator's expansion is
+    // nothing -- and upstream reports four `0.0` groups rather than an empty frame, because
+    // `drop_zero` runs inside `capex` and `installed_capex` and not on their difference.
+    //
+    // A single `(nominal - nominal_in)` query with the usual `HAVING ... <> 0` drops them and
+    // agreed with every assertion anyway: the floor filters a zero off both sides, so the
+    // group sets matched and `getOrElse(key, 0.0)` made the absent values compare equal. This
+    // is what makes the faithful version load-bearing.
+    scala.util.Using.resource(Stats.of(Lopf.solve(network("ac-dc-dispatch"), params))) { stats =>
+      val mine   = stats.expandedCapex("name")
+      val wanted = expected("ac-dc-dispatch", "expanded_capex", "name").get
+      val zeros  = wanted.filter((k, v) => v == 0.0 && covered.contains(component(k)))
+      assert(zeros.nonEmpty, "the golden has no zero group to check against")
+      zeros.foreach { (key, _) =>
+        assert(mine.contains(key), s"$key is reported as 0.0 by PyPSA and omitted here")
+        assertEqualsDouble(mine(key), 0.0, 1e-9, key)
+      }
+    }
   }
 
   test("the smallest group in a compared network is far above the floor") {

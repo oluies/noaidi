@@ -403,8 +403,9 @@ boundary a pinned list catches and a sentence about magnitudes does not.
 
 ### What is still not covered
 
-- **The seventeen other metrics.** Each is a query, and the six corrections above are the
-  argument for adding them against measured goldens a few at a time rather than in one pass.
+- **The other metrics.** Each is a query, and the corrections above are the argument for
+  adding them against measured goldens a few at a time rather than in one pass. Three of the
+  seventeen are done; see *The capital metrics* below for what they cost.
 - **Branches in `supply`.** PyPSA's `energy_balance` includes `Line`, `Link` and
   `Transformer` at their ports with a sign per end, and the port matters: measured on
   `statistics-dimensions`, `supply` groups a link by the bus at its *receiving* port while
@@ -414,6 +415,74 @@ boundary a pinned list catches and a sentence about magnitudes does not.
   fails no test, because the suite's solver floor hides exactly the artefacts the rounding
   removes. Measured and stated rather than counted as coverage; the rounding of the returned
   *value* is separable and is asserted.
+
+## The capital metrics, and the seventh thing the sketch had wrong
+
+`capex`, `installed_capex` and `expanded_capex` are the first metrics here that are **not
+sums over snapshots**: a capacity is one number for the whole horizon, so there is no
+snapshot axis to group by. Three things came out of building them, and the first was in the
+sketch above.
+
+### `capex` is not `Expansion.costWeight`
+
+The sketch said it was — "the per-period factor is `Expansion.costWeight`: the sum of
+`p_objective` over the periods the asset is active in" — with a `SUM(DISTINCT s.p_objective)`
+query to match, and a note that this is where SQL starts to fight back.
+
+`costWeight` is one factor per asset and it is what the **objective** charges capital with.
+The statistic is reported **per period**, each period carrying its own weighting:
+
+```
+capex[group, period] = SUM over assets active in that period of
+                       nominal_opt * capital_cost, times that period's objective weighting
+```
+
+Summing the statistic over periods recovers `costWeight`, so the two agree about the total
+and disagree about every breakdown — the shape of error a single-period fixture cannot see.
+Derived from the goldens and checked on two fixtures;
+`investment-periods-expansion` has weightings 1.0 and 0.5 and a generator built in 2040:
+
+```
+2030   (old 100x0 + wind 60x120)                x 1.0  =  7200
+2040   (old 0 + wind 7200 + late 40x60 = 9600)  x 0.5  =  4800
+```
+
+The `SUM(DISTINCT)` the sketch worried about is not needed either. A `capital_share` view
+supplies one row per `(entity, period)` an asset is charged for, with that period's weight,
+and exactly one row per entity with weight 1.0 on a flat index — where the `active` table is
+empty, because there is no period to be active in. Two sums over that view are the whole of
+`capex` and `installed_capex`.
+
+### `expanded_capex` reports exact zeros, and `drop_zero` does not stop it
+
+Upstream is `capex.sub(installed_capex, fill_value=0)`, and both operands have already been
+rounded and zero-dropped by then — `_apply_option_kwargs` runs inside each metric, not on the
+difference. So a group whose expansion is nothing comes back as `0.0` rather than being
+omitted, and on four goldens (`ac-dc-co2`, `ac-dc-dispatch`, `storage-hvdc`,
+`storage-cyclic-co2`) every non-extendable group does.
+
+This module computed it as one query over `nominal - nominal_in` with the usual
+`HAVING ... <> 0`, which drops them — **and agreed with every assertion anyway**. The suite's
+own floor filters a zero off both sides, so the group sets matched, and `getOrElse(key, 0.0)`
+made the absent values compare equal. The agreement was accidental. It is now two queries and
+a subtraction, like upstream, and `round(a) - round(b)` is not `round(a - b)` in the fifth
+decimal either.
+
+### The suite is driven by the recorded metric list
+
+It named `supply` and `opex` inline, so three new metrics would have been recorded in every
+golden, read by nothing, and reported as a pass. The metric list now comes off the goldens
+like the grouping list and the network list, with a case asserting that every recorded metric
+has an implementation.
+
+### What is still not covered
+
+Fourteen metrics: `overnight_cost`, `fom`, `optimal_capacity`, `installed_capacity`,
+`expanded_capacity`, `system_cost`, `withdrawal`, `transmission`, `energy_balance`,
+`curtailment`, `capacity_factor`, `revenue`, `market_value`, `prices`. The three capacity
+metrics are the obvious next batch — they are `capital_share` without the cost factor — and
+`overnight_cost` is refused by the LOPF today, which is a decision to make rather than a
+query to write.
 
 ## What this deliberately does not do
 

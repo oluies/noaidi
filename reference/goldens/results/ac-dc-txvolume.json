@@ -1350,6 +1350,207 @@
   "error": "AttributeError: 'SubNetwork' object has no attribute 'Y'"
  },
  "statistics": {
+  "capex|bus": {
+   "Generator|Frankfurt": 3506559.76642,
+   "Generator|Manchester": 13553914.6272,
+   "Generator|Norway": 3320425.15491,
+   "Line|Bremen": 66.71352,
+   "Line|London": 118.38981,
+   "Line|Manchester": 185.00471,
+   "Line|Norway DC": 14.26017,
+   "Line|Norwich": 20.54171,
+   "Line|Norwich DC": 26.01022,
+   "Link|Bremen": 48.22178,
+   "Link|London": 1077.81853,
+   "Link|Norway": 95.5226,
+   "Link|Norwich": 47.00097
+  },
+  "capex|bus_carrier": {
+   "Generator|AC": 20380899.54853,
+   "Line|AC": 390.64975,
+   "Line|DC": 40.27038,
+   "Link|AC": 1268.56389
+  },
+  "capex|carrier": {
+   "Generator|gas": 127406.37499,
+   "Generator|wind": 20253493.17354,
+   "Line|AC": 430.92013,
+   "Link|DC": 1268.56389
+  },
+  "capex|country": {
+   "Generator|DE": 3506559.76642,
+   "Generator|NO": 3320425.15491,
+   "Generator|UK": 13553914.6272,
+   "Line|DE": 66.71352,
+   "Line|NO": 14.26017,
+   "Line|UK": 349.94645,
+   "Link|DE": 48.22178,
+   "Link|NO": 95.5226,
+   "Link|UK": 1124.8195
+  },
+  "capex|location": {
+   "Generator|": 20380899.54853,
+   "Line|": 430.92013,
+   "Link|": 1268.56389
+  },
+  "capex|name": {
+   "Generator|Frankfurt Gas": 41232.35835,
+   "Generator|Frankfurt Wind": 3465327.40807,
+   "Generator|Manchester Wind": 13553914.6272,
+   "Generator|Norway Gas": 86174.01664,
+   "Generator|Norway Wind": 3234251.13827,
+   "Line|0": 118.38981,
+   "Line|1": 185.00471,
+   "Line|3": 26.01022,
+   "Line|4": 14.26017,
+   "Line|5": 20.54171,
+   "Line|6": 66.71352,
+   "Link|Bremen Converter": 48.22178,
+   "Link|DC link": 1077.81853,
+   "Link|Norway Converter": 95.5226,
+   "Link|Norwich Converter": 47.00097
+  },
+  "capex|unit": {
+   "Generator|": 20380899.54853,
+   "Line|": 430.92013,
+   "Link|": 1268.56389
+  },
+  "expanded_capex|bus": {
+   "Generator|Frankfurt": -4941836.647659999,
+   "Generator|Manchester": 3499664.1005099993,
+   "Generator|Norway": -63037.31903999997,
+   "Line|Bremen": -7933.28648,
+   "Line|Bremen DC": -346.93698,
+   "Line|London": -5350.240400000001,
+   "Line|Manchester": -5154.66241,
+   "Line|Norway DC": -2482.93475,
+   "Line|Norwich": -853.55637,
+   "Line|Norwich DC": -5139.03184,
+   "Link|Bremen": -141.77822,
+   "Link|London": 201.28432999999995,
+   "Link|Norway": -104.4774,
+   "Link|Norwich": -162.99903
+  },
+  "expanded_capex|bus_carrier": {
+   "Generator|AC": -1505209.8661899976,
+   "Line|AC": -19291.74565,
+   "Line|DC": -7968.90358,
+   "Link|AC": -207.97031000000015
+  },
+  "expanded_capex|carrier": {
+   "Generator|gas": -21082533.25841,
+   "Generator|wind": 19577323.39222,
+   "Line|AC": -27260.649230000003,
+   "Link|DC": -207.97031000000015
+  },
+  "expanded_capex|country": {
+   "Generator|DE": -4941836.647659999,
+   "Generator|NO": -63037.31903999997,
+   "Generator|UK": 3499664.1005099993,
+   "Line|DE": -8280.223460000001,
+   "Line|NO": -2482.93475,
+   "Line|UK": -16497.49101,
+   "Link|DE": -141.77822,
+   "Link|NO": -104.4774,
+   "Link|UK": 38.28530000000001
+  },
+  "expanded_capex|location": {
+   "Generator|": -1505209.8661899976,
+   "Line|": -27260.649230000003,
+   "Link|": -207.97031000000015
+  },
+  "expanded_capex|name": {
+   "Generator|Frankfurt Gas": -8172923.882259999,
+   "Generator|Frankfurt Wind": 3231087.2346,
+   "Generator|Manchester Gas": -9830758.39846,
+   "Generator|Manchester Wind": 13330422.49897,
+   "Generator|Norway Gas": -3078850.9777,
+   "Generator|Norway Wind": 3015813.65866,
+   "Line|0": -5350.240400000001,
+   "Line|1": -5154.66241,
+   "Line|2": -346.93698,
+   "Line|3": -5139.03184,
+   "Line|4": -2482.93475,
+   "Line|5": -853.55637,
+   "Line|6": -7933.28648,
+   "Link|Bremen Converter": -141.77822,
+   "Link|DC link": 201.28432999999995,
+   "Link|Norway Converter": -104.4774,
+   "Link|Norwich Converter": -162.99903
+  },
+  "expanded_capex|unit": {
+   "Generator|": -1505209.8661899976,
+   "Line|": -27260.649230000003,
+   "Link|": -207.97031000000015
+  },
+  "installed_capex|bus": {
+   "Generator|Frankfurt": 8448396.41408,
+   "Generator|Manchester": 10054250.52669,
+   "Generator|Norway": 3383462.47395,
+   "Line|Bremen": 8000.0,
+   "Line|Bremen DC": 346.93698,
+   "Line|London": 5468.63021,
+   "Line|Manchester": 5339.66712,
+   "Line|Norway DC": 2497.19492,
+   "Line|Norwich": 874.09808,
+   "Line|Norwich DC": 5165.04206,
+   "Link|Bremen": 190.0,
+   "Link|London": 876.5342,
+   "Link|Norway": 200.0,
+   "Link|Norwich": 210.0
+  },
+  "installed_capex|bus_carrier": {
+   "Generator|AC": 21886109.41472,
+   "Line|AC": 19682.3954,
+   "Line|DC": 8009.17396,
+   "Link|AC": 1476.5342
+  },
+  "installed_capex|carrier": {
+   "Generator|gas": 21209939.6334,
+   "Generator|wind": 676169.78132,
+   "Line|AC": 27691.56936,
+   "Link|DC": 1476.5342
+  },
+  "installed_capex|country": {
+   "Generator|DE": 8448396.41408,
+   "Generator|NO": 3383462.47395,
+   "Generator|UK": 10054250.52669,
+   "Line|DE": 8346.93698,
+   "Line|NO": 2497.19492,
+   "Line|UK": 16847.43746,
+   "Link|DE": 190.0,
+   "Link|NO": 200.0,
+   "Link|UK": 1086.5342
+  },
+  "installed_capex|location": {
+   "Generator|": 21886109.41472,
+   "Line|": 27691.56936,
+   "Link|": 1476.5342
+  },
+  "installed_capex|name": {
+   "Generator|Frankfurt Gas": 8214156.24061,
+   "Generator|Frankfurt Wind": 234240.17347,
+   "Generator|Manchester Gas": 9830758.39846,
+   "Generator|Manchester Wind": 223492.12823,
+   "Generator|Norway Gas": 3165024.99434,
+   "Generator|Norway Wind": 218437.47961,
+   "Line|0": 5468.63021,
+   "Line|1": 5339.66712,
+   "Line|2": 346.93698,
+   "Line|3": 5165.04206,
+   "Line|4": 2497.19492,
+   "Line|5": 874.09808,
+   "Line|6": 8000.0,
+   "Link|Bremen Converter": 190.0,
+   "Link|DC link": 876.5342,
+   "Link|Norway Converter": 200.0,
+   "Link|Norwich Converter": 210.0
+  },
+  "installed_capex|unit": {
+   "Generator|": 21886109.41472,
+   "Line|": 27691.56936,
+   "Link|": 1476.5342
+  },
   "opex|bus": {
    "Generator|Frankfurt": 3752.75617,
    "Generator|Manchester": 2132.40936,

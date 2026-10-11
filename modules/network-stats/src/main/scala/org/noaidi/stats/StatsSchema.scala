@@ -120,6 +120,46 @@ private[stats] object StatsSchema:
       |  period    VARCHAR NOT NULL
       |)""".stripMargin,
 
+    // One row per (entity, period) an asset is charged capital for, with that period's
+    // weighting -- and exactly one row per entity on a flat index.
+    //
+    // The three capital metrics are the first here that are NOT sums over snapshots. A
+    // capacity is one number for the whole horizon, so `capex` has no snapshot axis to group
+    // by, and yet upstream reports it PER PERIOD on a multi-period network. This view is what
+    // supplies that axis:
+    //
+    //     capex[group, period] = SUM over assets active in that period of
+    //                            nominal_opt * capital_cost, times that period's
+    //                            objective weighting
+    //
+    // Derived from the goldens rather than from the formula, and checked on two fixtures.
+    // `investment-periods-expansion` has weightings 1.0 and 0.5 and three generators, one
+    // built in 2040:
+    //
+    //     2030   (old 100x0 + wind 60x120)                 x 1.0  =  7200
+    //     2040   (old 0 + wind 7200 + late 40x60 = 9600)   x 0.5  =  4800
+    //
+    // ==This is not `Expansion.costWeight`, and the design note said it was==
+    //
+    // `costWeight` is the SUM of the objective weightings over the periods an asset is active
+    // in, and it is what the objective charges capital with -- one factor per asset. The
+    // statistic is per period with that period's own weighting. Summing the statistic over
+    // periods recovers `costWeight`, so the two agree about the total and disagree about
+    // every breakdown, which is the shape of error that passes a one-period fixture.
+    //
+    // The `active` table is empty on a flat index -- there is no period to be active in -- so
+    // the second branch is what covers that case, with a weight of 1.0 and a NULL period. The
+    // `COUNT(*) = 0` guard rather than a Scala branch keeps one query shape for both, which
+    // matters because the alternative is three metrics times two shapes.
+    """CREATE VIEW capital_share AS
+      |SELECT a.component, a.entity, a.period, w.p_objective AS weight
+      |FROM active a
+      |JOIN (SELECT DISTINCT period, p_objective FROM snapshot) w USING (period)
+      |UNION ALL
+      |SELECT e.component, e.entity, NULL AS period, 1.0 AS weight
+      |FROM entity e
+      |WHERE (SELECT COUNT(*) FROM active) = 0""".stripMargin,
+
     // Every grouping dimension, resolved once per entity.
     //
     // A view rather than seven expressions repeated in nineteen queries, which is the shape

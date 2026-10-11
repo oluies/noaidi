@@ -23,13 +23,20 @@ import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role}
   * browser demo that solves an LP in-page. A JNI dependency underneath either of those buys
   * nothing and costs the cross-build.
   *
-  * ==Two metrics, seven groupings, every golden==
+  * ==Five metrics, seven groupings, every golden==
   *
-  * [[supply]] and [[opex]] of the nineteen, and they are the pair worth having first because
-  * they weight DIFFERENTLY: `supply` uses `w_generators` and `opex` uses `w_objective` times
+  * [[supply]] and [[opex]] of the nineteen were the pair worth having first because they
+  * weight DIFFERENTLY: `supply` uses `w_generators` and `opex` uses `w_objective` times
   * `p_objective`. A port that reached for one weighting for both would pass one metric and
   * fail the other, and `operational-limit` -- the only golden whose three snapshot weightings
   * differ -- is the fixture that separates them.
+  *
+  * [[capex]], [[installedCapex]] and [[expandedCapex]] are the first three that are not sums
+  * over snapshots at all: a capacity is one number for the whole horizon, so their period
+  * axis comes from `capital_share` rather than from the snapshot index. They are also where
+  * the design note's own formula was wrong -- it named `Expansion.costWeight`, which is the
+  * factor the OBJECTIVE charges capital with, where the statistic is per period with that
+  * period's weighting. The two agree about the total and differ in every breakdown.
   *
   * Both answer all seven of PyPSA's grouping dimensions, and four of those are read off the
   * component's BUS rather than off the component, which is a different kind of mistake to
@@ -42,8 +49,8 @@ import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role}
   * eleven were. The period is the third level of the key, which is what upstream returns: a
   * multi-period frame has a column per period rather than a single series.
   *
-  * The remaining seventeen metrics are listed in the design note, along with what is still
-  * missing from these two: branches at their ports in `supply`, which PyPSA's
+  * The remaining fourteen metrics are listed in the design note, along with what is still
+  * missing from these five: branches at their ports in `supply`, which PyPSA's
   * `energy_balance` includes with a sign per end.
   */
 final class Stats private (
@@ -112,6 +119,16 @@ final class Stats private (
     */
   private val periodSelect: String = if multiPeriod then ", s.period AS period" else ""
   private val periodGroup: String  = if multiPeriod then ", s.period" else ""
+
+  /** The same two fragments for a metric whose period comes from `capital_share`.
+    *
+    * A capital metric has no snapshot axis to read a period off, so it takes one from
+    * `capital_share` instead -- the alias differs and nothing else does. Two more `val`s
+    * rather than a parameter, because the alias is part of the query text and a metric that
+    * passed the wrong one would group by a column that happens to exist on the other table.
+    */
+  private val capitalPeriodSelect: String = if multiPeriod then ", cs.period AS period" else ""
+  private val capitalPeriodGroup: String  = if multiPeriod then ", cs.period" else ""
 
   /** Energy injected, in MWh, by whatever dimension `groupBy` names.
     *
@@ -223,6 +240,86 @@ final class Stats private (
       |JOIN snapshot s ON s.snapshot = p.snapshot
       |GROUP BY p.component, grp$periodGroup
       |HAVING ROUND(SUM(p.cost * s.w_objective * s.p_objective), 5) <> 0
+      |""".stripMargin)
+
+  /** Capital cost of the capacity the solve chose, by `groupBy`.
+    *
+    * `p_nom_opt * capital_cost`, summed, and on a multi-period network reported per period
+    * with that period's `objective` weighting -- see `capital_share` in [[StatsSchema]] for
+    * the per-period axis and for why it is not `Expansion.costWeight`.
+    *
+    * ==Two sums and a subtraction==
+    *
+    * [[capex]] charges the chosen capacity and [[installedCapex]] the capacity the network
+    * came with; both are this one query against a different column. [[expandedCapex]] is
+    * their difference and is NOT a third query -- see its own note for why that matters.
+    *
+    * ==`capital_cost_piecewise_opt` is always zero here==
+    *
+    * PyPSA adds it to the cost (`capex` reads
+    * `static.get(cost_attribute + "_piecewise_opt", 0)`). A piecewise curve is refused by
+    * `CsvReader` and `NetCdfReader`, so a network carrying one never reaches this module and
+    * the term is structurally zero rather than dropped.
+    */
+  def capex(groupBy: String = "carrier"): Map[String, Double] =
+    capital(groupBy, "e.nominal * e.capital_cost")
+
+  /** Capital cost of the capacity the network came with, by `groupBy`.
+    *
+    * `p_nom * capital_cost` -- the static column rather than the solved one, which is the
+    * only difference from [[capex]]. Empty on a network whose extendables all start from
+    * zero: `tx-cost-periods`' two lines have no `s_nom` column at all, so this is 0 for both
+    * and `drop_zero` removes them, which is what upstream records.
+    */
+  def installedCapex(groupBy: String = "carrier"): Map[String, Double] =
+    capital(groupBy, "COALESCE(e.nominal_in, 0) * e.capital_cost")
+
+  /** Capital cost of the capacity the solve ADDED, by `groupBy`, which may be negative.
+    *
+    * '''Not''' one query over `nominal - nominal_in`, and the difference is a group rather
+    * than a number. Upstream is `capex.sub(installed_capex, fill_value=0)`, and both operands
+    * have already been rounded and zero-dropped by the time the subtraction happens --
+    * `_apply_option_kwargs` runs inside each metric and not on the difference. So
+    * `expanded_capex` is the one metric here that '''reports exact zeros''': on
+    * `ac-dc-co2`, `ac-dc-dispatch`, `storage-hvdc` and `storage-cyclic-co2` every
+    * non-extendable group comes back as `0.0` rather than being dropped.
+    *
+    * A single `(nominal - nominal_in)` query with the usual `HAVING ... <> 0` drops them, and
+    * it agreed with upstream on every assertion anyway: the suite's own floor filters a zero
+    * off both sides, so the group sets matched and `getOrElse(key, 0.0)` made the missing
+    * values compare equal. Fixed because the agreement was accidental, and because
+    * `round(a) - round(b)` is not `round(a - b)` in the fifth decimal.
+    *
+    * The sign convention is `Expansion`'s: `ac-dc-meshed`'s gas comes out at -21,109,107.32
+    * because the expansion retires gas.
+    */
+  def expandedCapex(groupBy: String = "carrier"): Map[String, Double] =
+    val chosen    = capex(groupBy)
+    val installed = installedCapex(groupBy)
+    (chosen.keySet ++ installed.keySet)
+      .map(key => key -> (chosen.getOrElse(key, 0.0) - installed.getOrElse(key, 0.0)))
+      .toMap
+
+  /** The shared body of the two capital metrics that are a single sum.
+    *
+    * `cost` is an expression over `entity`, interpolated -- which is safe only because the
+    * three call sites are the only ones and each passes a literal. It is not a parameter in
+    * the sense `groupBy` is, and it is deliberately `private`.
+    *
+    * No join to `fact` or `snapshot`: a capacity is one number for the whole horizon. That is
+    * what makes these three the first metrics here whose period axis comes from
+    * `capital_share` rather than from the snapshot index.
+    */
+  private def capital(groupBy: String, cost: String): Map[String, Double] =
+    grouped(s"""
+      |SELECT e.component                      AS component,
+      |       d.${dimension(groupBy)}           AS grp$capitalPeriodSelect,
+      |       ROUND(SUM(($cost) * cs.weight), 5) AS value
+      |FROM entity e
+      |JOIN dimensions d USING (component, entity)
+      |JOIN capital_share cs USING (component, entity)
+      |GROUP BY e.component, grp$capitalPeriodGroup
+      |HAVING ROUND(SUM(($cost) * cs.weight), 5) <> 0
       |""".stripMargin)
 
   /** A grouping dimension, validated against the `dimensions` view rather than interpolated.

@@ -820,6 +820,87 @@
   }
  },
  "statistics": {
+  "capex|bus": {
+   "Generator|b|2030": 1000.0,
+   "Generator|b|2040": 2500.0,
+   "Generator|b|2050": 4250.0
+  },
+  "capex|bus_carrier": {
+   "Generator|AC|2030": 1000.0,
+   "Generator|AC|2040": 2500.0,
+   "Generator|AC|2050": 4250.0
+  },
+  "capex|carrier": {
+   "Generator|wind|2030": 1000.0,
+   "Generator|wind|2040": 2500.0,
+   "Generator|wind|2050": 4250.0
+  },
+  "capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capex|location": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 2500.0,
+   "Generator||2050": 4250.0
+  },
+  "capex|name": {
+   "Generator|w2030|2030": 1000.0,
+   "Generator|w2030|2040": 1000.0,
+   "Generator|w2030|2050": 1000.0,
+   "Generator|w2040|2040": 1500.0,
+   "Generator|w2040|2050": 1500.0,
+   "Generator|w2050|2050": 1750.0
+  },
+  "capex|unit": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 2500.0,
+   "Generator||2050": 4250.0
+  },
+  "expanded_capex|bus": {
+   "Generator|b|2030": 1000.0,
+   "Generator|b|2040": 2500.0,
+   "Generator|b|2050": 4250.0
+  },
+  "expanded_capex|bus_carrier": {
+   "Generator|AC|2030": 1000.0,
+   "Generator|AC|2040": 2500.0,
+   "Generator|AC|2050": 4250.0
+  },
+  "expanded_capex|carrier": {
+   "Generator|wind|2030": 1000.0,
+   "Generator|wind|2040": 2500.0,
+   "Generator|wind|2050": 4250.0
+  },
+  "expanded_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capex|location": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 2500.0,
+   "Generator||2050": 4250.0
+  },
+  "expanded_capex|name": {
+   "Generator|w2030|2030": 1000.0,
+   "Generator|w2030|2040": 1000.0,
+   "Generator|w2030|2050": 1000.0,
+   "Generator|w2040|2040": 1500.0,
+   "Generator|w2040|2050": 1500.0,
+   "Generator|w2050|2050": 1750.0
+  },
+  "expanded_capex|unit": {
+   "Generator||2030": 1000.0,
+   "Generator||2040": 2500.0,
+   "Generator||2050": 4250.0
+  },
+  "installed_capex|bus": {},
+  "installed_capex|bus_carrier": {},
+  "installed_capex|carrier": {},
+  "installed_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capex|location": {},
+  "installed_capex|name": {},
+  "installed_capex|unit": {},
   "opex|bus": {
    "Generator|b|2030": 100000.0,
    "Generator|b|2040": 70000.0,

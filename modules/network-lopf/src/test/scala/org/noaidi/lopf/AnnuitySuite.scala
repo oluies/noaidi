@@ -75,7 +75,7 @@ class AnnuitySuite extends munit.FunSuite, CsvFixtures:
     val n = network("annuitised-capital")
     val generators = n.require("Generator")
     assertEqualsDouble(Expansion.periodizedCost(n, generators, "both"), 43.589347 * 0.5, 1e-5)
-    assertEqualsDouble(Expansion.periodizedCost(n, generators, "new"), 85.810517 * 0.5, 1e-5)
+    assertEqualsDouble(Expansion.periodizedCost(n, generators, "new"), 85.810517 * 0.5 + 7.5, 1e-5)
     // And the unset case still reads `capital_cost`, which is every other golden.
     val meshed = network("ac-dc-meshed")
     val lines  = meshed.require("Line")
@@ -112,4 +112,56 @@ class AnnuitySuite extends munit.FunSuite, CsvFixtures:
     val n = mutate("annuitised-capital", "generators.csv", setColumn(_, "lifetime", "0"))
     val failure = intercept[Lopf.UnsupportedNetwork](Lopf.build(n))
     assert(failure.getMessage.contains("lifetime"), failure.getMessage)
+  }
+
+  test("fom_cost is in the objective's coefficient and not in the statistic's") {
+    assume(available, "goldens missing")
+    // PyPSA keeps two capital coefficients, one function and one argument apart:
+    //
+    //   Components.periodized_cost  ->  fom_cost = static["fom_cost"]   the objective's
+    //   Components.capital_cost     ->  fom_cost = None                 statistics.capex's
+    //
+    // `annuitised-capital`'s `new` generator sets `fom_cost = 7.5` for this, and it is the
+    // only fixture that sets it anywhere. Without it the two Scala functions were equal on
+    // every golden and the split between them was an equivalent mutant -- a review caught
+    // that, and it is the same hole the half-year horizon closes for `nyears`.
+    val n          = network("annuitised-capital")
+    val generators = n.require("Generator")
+    val periodized = Expansion.periodizedCost(n, generators, "new")
+    val capital    = Expansion.capitalCost(n, generators, "new")
+    assertEqualsDouble(periodized - capital, 7.5, 1e-9,
+      "the difference between the two coefficients is exactly fom_cost")
+    // And the golden says PyPSA leaves it out of `capex`: 85.810517 x 0.5 x 100 MW.
+    val capex = ujson
+      .read(Files.readString(goldens.resolve("results").resolve("annuitised-capital.json")))(
+        "statistics")("capex|name")("Generator|new").num
+    assertEqualsDouble(capex, capital * 100.0, 1e-4, "capex excludes fom_cost")
+    // A unit that sets no `fom_cost` has the two coincide, which is every other asset here.
+    assertEqualsDouble(Expansion.periodizedCost(n, generators, "depr"),
+      Expansion.capitalCost(n, generators, "depr"), 1e-12)
+  }
+
+  test("a transmission cost limit weights an annuitised branch by its annuity") {
+    assume(available, "goldens missing")
+    // `define_transmission_expansion_cost_limit` weights by `c.capital_cost`
+    // (`global_constraints.py:935`) -- the PROPERTY, which annuitises. This port read the raw
+    // column, and the two agree only while an annuitised cost is refused, so lifting that
+    // refusal left this call site behind. `capital_cost` defaults to 0.0, so every
+    // coefficient was zero and the row became the vacuous `0 <= 500`.
+    //
+    // The separation is 5.7x rather than a tolerance: read raw, the line builds the whole
+    // 120 MW the load needs for 5,264,717.87; read correctly the limit binds at 6.88 MW and
+    // `dear` covers the rest for 30,029,250.99.
+    val result   = Lopf.solve(network("tx-cost-annuitised"), params)
+    assertEquals(result.status, SolveStatus.Optimal, s"did not solve: ${result.status}")
+    val expected = results("tx-cost-annuitised")("optimize")
+    val target   = expected("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * math.abs(target),
+      s"objective ${result.objective} against PyPSA's $target")
+    // The capacity, because the objective is dominated by the operating cost: the line is
+    // 6.88 MW of a 300 MW cap, and reading the coefficient as zero builds 120.
+    assertEqualsDouble(result.capacity("Line", "tie"),
+      expected("nominal_opt")("Line")("tie").num, 1e-4, "tie")
+    assert(result.capacity("Line", "tie") < 10.0,
+      s"the limit has to bind, and 120 MW is the vacuous answer: ${result.capacity("Line", "tie")}")
   }

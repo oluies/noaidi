@@ -1456,8 +1456,15 @@ def annuitised_capital():
 
     n.add("Bus", "a", v_nom=110.0)
 
+    # `fom_cost` on exactly one unit, because it is the one attribute that makes PyPSA's two
+    # capital coefficients differ: the objective charges `periodized_cost` WITH it and
+    # `statistics.capex` reads `capital_cost`, the same function with `fom_cost=None`. Set
+    # nowhere in the goldens, the two were equal everywhere and the split between
+    # `Expansion.periodizedCost` and `Expansion.capitalCost` was an equivalent mutant -- the
+    # same hole this fixture's half-year horizon was chosen to close for `nyears`.
     n.add("Generator", "new", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
-          marginal_cost=11.00, overnight_cost=1000.0, discount_rate=0.07, lifetime=25.0)
+          marginal_cost=11.00, overnight_cost=1000.0, discount_rate=0.07, lifetime=25.0,
+          fom_cost=7.5)
     n.add("Generator", "depr", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
           marginal_cost=11.07, overnight_cost=400.0, discount_rate=0.0, lifetime=20.0)
     n.add("Generator", "both", bus="a", p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
@@ -1469,6 +1476,63 @@ def annuitised_capital():
     n.add("Generator", "old", bus="a", p_nom=400.0, marginal_cost=80.0)
 
     n.add("Load", "d", bus="a", p_set=[350.0] * 4)
+    return n
+
+
+def tx_cost_annuitised():
+    """A transmission cost limit over a branch priced by `overnight_cost`, which was vacuous.
+
+    `define_transmission_expansion_cost_limit` weights each extendable branch by
+    `c.capital_cost` -- the PROPERTY, which annuitises an `overnight_cost` -- and this port
+    read the raw column. The two agree only while an annuitised cost is refused, so lifting
+    that refusal left one of the two call sites behind.
+
+    `capital_cost` defaults to 0.0, so with the line priced by `overnight_cost` alone every
+    coefficient in the row was zero and the constraint became the vacuous `0 <= 500`:
+    unlimited transmission build, reported `Optimal`. Found by review, not by a test, because
+    no fixture put an overnight cost and a cost limit in the same network.
+
+    Two buses, one extendable line, and a limit that BINDS -- which is the whole point, since
+    a slack limit is satisfied by a vacuous row too:
+
+        line        overnight 2000, r=0.06, n=30  ->  annuity 0.07264891
+        nyears      4 snapshots x 1095            ->  0.5
+        coefficient 2000 * 0.07264891 * 0.5       ->  72.65 per MW
+        limit       500                           ->  6.88 MW of line
+
+    `cheap` at bus A and `dear` at bus B, so the line's capacity is what lets the cheap unit
+    serve the far load and the limit is what stops it. Read with the raw column every
+    coefficient is zero, the row is `0 <= 500`, and the line builds the whole 120 MW the load
+    needs for an objective of 5,264,717.87; read correctly the limit binds and `dear` covers
+    what the line cannot carry.
+
+    The carrier is set on the line and matched in `carrier_attribute`, which the first version
+    of this fixture got wrong: the limit selects with `c.static.query("carrier in @car")`, so
+    an empty `carrier_attribute` selects nothing and the constraint is ABSENT rather than
+    vacuous -- and an absent constraint looks exactly like the defect being tested.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    n.snapshot_weightings.loc[:, :] = 8760.0 / 8
+
+    n.add("Bus", "A", v_nom=110.0)
+    n.add("Bus", "B", v_nom=110.0)
+
+    # `carrier="AC"` explicitly, and `carrier_attribute="AC"` below to match it: the limit
+    # selects branches with `c.static.query("carrier in @car")`, so an empty
+    # `carrier_attribute` selects nothing and builds no row at all -- which is how the first
+    # version of this fixture came out with the limit silently absent rather than vacuous.
+    n.add("Line", "tie", bus0="A", bus1="B", x=0.1, r=0.01, s_nom_extendable=True,
+          s_nom_max=300.0, carrier="AC",
+          overnight_cost=2000.0, discount_rate=0.06, lifetime=30.0)
+
+    n.add("Generator", "cheap", bus="A", p_nom=400.0, marginal_cost=10.0)
+    n.add("Generator", "dear", bus="B", p_nom=400.0, marginal_cost=60.0)
+
+    n.add("Load", "dB", bus="B", p_set=[120.0] * 4)
+
+    n.add("GlobalConstraint", "tx", type="transmission_expansion_cost_limit",
+          carrier_attribute="AC", sense="<=", constant=500.0)
     return n
 
 
@@ -2300,6 +2364,7 @@ NETWORKS = {
     "fixed-dispatch-periods": fixed_dispatch_periods,
     "statistics-dimensions": statistics_dimensions,
     "annuitised-capital": annuitised_capital,
+    "tx-cost-annuitised": tx_cost_annuitised,
     "ac-dc-dispatch": ac_dc_dispatch,
     "ac-dc-co2": ac_dc_co2,
     "ac-dc-txvolume": ac_dc_txvolume,

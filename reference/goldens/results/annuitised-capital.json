@@ -3,10 +3,10 @@
   "nominal_opt": {
    "Generator": {
     "determined": true,
-    "excess": -0.014960279553331313
+    "excess": -0.014990309944103131
    }
   },
-  "objective": 0.014092691242694855,
+  "objective": 0.0031677670776844025,
   "probe": {
    "presolve": "off",
    "run_crossover": "off",
@@ -15,11 +15,11 @@
   "series": {
    "bus_marginal_price": {
     "determined": true,
-    "excess": -0.0025652960480153537
+    "excess": -0.002562219872946015
    },
    "generator_p": {
     "determined": true,
-    "excess": -0.009999996835558377
+    "excess": -0.009999998682051552
    }
   },
   "statistics": {
@@ -295,7 +295,7 @@
     "perp": 50.0
    }
   },
-  "objective": 16989354.993205734,
+  "objective": 16990104.993205734,
   "objective_constant": 0.0,
   "status": "ok",
   "storage_p": {
@@ -403,7 +403,7 @@
     []
    ]
   },
-  "total_system_cost": 16989354.993205734,
+  "total_system_cost": 16990104.993205734,
   "transformer_p0": {
    "columns": [],
    "index": [

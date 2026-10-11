@@ -1,0 +1,2 @@
+name,bus0,bus1,x,r,s_nom_extendable,s_nom_max,overnight_cost,discount_rate,lifetime,carrier,sub_network
+tie,A,B,0.1,0.01,True,300.0,2000.0,0.06,30.0,AC,0

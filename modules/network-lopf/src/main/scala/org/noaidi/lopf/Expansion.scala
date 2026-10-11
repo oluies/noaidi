@@ -202,8 +202,26 @@ object Expansion:
       val capital = table.float("capital_cost", id)
       if capital.isFinite then capital else 0.0
     else
+      // `horizon` rather than `nyears(network).head`, so the precondition is checked where it
+      // is relied on. `reject` refuses a network whose periods disagree, but this is reachable
+      // from `network-stats` with no `reject` having run -- `Stats.of` does not call it.
       overnight * annuity(table.float("discount_rate", id), table.float("lifetime", id)) *
-        nyears(network).head
+        horizon(network)
+
+  /** The single modelled horizon, or a refusal if the investment periods disagree about it.
+    *
+    * Separate from [[nyears]] because the two answer different questions: that one reports
+    * what the periods model, and this one asserts there is only one answer before an annuity
+    * is scaled by it. Reachable from `network-stats`, which never calls [[reject]].
+    */
+  private def horizon(network: Network): Double =
+    val years = nyears(network).distinct
+    if years.length > 1 then
+      throw new Lopf.UnsupportedNetwork(
+        s"an annuitised cost needs one modelled horizon and this network's periods model " +
+          s"${years.map(y => f"$y%.6f").mkString(", ")} years"
+      )
+    years.head
 
   /** Cost per unit of capacity over the modelled horizon: PyPSA's `periodized_cost`.
     *
@@ -225,29 +243,21 @@ object Expansion:
     *
     * ==What is refused, and why each would otherwise be silent==
     *
-    * See [[reject]]. A missing `discount_rate` makes the annuity NaN, which reaches the
-    * objective as a coefficient; a non-positive `lifetime` is a `ValueError` upstream; and
-    * investment periods of unequal length make an annuitised cost ill-defined, which is a
-    * `ValueError` there too. The first is the one that matters, because `discount_rate`
-    * defaults to NaN: an `overnight_cost` set on its own with a finite `lifetime` produces
-    * NaN here and a warning upstream.
+    * See [[reject]]. The three cases are a missing `discount_rate`, a non-positive
+    * `lifetime`, and investment periods of unequal length, and not one of them is an error
+    * upstream on a real network -- each produces a coefficient instead. The first matters
+    * most because `discount_rate` defaults to NaN, so an `overnight_cost` set on its own
+    * reaches it.
+    *
+    * This is `capitalCost` plus `fom_cost` and nothing else, which is how upstream relates
+    * its own two: `periodized_cost` with `fom_cost` set against the same call with
+    * `fom_cost = None`. Written as the sum rather than as a second copy of the branch logic,
+    * after a review found two copies of the overnight-wins precedence to keep in step.
     */
   def periodizedCost(network: Network, table: ComponentTable, id: String): Double =
     val fom =
       if table.static.contains("fom_cost") then table.float("fom_cost", id) else 0.0
-    val fixed = if fom.isFinite then fom else 0.0
-    val overnight =
-      if table.static.contains("overnight_cost") then table.float("overnight_cost", id)
-      else Double.NaN
-    if !overnight.isFinite then
-      val capital = table.float("capital_cost", id)
-      (if capital.isFinite then capital else 0.0) + fixed
-    else
-      val rate     = table.float("discount_rate", id)
-      val lifetime = table.float("lifetime", id)
-      // `nyears` is a single value here because `rejectUnequalHorizons` has already refused
-      // the case where the periods disagree -- which is exactly when PyPSA raises.
-      overnight * annuity(rate, lifetime) * nyears(network).head + fixed
+    capitalCost(network, table, id) + (if fom.isFinite then fom else 0.0)
 
   /** The factor a capacity's [[periodizedCost]] is multiplied by.
     *
@@ -351,8 +361,17 @@ object Expansion:
                   s"$component '$id' sets overnight_cost but no finite discount_rate, so its " +
                     "annuity is not a number. PyPSA warns and carries the NaN into the objective."
                 )
-              // Upstream raises `ValueError: lifetime must be positive`. An infinite lifetime
-              // is fine and is the DEFAULT -- it makes the annuity a perpetuity at the rate.
+              // Upstream does NOT raise here, and the first version of this comment said it
+              // did. `costs.py` guards with `isinstance(lifetime, int | float) and
+              // lifetime <= 0`, which is scalar-only, and `Components.periodized_cost`
+              // always passes `static["lifetime"]` -- a Series. So the check never fires on
+              // a component frame. Measured on a two-snapshot network with `lifetime = 0`:
+              // `periodized_cost` returns `inf` and `optimize` returns `ok` with condition
+              // `unknown` and an objective of 0.0. Worse than an error, and the reason the
+              // refusal stays.
+              //
+              // An infinite lifetime is fine and is the DEFAULT -- it makes the annuity a
+              // perpetuity at the rate.
               if lifetime <= 0.0 then
                 refuse(
                   s"$component '$id' sets overnight_cost with lifetime = $lifetime, which has to " +
@@ -404,11 +423,15 @@ object Expansion:
     if !network.isMultiPeriod then return
     val horizons = nyears(network).distinct
     if horizons.length <= 1 then return
+    // Every id, not just the extendables, which is upstream's own scope: `periodized_cost`
+    // guards on `overnight_cost.notna().any()` over the whole static column, so PyPSA raises
+    // on a network where only a NON-extendable asset carries an overnight cost. Scoped to the
+    // extendables, this port solved such a network and `Stats` then priced its capex at the
+    // first period's horizon.
     val annuitised = nominalAttribute.keys.exists { component =>
       network.table(component).exists { table =>
-        extendables(table).exists { id =>
-          table.static.contains("overnight_cost") && table.float("overnight_cost", id).isFinite
-        }
+        table.static.contains("overnight_cost") &&
+          table.ids.exists(id => table.float("overnight_cost", id).isFinite)
       }
     }
     if annuitised then

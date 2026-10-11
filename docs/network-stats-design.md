@@ -381,9 +381,25 @@ are rounded to five decimals, because upstream's are.
 What the rule is not is reproducible across solvers at that scale. On
 `ac-dc-txvolume-exact` HiGHS leaves two idle generators at exactly 0.0 while Prima — a
 first-order method at 1e-9 on a 60,000-variable LP — leaves them at 1.0e-5, which rounds to
-0.00001 and survives. So the suite compares group *sets* above a floor relative to the largest
-group in the same metric, five orders of magnitude below any real group on that network, and
-says in the code that this is a tolerance on the solver rather than on the metric.
+0.00001 and survives. So the suite compares group *sets* above a floor, applied to both sides,
+and says in the code that this is a tolerance on the solver rather than on the metric.
+
+**The floor is absolute, at 1e-4, and getting that wrong was the instructive part.** The first
+version was relative — 1e-6 of the largest group in the same metric — which happened to
+suppress the artefact and would also have hidden five groups PyPSA *genuinely* reports:
+`scigrid-de`'s onshore wind farms at 1e-5 to 1e-4 against a largest group of 61,728, a ratio
+as low as 1.6e-10. Upstream's rule is five decimal places, so the smallest value it admits is
+1e-5 **at any scale**; a floor in any other shape cannot be reasoned about against it.
+
+Nothing separates a real 1e-5 group from a solver artefact, and the floor does not pretend to.
+What makes it safe is four cases that pin what it removes rather than arguing that it is
+small: exactly five golden groups across all 41 networks, all five in the one network the
+suite skips for a degenerate dispatch, against a smallest *compared* group of 0.6 — six
+thousand times the floor. A future golden with a genuinely tiny group in a compared network
+fails a test instead of being quietly dropped. The fifth of those five sits exactly on the
+floor, and the first version of that pinned list said four: it was enumerated with a strict
+`<` in a throwaway script while `significant` keeps `> GroupFloor`, which is the kind of
+boundary a pinned list catches and a sentence about magnitudes does not.
 
 ### What is still not covered
 

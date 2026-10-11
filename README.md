@@ -43,7 +43,7 @@ optimisation.
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
 | `network-stats` | L3: PyPSA's `statistics` in SQL. Loads a solved result into an in-memory DuckDB and answers metrics as queries. A consumer of the solve — nothing below it knows it exists, and the cross-build is untouched. Two of nineteen metrics, all seven grouping dimensions and per-period grouping; see [`docs/network-stats-design.md`](docs/network-stats-design.md). |
 
-1,115 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
+1,120 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
 runs as a separate step, plus 48 in the opt-in Netlib module and 20 in
 `prima-cyfra`, which need hardware and a corpus no runner has.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible

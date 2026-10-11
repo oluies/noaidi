@@ -70,29 +70,51 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     results("statistics-dimensions")("statistics").obj.keys
       .map(_.split('|').last).toList.distinct.sorted
 
+  /** The floor below which a group is a solver's zero rather than a group.
+    *
+    * Absolute, and that is the whole point of it. PyPSA drops a zero group by rounding to
+    * five decimals and testing against exact zero, so the smallest value its rule admits is
+    * `1e-5` **at any scale** -- the rule is five decimal places, not a fraction of anything.
+    * A floor in the same shape is the only one that can be reasoned about against it.
+    *
+    * The first version was relative, `1e-6` of the largest group in the same metric, and it
+    * was the wrong shape twice over. It happened to suppress the artefact below, and it would
+    * also have hidden five groups PyPSA genuinely reports -- `scigrid-de`'s five onshore wind
+    * farms at `1e-5` to `1e-4` against a largest group of 61,728, a ratio as low as 1.6e-10.
+    * Those are real: upstream's own rule admits them.
+    */
+  private val GroupFloor = 1e-4
+
   /** Groups big enough to be a group rather than a solver's zero.
     *
-    * PyPSA drops a zero group by rounding to five decimals and testing against exact zero,
-    * and `Stats` reproduces that rule exactly -- it is upstream's, and it is what makes the
-    * group SET comparable at all. What it is not is reproducible across solvers at that
-    * scale. On `ac-dc-txvolume-exact` HiGHS leaves `Manchester Gas` and `Norway Gas` at
-    * exactly 0.0 while Prima -- a first-order method at 1e-9 on a 60,000-variable LP --
-    * leaves them at 1.0e-5, which rounds to 0.00001 and survives the rule. Two extra groups,
-    * both of them a generator PyPSA agrees does not run.
+    * `Stats` reproduces PyPSA's `drop_zero` exactly -- round to five decimals, drop exact
+    * zero -- because it is upstream's rule and it is what makes the group SET comparable at
+    * all. What it is not is reproducible across solvers at that scale. On
+    * `ac-dc-txvolume-exact` HiGHS leaves `Manchester Gas` and `Norway Gas` at exactly 0.0
+    * while Prima -- a first-order method at 1e-9 on a 60,000-variable LP -- leaves them at
+    * `1.0e-5`, which rounds to `0.00001` and survives the rule. Two extra groups, both a
+    * generator PyPSA agrees does not run.
     *
-    * So the key sets are compared above this floor, which is relative to the largest group in
-    * the same metric. On that network the floor is about 0.016 against a smallest real group
-    * of 1,465, so there are five orders of magnitude between what this hides and anything it
-    * could hide by accident.
+    * Applied to '''both''' sides, so it can only ever remove a group the two sides disagree
+    * about at the solver's own noise level.
+    *
+    * ==It cannot distinguish a real `1e-5` group from an artefact, and does not pretend to==
+    *
+    * Both are `1e-5`. Nothing absolute separates them, and nothing relative does either --
+    * see [[GroupFloor]]. So what makes this safe is not the threshold but the two cases
+    * below, which pin what it actually removes: exactly five groups across every golden, all
+    * five in `scigrid-de`, which this suite skips for a degenerate dispatch anyway, while
+    * the smallest group in any network it does compare is `0.6`. Nearly four orders of
+    * margin, asserted rather than asserted-to-be-obvious, so a future golden with a
+    * genuinely tiny group fails a test instead of being quietly dropped.
     *
     * This is a tolerance on the SOLVER, not on the metric: every surviving group's value is
-    * still compared, and the `drop_zero` bugs this assertion has already caught -- a missing
-    * `drop_zero` entirely, and `store-bank`'s carrier -- were group sets differing by whole
-    * groups rather than by a rounding artefact.
+    * still compared at `1e-4` relative, and the `drop_zero` defects this assertion has
+    * already caught -- a missing `drop_zero` entirely, and `store-bank`'s carrier -- were
+    * group sets differing by whole groups rather than by a rounding artefact.
     */
   private def significant(groups: Map[String, Double]): Map[String, Double] =
-    val largest = groups.values.map(math.abs).maxOption.getOrElse(0.0)
-    groups.filter((_, v) => math.abs(v) > 1e-6 * largest)
+    groups.filter((_, v) => math.abs(v) > GroupFloor)
 
   /** A golden metric for one grouping, or `None` where PyPSA itself did not produce one.
     *
@@ -268,4 +290,106 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         // rather than falling through, so it contributes no rows at all.
         assertEquals(loaded.get("Load"), None)
     }
+  }
+
+  /** Every golden statistics group, as `(network, block, key, value, skipped)`. */
+  private lazy val allGoldenGroups: List[(String, String, String, Double, Boolean)] =
+    networks.flatMap { name =>
+      val json = results(name)
+      val skip = comparable(name).isDefined
+      json.obj.get("statistics").toList.flatMap(_.obj.toList).flatMap { (block, frame) =>
+        if frame.obj.contains("error") then Nil
+        else frame.obj.toList.map((key, v) => (name, block, key, v.num, skip))
+      }
+    }
+
+  test("the solver floor removes exactly five golden groups, all in a skipped network") {
+    assume(available, "goldens missing")
+    // The floor is a judgement, so this pins what it actually does rather than arguing that
+    // it is small. Every group PyPSA reports below it, across all 41 networks and both
+    // metrics and all seven groupings:
+    //
+    //   1e-05   scigrid-de/supply|name  Generator|320 Wind Onshore
+    //   1e-05   scigrid-de/supply|name  Generator|434 Wind Onshore
+    //   4e-05   scigrid-de/supply|name  Generator|264_220kV Wind Onshore
+    //   8e-05   scigrid-de/supply|name  Generator|378 Wind Onshore
+    //   0.0001  scigrid-de/supply|name  Generator|307_220kV Wind Onshore
+    //
+    // All five are real -- upstream's round-to-five rule admits `1e-5` at any scale -- and
+    // all five are in the one network this suite skips for a degenerate dispatch. So the
+    // floor currently hides nothing from any comparison that runs.
+    //
+    // The last one is exactly `GroupFloor`, and it is in this list because `significant`
+    // keeps `> GroupFloor` rather than `>=`. The first version of this case said four,
+    // enumerated with a strict `<` in a throwaway script, and the boundary group was the
+    // difference -- which is the kind of thing a pinned list catches and a sentence about
+    // magnitudes does not.
+    //
+    // A golden that gains a genuinely tiny group in a network that IS compared fails here,
+    // which is the point: the alternative is that it silently stops being compared.
+    val hidden = allGoldenGroups.filter((_, _, _, v, _) => math.abs(v) <= GroupFloor)
+    assertEquals(hidden.map((n, b, k, _, _) => s"$n/$b/$k").sorted,
+      List(
+        "scigrid-de/supply|name/Generator|264_220kV Wind Onshore",
+        "scigrid-de/supply|name/Generator|307_220kV Wind Onshore",
+        "scigrid-de/supply|name/Generator|320 Wind Onshore",
+        "scigrid-de/supply|name/Generator|378 Wind Onshore",
+        "scigrid-de/supply|name/Generator|434 Wind Onshore",
+      ))
+    assert(hidden.forall((_, _, _, _, skipped) => skipped),
+      "the floor hides a group in a network this suite actually compares")
+  }
+
+  test("the smallest group in a compared network is far above the floor") {
+    assume(available, "goldens missing")
+    // The other half, and the one that says the margin is not a coincidence of the four
+    // above. `store-per-period`'s 0.6 is the smallest group PyPSA reports in any network this
+    // suite compares, which is 6,000x the floor. Asserted as a floor on the margin rather
+    // than as the exact number, because a new fixture may legitimately lower it -- but not by
+    // three orders of magnitude without someone looking.
+    val smallest = allGoldenGroups
+      .filterNot((_, _, _, _, skipped) => skipped)
+      .map((_, _, _, v, _) => math.abs(v))
+      .filter(_ > 0.0)
+      .min
+    assert(smallest > 100.0 * GroupFloor,
+      s"the smallest compared group is $smallest, within 100x of the floor $GroupFloor")
+  }
+
+  test("the floor drops the solver artefact and keeps a real group") {
+    // The two values the floor exists to separate, taken from `ac-dc-txvolume-exact`: Prima
+    // reports 1.0e-5 for two generators PyPSA leaves at exactly 0.0, and 1465.27437 for one
+    // it reports at 1465.27439.
+    val groups = Map(
+      "Generator|Manchester Gas" -> 1.0e-5,
+      "Generator|Norway Gas"     -> 1.0e-5,
+      "Generator|Frankfurt Gas"  -> 1465.27437,
+    )
+    assertEquals(significant(groups).keySet, Set("Generator|Frankfurt Gas"))
+  }
+
+  test("the floor keeps a real group that a relative one would hide") {
+    // The case that makes the floor ABSOLUTE rather than a fraction of the largest group, and
+    // the one the first version got wrong. `scigrid-de` is its real shape: PyPSA reports five
+    // onshore wind farms between 1e-5 and 1e-4 against a largest group of 61,728, and its
+    // round-to-five rule admits them, so they are groups and not noise.
+    //
+    // A relative floor of 1e-6 of the largest would put the threshold at 0.0617 and hide all
+    // five. Here `small` stands for them: real, and eleven orders below `huge`.
+    val groups = Map("huge" -> 1.5e9, "small" -> 0.6, "artefact" -> 1.0e-5)
+    assertEquals(significant(groups).keySet, Set("huge", "small"))
+    // Said as the comparison rather than left implicit, because "absolute" is the property
+    // and a reader should be able to see what it buys.
+    val relativeFloor = 1e-6 * groups.values.map(math.abs).max
+    assert(0.6 < relativeFloor,
+      s"this case no longer separates the two floors: 0.6 is above $relativeFloor")
+  }
+
+  test("the floor is empty-safe and does not invent a group") {
+    // `maxOption` on an empty map was what the relative version needed a default for, and a
+    // default of 0.0 there made `|v| > 0` drop every group of an all-zero metric -- which is
+    // correct but by accident. Absolute has no such edge, and this says so.
+    assertEquals(significant(Map.empty), Map.empty[String, Double])
+    assertEquals(significant(Map("a" -> 0.0)), Map.empty[String, Double])
+    assertEquals(significant(Map("a" -> -5000.0)), Map("a" -> -5000.0))
   }

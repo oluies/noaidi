@@ -35,6 +35,92 @@ class GoldenNetworkSuite extends munit.FunSuite:
     assertEquals(schema.attributeCount, 454)
   }
 
+  /** A golden network directory with one file rewritten, for the reader refusals below. */
+  private def withFile(name: String, file: String, content: String)(check: Path => Unit): Unit =
+    val source = goldens.resolve("networks").resolve(name)
+    val out    = Files.createTempDirectory(s"noaidi-csv-$name-")
+    try
+      scala.util.Using.resource(Files.list(source)) { paths =>
+        paths.forEach(p => Files.copy(p, out.resolve(p.getFileName)))
+      }
+      Files.writeString(out.resolve(file), content)
+      check(out)
+    finally
+      scala.util.Using.resource(Files.walk(out)) { paths =>
+        paths.sorted(java.util.Comparator.reverseOrder).forEach(Files.delete)
+      }
+
+  test("a decimal comma is refused rather than read as a field separator") {
+    assume(available, "goldens missing")
+    // `0,25` is what a spreadsheet in a European locale writes for 0.25, and no
+    // comma-splitting reader can tell it from a separator. Measured against pandas 3.0.5 on
+    // this exact text, which is why the refusal is a deliberate divergence rather than a
+    // shared diagnosis:
+    //
+    //   truth    marginal_cost = 0.25
+    //   pandas   marginal_cost = 25     <- `g` becomes the index and all three columns shift
+    //   noaidi   marginal_cost = 0      <- read positionally, the trailing field dropped
+    //
+    // So `pd.read_csv` accepts the file and is off by a factor of 100, and this reader
+    // accepted it and was off by the whole value. Neither raised.
+    val text = "name,bus,p_nom,marginal_cost\ng,b,100.0,0,25\n"
+    val spec = schema.components.find(_.name == "Generator").get
+    val failure = intercept[CsvReader.MalformedNetwork](CsvReader.table(text, spec))
+
+    // The line, the counts and the cause. Each is asserted separately because each is a
+    // different way for the message to be useless: a reader sent to the wrong line, a count
+    // that does not say which side is wrong, or a correct refusal with no hint at all.
+    assert(failure.getMessage.contains("line 2"), failure.getMessage)
+    assert(failure.getMessage.contains("5 fields"), failure.getMessage)
+    assert(failure.getMessage.contains("header has 4"), failure.getMessage)
+    assert(failure.getMessage.contains("0.25"), failure.getMessage)
+    assert(failure.getMessage.contains("decimal comma"), failure.getMessage)
+  }
+
+  test("a decimal comma in a weighting is refused, and names the file") {
+    assume(available, "goldens missing")
+    // `snapshots.csv` rather than a component table, because that is where the gap was
+    // found: `parseWeighting` refuses a cell it cannot parse, and a decimal comma never
+    // reaches it -- the row simply gains a column, `1` parses as the weighting and the `0`
+    // of `0,25` is dropped. The check has to sit in `parse`, above every reader, for this
+    // file to be covered at all.
+    val text = ",snapshot,objective,stores,generators\n0,now,0,25,1.0,1.0\n"
+    withFile("ac-dc-meshed", "snapshots.csv", text) { directory =>
+      val failure =
+        intercept[CsvReader.MalformedNetwork](CsvReader.read(directory, schema, "comma"))
+      assert(failure.getMessage.contains("snapshots.csv"), failure.getMessage)
+      assert(failure.getMessage.contains("decimal comma"), failure.getMessage)
+    }
+  }
+
+  test("a short row is not refused, because pandas pads one with NaN") {
+    assume(available, "goldens missing")
+    // The other half, and the one that keeps this from being an over-refusal. `pd.read_csv`
+    // pads a short row with NaN -- measured -- and a NaN cell is exactly how this reader
+    // already spells "not set for this entity", so both sides fall through to the schema
+    // default and there is nothing to refuse. Asserting the value rather than just the
+    // absence of an exception: "not refused" would also pass if the row were dropped.
+    val text = "name,bus,p_nom,marginal_cost\ng,b,100.0\n"
+    val spec = schema.components.find(_.name == "Generator").get
+    val table = CsvReader.table(text, spec)
+    assertEquals(table.ids, IndexedSeq("g"))
+    assertEquals(table.float("p_nom", "g"), 100.0)
+    assertEquals(table.float("marginal_cost", "g"), 0.0)
+  }
+
+  test("a quoted comma is one field and is not refused") {
+    assume(available, "goldens missing")
+    // The check counts the fields `splitLine` produced, not the commas in the line, and this
+    // is what says so. PyPSA writes through pandas, which quotes any field containing a
+    // comma, and real datasets have bus names that need it -- a check built on a naive split
+    // would refuse that file, which is the opposite mistake and a louder one.
+    val text = "name,bus,p_nom\n\"g, large\",b,100.0\n"
+    val spec = schema.components.find(_.name == "Generator").get
+    val table = CsvReader.table(text, spec)
+    assertEquals(table.ids, IndexedSeq("g, large"))
+    assertEquals(table.float("p_nom", "g, large"), 100.0)
+  }
+
   test("a piecewise cost curve is refused by the CSV reader, from PyPSA's own export") {
     assume(available, "goldens missing")
     // Against `unsupported/piecewise-cost`, written by `export_to_csv_folder` and

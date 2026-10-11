@@ -200,7 +200,13 @@ object CsvReader:
     * a second parser for it would be a second set of conventions to keep in step.
     */
   private[network] def table(text: String, spec: ComponentSpec): ComponentTable =
-    staticTable(text.linesIterator.filter(_.nonEmpty).map(splitLine).toIndexedSeq, spec)
+    staticTable(
+      rectangular(
+        text.linesIterator.filter(_.nonEmpty).map(splitLine).toIndexedSeq,
+        spec.listName,
+      ),
+      spec,
+    )
 
   private def staticTable(rows: IndexedSeq[IndexedSeq[String]], spec: ComponentSpec): ComponentTable =
     if rows.isEmpty then return ComponentTable.empty(spec)
@@ -381,23 +387,97 @@ object CsvReader:
     })
     TimeSeries(entities, values)
 
+  /** Refuse a row with more fields than the header.
+    *
+    * The gap this closes is a '''decimal comma'''. A spreadsheet configured for a European
+    * locale saves `0.25` as `0,25`, and no comma-splitting reader can tell that from a field
+    * separator — so the row gains a field, everything after it shifts by one, and what is
+    * read is a different network. Measured on a three-column generators file whose
+    * `marginal_cost` was written `0,25`:
+    *
+    * {{{
+    * truth    marginal_cost = 0.25
+    * pandas   marginal_cost = 25       <- the leading field becomes the index, all shift
+    * noaidi   marginal_cost = 0        <- read positionally, the trailing field dropped
+    * }}}
+    *
+    * Three answers, none of them an error, and the two wrong ones wrong in different
+    * directions. '''This is a deliberate divergence''': `pd.read_csv` accepts the file, so
+    * `import_from_csv_folder` accepts it too, and the refusal here stops a network PyPSA has
+    * an answer for. The argument is the one `docs/pypsa-and-noaidi.md` already makes for zone
+    * limits that cannot take effect — a plausible number from a mangled file is worse than a
+    * stopped read — and it is sharper here, because the pandas reading is off by a factor of
+    * 100 rather than merely inert.
+    *
+    * '''Short rows are not refused''', and that is agreement rather than leniency: pandas
+    * pads a short row with NaN, and a NaN cell is exactly how this reader already spells "not
+    * set for this entity", resolving to the schema default. The two sides read such a file
+    * the same way, so there is nothing to refuse.
+    *
+    * It does '''not''' make true the claim [[parse]]'s own docstring had been making since it
+    * was written — that a file with an embedded newline "fails loudly on field count rather
+    * than silently misaligning". Nothing checked a field count, and now that something does,
+    * that case is still not one it catches: splitting a record leaves both halves short. The
+    * sentence there is corrected rather than satisfied.
+    */
+  private def rectangular(
+      rows: IndexedSeq[IndexedSeq[String]],
+      source: String,
+  ): IndexedSeq[IndexedSeq[String]] =
+    if rows.isEmpty then rows
+    else
+      val width = rows.head.length
+      rows.tail.zipWithIndex.foreach { (row, i) =>
+        if row.length > width then
+          // Named as a suspicion rather than asserted. Two adjacent all-digit fields are what
+          // `0,25` splits into, and by the time we are here the row is already malformed, so
+          // a wrong guess costs a sentence and a right one saves the reader the hunt.
+          val suspect = row.indices.dropRight(1).find { j =>
+            val left  = row(j).stripPrefix("-")
+            val right = row(j + 1)
+            left.nonEmpty && right.nonEmpty && left.forall(_.isDigit) && right.forall(_.isDigit)
+          }
+          // Line numbers are 1-based and the header is line 1, so a body row at index `i` is
+          // line `i + 2`. Off by one here would send a reader to the wrong line of the file,
+          // which is the whole value of naming one.
+          throw new MalformedNetwork(
+            s"$source line ${i + 2} has ${row.length} fields where the header has $width: " +
+              row.mkString("[", "|", "]") +
+              suspect.fold("")(j =>
+                s". Fields ${j + 1} and ${j + 2} look like '${row(j)}.${row(j + 1)}' split on a " +
+                  "decimal comma, which is what a spreadsheet in a European locale writes"
+              )
+          )
+      }
+      rows
+
   /** Minimal CSV parse: quoted fields with doubled quotes, no embedded newlines.
     *
     * PyPSA writes through pandas, which quotes any field containing a comma —
     * entity names like "Manchester Wind" do not need it, but bus names in real
-    * datasets can. Embedded newlines do not occur in this format and are not
-    * handled, so a file containing one fails loudly on field count rather than
-    * silently misaligning.
+    * datasets can.
+    *
+    * Embedded newlines do not occur in this format and are not handled. An earlier version of
+    * this comment said such a file "fails loudly on field count rather than silently
+    * misaligning", which was a claim about a check that did not exist. [[rectangular]] is
+    * that check now, and it '''still does not cover this case''' — stated rather than
+    * implied, because the old sentence is exactly how a gap stays unnoticed. Splitting one
+    * record across two lines conserves its fields and adds one break, so both halves come out
+    * '''short''' and `rectangular` only refuses a long row. Such a file is still read as rows
+    * of schema defaults, with no diagnostic.
     */
   private def parse(path: Path): IndexedSeq[IndexedSeq[String]] =
     if !Files.exists(path) then IndexedSeq.empty
     else
-      Files
-        .readAllLines(path)
-        .asScala
-        .toIndexedSeq
-        .filter(_.nonEmpty)
-        .map(splitLine)
+      rectangular(
+        Files
+          .readAllLines(path)
+          .asScala
+          .toIndexedSeq
+          .filter(_.nonEmpty)
+          .map(splitLine),
+        path.getFileName.toString,
+      )
 
   private[network] def splitLine(line: String): IndexedSeq[String] =
     val out     = IndexedSeq.newBuilder[String]

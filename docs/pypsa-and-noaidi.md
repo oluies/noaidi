@@ -167,6 +167,24 @@ stopped build, because the output of the first is a plausible number.
 The cost is real and worth stating: a config naming a zone that was legitimately dropped now
 stops instead of proceeding, and that is a divergence from upstream rather than a bug fixed.
 
+The reader does the same thing one layer down, and there the two sides' answers can be
+measured against each other. A spreadsheet in a European locale writes `0.25` as `0,25`, and
+no comma-splitting reader can tell that from a separator. On a four-column generators file
+whose `marginal_cost` is written that way:
+
+```
+truth    marginal_cost = 0.25
+pandas   marginal_cost = 25      # the first field becomes the index and all three shift
+noaidi   marginal_cost = 0       # read positionally, the trailing field dropped
+```
+
+`pd.read_csv` accepts the file, so `import_from_csv_folder` accepts it, and
+`CsvReader.rectangular` refuses it — a row with more fields than its header. Same argument as
+the zone limits, and sharper, because upstream's reading is out by a factor of 100 rather
+than merely inert. A **short** row is not refused: pandas pads one with NaN, which is how
+this reader already spells "not set", so both sides resolve to the schema default and there
+is nothing to diverge about.
+
 ## Reading the answer back
 
 ```python

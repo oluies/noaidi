@@ -637,6 +637,7 @@ does for LPs, and CI runs it as a separate step so a MILP regression is
 attributed to branch-and-bound rather than to the LP solver.
 
 ```
+host: Mac OS X aarch64, JVM OpenJDK 64-Bit Server VM 27
 instance           size              int prima     ojalgo         prima obj     ojalgo obj   rel gap   int gap   nodes  unprv
 fractional-pair    2v/2c/4nz           2 Optimal   Optimal       -20.000000     -20.000000  0.00e+00  5.00e-02       5      0
 knapsack-8         8v/1c/8nz           8 Optimal   Optimal       -59.000000     -59.000000  0.00e+00  5.65e-03      23      0
@@ -645,12 +646,22 @@ set-cover-triangle 3v/3c/6nz           3 Optimal   Optimal         2.000000     
 set-cover-k5-edges 10v/5c/20nz        10 Optimal   Optimal         3.000000       3.000000  0.00e+00  1.67e-01      59      0
 random-mixed-1     8v/4c/22nz          4 Optimal   Optimal       -27.800000     -27.800000  1.01e-11  9.11e-02       5      0
 random-mixed-9     10v/5c/35nz         5 Optimal   Optimal       -31.400000     -31.400000  2.81e-12  6.46e-02       7      0
-random-mixed-3     12v/6c/51nz         6 Optimal   Optimal       -14.000000     -14.000000  9.07e-12  2.07e-01       9      0
+random-mixed-3     12v/6c/51nz         6 Optimal   Optimal       -14.000000     -14.000000  1.05e-11  2.07e-01       9      0
 random-mixed-4     14v/7c/61nz         7 Optimal   Optimal       -33.512820     -33.512821  7.28e-10  1.70e-02       5      0
 ```
 
-Worst relative objective gap against the oracle: **7.3e-10**. No instance where
-Prima reported an objective better than the true optimum, and no unproven nodes.
+The `host:` line is the report's own, and it is quoted because the numbers are that host's.
+The two `prima ms` / `ojalgo ms` columns the report also prints are left out here: they move
+several-fold between runs on an idle machine, so pinning them in prose would be pinning
+noise. `random-mixed-3` read `9.07e-12` in this table for several releases against the
+`1.05e-11` four consecutive runs here report; recorded on some earlier configuration and
+never re-measured, which is the second data point for *The worst gap is a figure for one
+configuration* below -- and the reason the `host:` line is quoted at all.
+
+Worst relative objective gap against the oracle: **7.3e-10** on macOS/aarch64
+JDK 27, **3.8e-10** on Linux/x86_64 JDK 21 — see below, and note that the table
+above is the first of those two. No instance where Prima reported an objective
+better than the true optimum, and no unproven nodes.
 
 The report's exit code gates all of that, and it gates it directly. It previously
 dropped a row from the comparison unless *both* solvers reported `Optimal`, so a
@@ -667,6 +678,47 @@ the search. Two instances in the first version of the ladder had an integrality
 gap of exactly zero and solved in one node; they are gone, and
 `MilpAgreementSuite` now asserts that every instance has a fractional relaxation
 so the same thing cannot creep back.
+
+**The worst gap is a figure for one configuration, and the search is deterministic within
+one.** The 7.3e-10 above is macOS/aarch64 on JDK 27. Linux/x86_64 on JDK 21 reports
+**3.766e-10** on identical input, with the same 423 nodes, and `random-mixed-3` differs here
+from whatever configuration this table was first taken on. Instances are seeded and
+`Pdhg.solve` runs on `ScalaKernels`, so nothing about the search is randomised — what moves
+is the relaxation's own gap, for the summation-order reason the LP ladder's 4.9e-10 against
+5.874e-10 already records two sections up.
+
+Within a configuration it is stable, which is worth stating because "non-deterministic" was
+the loose way this was described before it was measured: four consecutive runs here agree on
+every `rel gap` digit printed, on all 423 nodes and on the exact bits of the worst gap
+(`0x3e0901eae20839f5`). What is not stable is the two timing columns, which is why they are
+not pinned above. Node counts are unchanged across all three environments measured, which is
+what says the branching decisions agree and only the arithmetic differs.
+
+This is **open**, not explained. It is the same open question as the LP ladder's, one level
+up, and it had been recorded only in the commit message of the change that found it — which
+is the failure this file exists against, so it is here now.
+
+**A degenerate search used to be an opaque kill rather than a report.** `MilpReport` wedged
+on the JDK 25 leg of one run and was killed by the step's `timeout 600`, while the JDK 21 leg
+of the same commit solved the whole ladder in 423 nodes and 82ms with nothing unproven. Two
+separate things made that far less informative than it should have been, and both are fixed:
+
+- **The bound in work did not bound the step.** `ci.yml` described `BnbParams`' 50,000 nodes
+  and 200,000 LP iterations as the protection, on the grounds that a bound in work is better
+  than one in wall time. It is, and the product is on the order of 10^10 iterations. A node
+  whose relaxation converges costs about 0.19ms; one that runs to its iteration cap costs a
+  thousand times that, which is the state a degenerate search reaches — so exhausting the
+  node budget takes thousands of seconds against a ten-minute step, and could only ever
+  appear as exit 124. `MilpLadder.params` now also sets `timeLimitMillis` per instance, which
+  `BranchAndBound` checks between nodes. The search then ends `Feasible`, which this report
+  already fails on by name, and still prints. The budget that could actually be exhausted was
+  fifty times the budget that was enforced.
+- **A wedge printed nothing.** Every row was built before the header went out, so the log
+  held the kill message and not one row: which instance diverged had to be guessed. The
+  header goes out first and each row as its instance finishes, with the instance name on
+  stderr before the solve, so a wedge the time limit cannot interrupt still names itself.
+  Column widths moved into the header and the row renderer together, because the two now
+  print from different places and could otherwise drift.
 
 **The oracle had to be pinned before it could be an oracle.** ojAlgo's integer
 solver stops on `time_suffice` once it holds a solution it considers good enough

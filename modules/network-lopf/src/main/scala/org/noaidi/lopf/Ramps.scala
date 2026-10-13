@@ -39,12 +39,12 @@ import org.noaidi.prima.LpBuilder
   * wherever it likes" and "the unit starts shut down", and on a limit of 0.1
   * those differ by 90% of the rating at `t = 0`.
   *
-  * `p_init` is read through `up_time_before`, whose default is 1: a unit that
-  * was already up keeps its `p_init` (NaN by default, so no row), and one
-  * declared down (`up_time_before = 0`) gets `p_init = 0` and a row that holds
-  * it at zero for the first snapshot. That is why this reads two attributes to
-  * decide one number, and why `p_init` is not a separate gap — it has no effect
-  * on anything except these rows.
+  * `up_time_before` is '''not''' read, and it was until the pin moved to PyPSA 1.4.0.
+  * 1.3.0 set `initially_up = up_time_before > 0` and forced `p_init` to 0 where that was
+  * false; 1.4.0's `_status_history` ends `history.where(committable, 1.0)`, so a
+  * non-committable unit is always on whatever the attribute says, and `_dispatch_before`
+  * then returns `p_init` unchanged. Every unit this module builds is non-committable, so
+  * the attribute has no effect here. `p_init` has no effect on anything except these rows.
   *
   * ==Committable units are refused, not built==
   *
@@ -204,15 +204,26 @@ object Ramps:
       // shape.
       val pNom = if cap.isDefined then 0.0 else table.float("p_nom", id)
 
-      val upTime =
-        if table.spec.attribute("up_time_before").isDefined then table.int("up_time_before", id)
-        else 1
-      val initiallyUp = upTime > 0
-
-      // NaN unless the unit was declared already down, in which case it started
-      // at zero. `!isNaN` below is what decides whether the first snapshot gets
-      // a row at all.
-      val pInit = if initiallyUp then optional(table, "p_init", id) else 0.0
+      // `p_init` as given, and `up_time_before` is not read at all.
+      //
+      // PyPSA 1.3.0 read it: `initially_up = up_time_before > 0` and
+      // `p_init = p_init.where(initially_up, 0)`, so a unit declared down before the horizon
+      // got `p_init = 0` and a row holding it near zero at the first snapshot. 1.4.0 replaced
+      // that with `_status_history`, which ends `history.where(committable, 1.0)` -- a
+      // NON-committable unit is always on, whatever `up_time_before` says -- and
+      // `_dispatch_before`, which is `p_init.where(status > 0, 0.0)`. With the status 1, that
+      // is `p_init` unchanged.
+      //
+      // Every unit this module builds is non-committable, because `Commitment.reject` refuses
+      // the others ahead of it. So `up_time_before` has no effect here at all, and the prior
+      // status that used to scale the up row is 1.
+      //
+      // That reads as a bug fix rather than a change of model: `up_time_before` and
+      // `down_time_before` are commitment attributes, and 1.3.0 applied them to units with no
+      // commitment status. `ramp-limits` is the fixture that measures it -- its `cold`
+      // generator sets `up_time_before = 0` and is not committable, and the answer moves from
+      // 50,240 to 48,640 with `cold` starting at 120 MW instead of 0.
+      val pInit = optional(table, "p_init", id)
 
       snapshots.foreach { t =>
         val limit = limitsAt(table, id, t, start, shut)
@@ -221,15 +232,16 @@ object Ramps:
 
           if t == snapshots.head then
             if !pInit.isNaN then
-              // The unit's committed state before the horizon. It scales the up
-              // row only: a unit that starts down may not ramp up from nothing,
-              // but it may certainly stay there, so the down row is against a
-              // status of 1 either way.
-              val was = if initiallyUp then 1.0 else 0.0
+              // No prior-status factor on the up row. It was `s_init`, which 1.3.0 set
+              // from `up_time_before` and 1.4.0 sets to 1 for a non-committable unit --
+              // and 1.4.0 dropped the extendable half of it outright, writing
+              // `rhs.add(limit_up * p_nom_ext_var)` where it had carried an `sp_ext`
+              // factor. With the status 1 the two spellings agree, and this is the
+              // shorter one.
               if limit.hasUp then
                 builder.lessThan(
-                  Seq((here, 1.0)) ++ cap.map(c => (c, -limit.up * was)),
-                  pInit + limit.up * pNom * was,
+                  Seq((here, 1.0)) ++ cap.map(c => (c, -limit.up)),
+                  pInit + limit.up * pNom,
                 )
               if limit.hasDown then
                 builder.greaterThan(

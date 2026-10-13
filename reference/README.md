@@ -14,8 +14,8 @@ xarray's netCDF-4 backend is already a PyPSA dependency.
 ## Recreating
 
 ```bash
-uv venv reference/.venv --python 3.13
-uv pip install --python reference/.venv/bin/python "pypsa==1.3.0" highspy tables
+uv venv reference/.venv --python 3.14
+uv pip install --python reference/.venv/bin/python "pypsa==1.4.0" highspy tables
 ./reference/.venv/bin/python reference/generate_goldens.py
 ```
 
@@ -172,6 +172,6 @@ an unmeetable target.
 
 ## Versions
 
-Pinned at PyPSA 1.3.0 (pandas 3.0.5, Python 3.13). Note the migration brief
+Pinned at PyPSA 1.4.0 (pandas 3.0.6, numpy 2.5.4, Python 3.14). Note the migration brief
 cites PyPSA 0.30.2 documentation; 1.x reorganised the component API, so the
 schema here is the authority for what the port targets.

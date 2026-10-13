@@ -315,14 +315,13 @@ object Expansion:
     * compared on.
     */
   def objectiveConstant(network: Network): Double =
-    if network.isMultiPeriod then 0.0
-    else
-      nominalAttribute.keys.toIndexedSeq.sorted.flatMap { component =>
-        network.table(component).toIndexedSeq.flatMap { table =>
-          extendables(table).map(id =>
-            periodizedCost(network, table, id) * table.float(nominalAttribute(component), id))
-        }
-      }.sum
+    nominalAttribute.keys.toIndexedSeq.sorted.flatMap { component =>
+      network.table(component).toIndexedSeq.flatMap { table =>
+        extendables(table).map(id =>
+          periodizedCost(network, table, id) * costWeight(network, table, id) *
+            table.float(nominalAttribute(component), id))
+      }
+    }.sum
 
   /** Refuse the expansion features this model does not build.
     *

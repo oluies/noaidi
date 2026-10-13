@@ -258,20 +258,20 @@
      25.0
     ],
     [
-     -28.0,
-     45.0
+     -48.0,
+     25.0
     ],
     [
-     48.0,
-     -165.0
+     68.0,
+     -170.0
     ],
     [
      -20.0,
-     205.0
+     225.0
     ],
     [
      40.0,
-     15.0
+     20.0
     ],
     [
      10.0,
@@ -300,43 +300,43 @@
     [
      120.0,
      75.0,
-     -0.0,
-     145.0,
+     120.0,
+     25.0,
      -0.0
     ],
     [
      135.0,
      -0.0,
-     60.0,
-     115.0,
+     120.0,
+     55.0,
      -0.0
     ],
     [
      195.0,
      75.0,
-     15.0,
-     55.0,
+     60.0,
+     10.0,
      -0.0
     ],
     [
      190.0,
      -0.0,
-     75.0,
-     115.0,
+     120.0,
+     70.0,
      -0.0
     ],
     [
      250.0,
      60.0,
-     55.0,
-     55.0,
+     100.0,
+     10.000000000000002,
      -0.0
     ],
     [
      170.0,
      -0.0,
-     115.0,
-     25.0,
+     120.0,
+     20.0,
      -0.0
     ]
    ]
@@ -426,7 +426,7 @@
     "tie": 200.0
    }
   },
-  "objective": 50240.0,
+  "objective": 48640.0,
   "objective_constant": 0.0,
   "status": "ok",
   "storage_p": {
@@ -562,7 +562,7 @@
     []
    ]
   },
-  "total_system_cost": 50240.0,
+  "total_system_cost": 48640.0,
   "transformer_p0": {
    "columns": [],
    "index": [
@@ -1160,33 +1160,33 @@
   "installed_capex|unit": {},
   "opex|bus": {
    "Generator|a": 19000.0,
-   "Generator|b": 19150.0,
+   "Generator|b": 17550.0,
    "Link|a": 90.0
   },
   "opex|bus_carrier": {
-   "Generator|AC": 38150.0,
+   "Generator|AC": 36550.0,
    "Link|AC": 90.0
   },
   "opex|carrier": {
-   "Generator|-": 38150.0,
+   "Generator|-": 36550.0,
    "Link|AC": 90.0
   },
   "opex|country": {
    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
   },
   "opex|location": {
-   "Generator|": 38150.0,
+   "Generator|": 36550.0,
    "Link|": 90.0
   },
   "opex|name": {
    "Generator|base": 10600.0,
-   "Generator|cold": 6400.0,
+   "Generator|cold": 12800.0,
    "Generator|flex": 8400.0,
-   "Generator|new": 12750.0,
+   "Generator|new": 4750.0,
    "Link|tie": 90.0
   },
   "opex|unit": {
-   "Generator|": 38150.0,
+   "Generator|": 36550.0,
    "Link|": 90.0
   },
   "optimal_capacity|bus": {
@@ -1244,9 +1244,9 @@
   },
   "supply|name": {
    "Generator|base": 1060.0,
-   "Generator|cold": 320.0,
+   "Generator|cold": 640.0,
    "Generator|flex": 210.0,
-   "Generator|new": 510.0,
+   "Generator|new": 190.0,
    "Link|tie": 190.0
   },
   "supply|unit": {

@@ -1042,10 +1042,21 @@ this port produces. Its own `n.lpf()` excludes inactive branches from topology
 properly, which is why the `lpf` block on that fixture *is* a target while the
 `optimize` block is evidence.
 
-So `inactive-removed` exists as the comparison, and the golden carries a
-`not_a_target` note beside the numbers. This is the second golden in the
-repository that records what PyPSA does rather than what should be reproduced —
-`scigrid-de`'s degenerate dispatch is the other.
+So `inactive-removed` existed as the comparison, and the golden carried a
+`not_a_target` note beside the numbers.
+
+**PyPSA 1.4.0 fixed it.** `inactive` now reports 19,800 with `hv31` at -300 and
+`hv12` at 46.67 — this port's answer, including the flow pattern. Everything in
+the two paragraphs above is history as of that pin, and it is kept because
+`LopfSuite` had written the tripwire in advance: an assertion that the two PyPSA
+answers really did differ, "so this is not passing because the distinction is
+moot". The bump fired it, which is the only reason this section needed rewriting
+rather than silently going stale.
+
+`NOT_A_TARGET` is now empty and kept for the mechanism. That leaves `scigrid-de`'s
+degenerate dispatch as the only golden recording what PyPSA does rather than what
+should be reproduced — and it is a different kind of entry, since a degenerate
+optimum is not an upstream defect.
 
 The objective is not the discriminator here: both networks cost 19,800, because
 the cheap generator serves everything either way and no rating binds. The flows
@@ -3414,6 +3425,70 @@ either. The fixture uses `160 MVA 380/110 kV`, which has no shift, and pins
 `model = "pi"` to isolate type expansion from the conversion rather than because
 the conversion is missing. The remaining piece is a golden over a Dyn5 type, not
 the capability it would exercise.
+
+## PyPSA 1.4.0, and a pin bump that two tripwires asked for
+
+Released 2026-10-09 and pinned here two days later. The weekly drift job had last run on the
+5th, so nothing had seen it: the check was run by hand against a scratch venv first, which is
+the workflow `reference/README.md` documents.
+
+**Schema drift is small**: `start_up_cost` and `shut_down_cost` became `static or series` on
+`Generator`, `Link` and `Process` — time-varying commitment costs, inside what
+`UnitCommitment` already refuses.
+
+**Answer drift is three networks, and two of them are upstream fixing something.** 5 of 1,152
+tests failed on the regenerated goldens, every one of them on a network the drift report named.
+
+### `inactive`: upstream fixed it, and this port was right
+
+68,407.58 → 19,800.00, with `hv31` at -300 and `hv12` at 46.67. Through 1.3.0 `cycle_matrix`
+kept an inactive branch's loop while the Kirchhoff builder dropped its flow term; see *PyPSA's
+two L2 models disagree* above for the mechanism, which is now history.
+
+`LopfSuite` had an assertion written for this day — that the two PyPSA answers really did
+differ, "so this is not passing because the distinction is moot" — and the bump fired it. That
+test now compares `inactive` against its own block and asserts the agreement, which is
+stronger than the comparison it replaces: a deleted line cannot tell an implementation that
+ignores `active` from one that honours it on the branch that was removed.
+
+### `investment-periods-expansion`: the objective constant moved
+
+Objective 20,175 → 16,275, constant 0.0 → 3,900, `total_system_cost` unchanged. 1.3.0 computed
+the sunk-capital term in both branches of `define_objective` and appended it only in the
+single-period one; 1.4.0 appends it in both. `Expansion.objectiveConstant` no longer
+special-cases a multi-period network.
+
+The four mutation objectives that fixture's tests pin — 25,150, 10,475, 18,000, 20,175 — are
+unchanged under the split, because they were always the *total*. The tests assert
+`totalSystemCost` now, which is the figure invariant across it.
+
+### `ramp-limits`: `up_time_before` stopped reaching a non-committable unit
+
+50,240 → 48,640, which is the number that fixture's own docstring recorded for "without
+`cold`'s handling". Diffing `define_ramp_limit_constraints` across the two versions:
+
+    1.3.0   initially_up = up_time_before > 0
+            p_init = p_init.where(initially_up, 0);  s_init = initially_up
+    1.4.0   s_init = _status_history(...)  -> history.where(committable, 1.0)
+            p_init = _dispatch_before(...) -> p_init.where(status > 0, 0.0)
+
+A non-committable unit is on before the horizon whatever `up_time_before` says, and `p_init`
+passes through unchanged — NaN by default, which masks the row out. `up_time_before` and
+`down_time_before` are commitment attributes, and 1.3.0 was applying them to units with no
+commitment status, so this reads as a fix. 1.4.0 also dropped the prior-status factor from the
+extendable branch outright.
+
+`Ramps` reads `p_init` directly and does not read `up_time_before` at all. Every unit it
+builds is non-committable, because `Commitment.reject` refuses the rest ahead of it — so the
+attribute now has no effect anywhere in the LOPF.
+
+### What the bump cost, and what it did not
+
+Three stale prose claims corrected, two fixture docstrings rewritten, `NOT_A_TARGET` emptied,
+and four pinned numbers moved from an objective to a total. No refusal was added or lifted,
+and no new gap appeared. The whole of it was reachable from the drift report plus two
+assertions written years ahead of the release — which is the argument for writing a tripwire
+beside a divergence rather than only a comment.
 
 ## PyPSA 1.3.0, and a pin that stopped being free
 

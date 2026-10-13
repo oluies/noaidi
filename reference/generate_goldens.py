@@ -511,14 +511,20 @@ def inactive_components():
 def inactive_removed():
     """`inactive`'s network with the line genuinely deleted rather than switched off.
 
-    The physically correct target for `inactive`, and the reason it has to exist
-    as its own fixture: PyPSA's own two answers for "this line is not there"
-    disagree, so one of them cannot be a golden.
+    It exists because PyPSA's own two answers for "this line is not there" disagreed, and
+    that is over: **PyPSA 1.4.0 fixed it.** Both networks now cost 19,800 with `slack`
+    serving all 435 MW, which is the obvious merit order and the answer this port has always
+    produced.
 
-    Deactivating `hv23` gives an objective of 68,407.58 with `peak` running at
-    272 MW while cheap capacity sits idle. Deleting it gives 19,800 with `slack`
-    serving all 435 MW -- which is the obvious merit order, and the answer this
-    port produces.
+    Through 1.3.0, deactivating `hv23` gave 68,407.58 with `peak` running at 272 MW while
+    cheap capacity sat idle, and deleting it gave 19,800. So `inactive` carried a
+    `not_a_target` marker, `NOT_A_TARGET` existed for it alone, and `LopfSuite` compared
+    against this fixture with an assertion that the two answers really did differ -- a
+    tripwire for the day upstream fixed it, which the pin bump fired.
+
+    Kept as its own fixture rather than deleted. The two networks agreeing is now an
+    assertion in its own right: a deleted line and a deactivated one are the same model,
+    which is what `active` means, and a future release separating them again fails there.
 
     The cause is inside PyPSA. `cycle_matrix` still finds the loop
     hv12-hv23-hv31 when `hv23` is inactive, so `define_kirchhoff_voltage_
@@ -674,11 +680,18 @@ def ramp_limits():
       - `flex` -- a **time-varying** `ramp_limit_up`. Both up and down limits are
         `static or series` in PyPSA, and a series with no static counterpart is
         invisible to a `static.contains` check. Without it: 47,735.
-      - `cold` -- `up_time_before = 0`, so it was down before the horizon. PyPSA
-        then reads `p_init` as 0 rather than NaN *and* scales the up row by a
-        prior status of zero, which pins `p(0)` to 0 exactly. Without it: 48,640.
-        This is the only attribute here that changes the answer by changing
-        whether a row exists at all.
+      - `cold` -- `up_time_before = 0`, which through PyPSA 1.3.0 made it read `p_init` as
+        0 rather than NaN *and* scale the up row by a prior status of zero, pinning `p(0)`
+        to 0 exactly. **1.4.0 stopped doing that**, and this fixture is what measures it:
+        `_status_history` ends `history.where(committable, 1.0)`, so a non-committable unit
+        is on before the horizon whatever the attribute says, and `_dispatch_before` returns
+        `p_init` unchanged -- NaN here, which masks the row out. `cold` starts at its full
+        120 MW and the objective is 48,640 where 1.3.0 gave 50,240.
+
+        That reads as a fix rather than a change of model: `up_time_before` and
+        `down_time_before` are commitment attributes and 1.3.0 applied them to a unit with
+        no commitment status. The attribute is kept on the fixture so the two readings stay
+        separated -- an implementation still reading it the old way pins `p(0)` to 0.
       - `new` -- **extendable** and ramp-limited, so its limits multiply the
         capacity *variable* rather than a number in the file. Built to 200 MW,
         and its dispatch moves 115 -> 55 -> 115, hitting the +-60 band exactly at
@@ -2309,40 +2322,24 @@ def determinacy(build, multi_invest: bool) -> dict:
     return out
 
 
-# Fixtures whose optimal *dispatch* is not reproducible, with the evidence.
+# Fixtures whose `optimize` block is not a comparison target, with the reason.
 #
-# Found by accident and then measured: adding this file's `standard-types`
-# fixture rewrote 59,000 lines of the committed `scigrid-de` golden, having
-# touched nothing that network uses. Six runs of `scigrid-de` in fresh processes
-# land on exactly two answers. The objective is the same to 2e-8 relative
-# (6684817.323607759 against ...738) and individual generators differ by up to
-# 750 MW.
+# Empty, and kept rather than deleted: `inactive` was the only entry and PyPSA 1.4.0 fixed the
+# bug it recorded. Through 1.3.0, `cycle_matrix` kept an inactive branch's loop while the
+# Kirchhoff builder dropped its flow term, so the row collapsed to a voltage law for a loop
+# that is not closed and pinned hv31 to 27.6 MW on a 1700 MW branch -- 68,407.58 against the
+# 19,800 a deleted line gives. Its own linear flow excluded inactive branches properly, so
+# `lpf` and `optimize` modelled different networks.
 #
-# The cause is upstream of the solver. `find_cycles` returns 364 cycles either
-# way, but the basis alternates between 2372 and 2469 nonzeros -- and 2469-2372
-# = 97 is exactly the per-snapshot difference in the LP HiGHS is handed
-# (261298 against 263626 nonzeros over 24 snapshots). So PyPSA builds a
-# different, equally valid Kirchhoff basis from one process to the next, and the
-# degenerate optimum it reaches moves with it. Fixing PYTHONHASHSEED does not
-# pin it.
+# 1.4.0 reports 19,800 with hv31 at -300 and hv12 at 46.67, which is what this port has said
+# all along, including the flow pattern. `LopfSuite` had a tripwire for the day it changed --
+# "PyPSA's two answers now agree, so the inconsistency this pins is gone" -- and that is the
+# assertion the pin bump fired.
 #
-# This is a property of the network, not of PyPSA's correctness: any KVL basis
-# spanning the cycle space gives the same feasible set, and both answers cost
-# the same. It does mean the dispatch frames here cannot gate an
-# implementation. The objective and the marginal prices can.
-# Fixtures whose `optimize` block records what PyPSA does rather than what a
-# correct model should, with the evidence and the substitute.
-NOT_A_TARGET = {
-    "inactive": (
-        "PyPSA's `cycle_matrix` keeps the inactive branch's loop while the Kirchhoff "
-        "builder drops its flow term, so the row collapses to a voltage law for a loop "
-        "that is not closed and pins hv31 to 27.6 MW on a 1700 MW branch. Deleting the "
-        "line instead gives 19800 against this 68407.58. Its own linear flow excludes "
-        "inactive branches from topology properly, so `lpf` and `optimize` here model "
-        "different networks. Compare an implementation against `inactive-removed`; the "
-        "`lpf` block on this fixture *is* a target."
-    ),
-}
+# The dict stays because the mechanism is worth having and because a reader who finds a
+# divergence needs somewhere to record it. An entry here means: the answer is upstream's and
+# it is wrong, so compare against something else.
+NOT_A_TARGET: dict[str, str] = {}
 
 
 DEGENERATE_DISPATCH = {

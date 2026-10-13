@@ -2,15 +2,12 @@
  "determinacy": {
   "nominal_opt": {
    "Generator": {
-    "determined": true,
-    "excess": -0.05
+    "determined": true
    },
    "Link": {
-    "determined": true,
-    "excess": -0.025
+    "determined": true
    }
   },
-  "objective": 1.191964383906452e-05,
   "probe": {
    "presolve": "off",
    "run_crossover": "off",
@@ -18,16 +15,13 @@
   },
   "series": {
    "bus_marginal_price": {
-    "determined": false,
-    "excess": 210.8862624640055
+    "determined": false
    },
    "generator_p": {
-    "determined": true,
-    "excess": -0.009998415116152896
+    "determined": true
    },
    "link_p0": {
-    "determined": true,
-    "excess": -0.00999841603809983
+    "determined": true
    }
   },
   "statistics": {

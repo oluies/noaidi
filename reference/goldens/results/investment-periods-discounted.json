@@ -2,11 +2,9 @@
  "determinacy": {
   "nominal_opt": {
    "Generator": {
-    "determined": true,
-    "excess": -0.03
+    "determined": true
    }
   },
-  "objective": 6.237831257749349e-06,
   "probe": {
    "presolve": "off",
    "run_crossover": "off",
@@ -14,12 +12,10 @@
   },
   "series": {
    "bus_marginal_price": {
-    "determined": true,
-    "excess": -0.018899999477012125
+    "determined": true
    },
    "generator_p": {
-    "determined": true,
-    "excess": -0.009999996461745785
+    "determined": true
    }
   },
   "statistics": {

@@ -2164,6 +2164,31 @@ def _series_deviation(a, b):
     return float((diff.to_numpy() - allowed).max())
 
 
+# Why the series and capacity verdicts carry no margin.
+#
+# They did, as an `excess` field -- the overshoot of the per-element tolerance -- so a reader
+# could see whether a series missed by a hair or by 500 MW. It had to go, and the reason is
+# the tool it broke.
+#
+# `results_drift.py` compares these goldens field by field to find a release that moved an
+# answer. An `excess` sitting near zero is a difference of two solver outputs, so it moves
+# with any change to either: measured across the PyPSA 1.3.0 -> 1.4.0 step, three networks --
+# `investment-periods-expansion`, `ramp-limits`, `transformer-taps` -- reported as drifted
+# with their verdicts unchanged and nothing else moved, the whole difference being `excess`
+# values shifting by 7e-7 to 1.6e-2 relative. Noise in the one tool whose job is to tell
+# noise from signal.
+#
+# What is kept is the verdict, which is what the consuming suite reads, and the per-GROUP
+# deviations in the `statistics` block below -- those are 14 to 538, three orders above the
+# tolerance, and they do not move. The margin on a series is recoverable by re-running the
+# probe, which is cheaper than a drift report nobody trusts.
+#
+# The objective gap between the two solves went the same way. Dropping the series margins
+# first made it the only churn left, which is how it was found: with it gone, the 1.3.0 ->
+# 1.4.0 drift narrows from four networks to the two that really moved.
+_DETERMINACY_RECORDS_NO_MARGIN = True
+
+
 def determinacy(build, multi_invest: bool) -> dict:
     """Which series of this network's solve are a point rather than a face.
 
@@ -2207,18 +2232,19 @@ def determinacy(build, multi_invest: bool) -> dict:
         "store_p": lambda n: n.stores_t.p,
     }
 
-    out = {
-        "probe": dict(DETERMINACY_PROBE),
-        "objective": jsonable(abs(first.objective - second.objective)),
-        "series": {},
-    }
+    # No objective gap either, and for the same reason as the series margins: it is the
+    # difference of two solver outputs, so it moves with any change to either. It was 3.8e-07
+    # on `investment-periods-expansion` under PyPSA 1.3.0 and 5.1e-05 under 1.4.0, with that
+    # network's verdicts unchanged -- the last of the churn once the per-series margins went.
+    out = {"probe": dict(DETERMINACY_PROBE), "series": {}}
     for label, read in series.items():
         excess = _series_deviation(read(first), read(second))
         if excess is None:
             continue
         # `excess` is already the overshoot of the per-element tolerance, so the verdict is a
         # comparison against zero and the recorded number says by how much.
-        out["series"][label] = {"determined": bool(excess <= 0.0), "excess": jsonable(excess)}
+        # The verdict and not the margin. See `_DETERMINACY_RECORDS_NO_MARGIN` below.
+        out["series"][label] = {"determined": bool(excess <= 0.0)}
 
     # Chosen capacities, which are an answer rather than a by-product and can be degenerate on
     # their own: `ac-dc-txcost`'s transmission cost limit binds at 4800 and the split between
@@ -2233,7 +2259,7 @@ def determinacy(build, multi_invest: bool) -> dict:
         diff = (a - aligned).abs().to_numpy()
         scale = np.maximum(a.abs().to_numpy(), aligned.abs().to_numpy())
         excess = float((diff - (DETERMINACY_ABS + DETERMINACY_REL * scale)).max())
-        nominal[component] = {"determined": bool(excess <= 0.0), "excess": jsonable(excess)}
+        nominal[component] = {"determined": bool(excess <= 0.0)}
     if nominal:
         out["nominal_opt"] = nominal
 

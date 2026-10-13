@@ -955540,23 +955540,18 @@
  "determinacy": {
   "nominal_opt": {
    "Generator": {
-    "determined": true,
-    "excess": -0.010000000002147047
+    "determined": true
    },
    "Line": {
-    "determined": true,
-    "excess": -0.0347683265482
+    "determined": true
    },
    "StorageUnit": {
-    "determined": true,
-    "excess": -0.010150000000000001
+    "determined": true
    },
    "Transformer": {
-    "determined": true,
-    "excess": -0.21000000000000002
+    "determined": true
    }
   },
-  "objective": 0.0011993050575256348,
   "probe": {
    "presolve": "off",
    "run_crossover": "off",
@@ -955564,36 +955559,28 @@
   },
   "series": {
    "bus_marginal_price": {
-    "determined": true,
-    "excess": -0.00997947960690514
+    "determined": true
    },
    "generator_p": {
-    "determined": false,
-    "excess": 784.921639603669
+    "determined": false
    },
    "line_p0": {
-    "determined": false,
-    "excess": 506.515306091588
+    "determined": false
    },
    "storage_p": {
-    "determined": false,
-    "excess": 472.79895163066624
+    "determined": false
    },
    "storage_p_dispatch": {
-    "determined": false,
-    "excess": 75.6439625877379
+    "determined": false
    },
    "storage_p_store": {
-    "determined": false,
-    "excess": 472.7989516461257
+    "determined": false
    },
    "storage_state_of_charge": {
-    "determined": false,
-    "excess": 1354.554356940875
+    "determined": false
    },
    "transformer_p0": {
-    "determined": false,
-    "excess": 259.85887128064223
+    "determined": false
    }
   },
   "statistics": {

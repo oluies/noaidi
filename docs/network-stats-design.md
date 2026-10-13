@@ -585,8 +585,34 @@ Three things about the measurement:
   and neither of PyPSA's does — and on a degenerate flow pattern that happens, because which
   lines carry anything at all is part of the face. Still far finer than a network skip.
 
-The measurement is itself reproducible: `results_drift.py` reports the whole block unchanged
-across two regenerations, so the probe is not adding a source of churn to the goldens.
+The measurement is reproducible across two regenerations of the same PyPSA — which is what
+was checked when it landed, and not enough.
+
+**It carried a margin, and the margin had to go.** Each series and capacity verdict recorded
+an `excess`: how far past the per-element tolerance the two solves were, so a reader could
+see whether something missed by a hair or by 500 MW. An `excess` near zero is a difference of
+two solver outputs, so it moves with any change to either. Measured across the PyPSA
+1.3.0 → 1.4.0 step, three networks — `investment-periods-expansion`, `ramp-limits`,
+`transformer-taps` — reported as drifted with their verdicts unchanged and nothing else moved,
+the whole difference being `excess` values shifting by 7e-7 to 1.6e-2 relative. Noise in the
+one tool whose job is to tell noise from signal.
+
+So the series and capacity blocks carry the verdict alone, and the objective gap between the
+two solves went the same way. The per-**group** deviations in the `statistics` block stay,
+because those are the ones that matter and the ones that hold still: 14 to 538, three orders
+above the tolerance.
+
+Dropping the series margins first is what exposed the objective gap as the remaining churn —
+and with both gone the 1.3.0 → 1.4.0 drift narrows from four networks to the **three that
+really moved**, which is the report doing its job:
+
+```
+inactive                      68,407.58 -> 19,800.00   upstream fixed the Kirchhoff bug
+investment-periods-expansion  constant 0.0 -> 3,900.0  upstream now appends it under
+                                                       multi-invest; total_system_cost is
+                                                       unchanged at 20,175
+ramp-limits                   50,240.00 -> 48,640.00   a genuinely cheaper answer
+```
 
 ## What this deliberately does not do
 

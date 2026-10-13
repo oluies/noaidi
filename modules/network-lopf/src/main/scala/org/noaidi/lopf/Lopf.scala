@@ -215,7 +215,7 @@ object Lopf:
           // Weighted by the periods the asset is active in, which on a flat index
           // is 1.0 and changes nothing. One column per asset either way -- see
           // `Expansion.costWeight` for why a build year does not get its own.
-          Expansion.periodizedCost(table, id) * Expansion.costWeight(network, table, id),
+          Expansion.periodizedCost(network, table, id) * Expansion.costWeight(network, table, id),
         ): Unit
       }
     }
@@ -842,11 +842,22 @@ object Lopf:
       * Only `Line` and `Link`, which is PyPSA's own scope: a transmission limit is about the
       * wires, and a generator's capacity is not transmission however it is carriered.
       *
-      * `capital_cost` raw, not [[Expansion.periodizedCost]], so a network setting `fom_cost`
-      * has a cost limit that disagrees with its own objective about what a branch costs to
-      * build. That is upstream's behaviour -- `define_transmission_expansion_cost_limit`
-      * weights by `c.capital_cost` -- and this is a port, so it is reproduced rather than
+      * [[Expansion.capitalCost]], which is the annuitised cost '''without''' `fom_cost`, so
+      * a network setting `fom_cost` has a cost limit that disagrees with its own objective
+      * about what a branch costs to build. That is upstream's behaviour --
+      * `define_transmission_expansion_cost_limit` weights by `c.capital_cost`
+      * (`global_constraints.py:935`), which is the property at `components.py:1151` and
+      * passes `fom_cost=None` -- and this is a port, so it is reproduced rather than
       * corrected.
+      *
+      * It read the raw column until a review caught it, and the comment above said that was
+      * upstream's behaviour. Half right: the property does leave out `fom_cost`, and it also
+      * '''annuitises'''. The two agreed only while an annuitised `overnight_cost` was
+      * refused, and the commit that lifted that refusal fixed one of the two call sites.
+      * `capital_cost` defaults to 0.0, so on an extendable branch priced by `overnight_cost`
+      * every coefficient here was zero and the row became the vacuous `0 <= limit` --
+      * unlimited transmission build, reported `Optimal`. `tx-cost-annuitised` is the
+      * fixture.
       *
       * ==The per-period weighting, which used to be unreachable and is not==
       *
@@ -916,7 +927,9 @@ object Lopf:
             // is right for an objective -- a cost nobody can price is not a cost -- and
             // wrong here, where dropping a branch from a limit silently changes what the
             // limit means.
-            val weight = table.float(weightAttribute, branch)
+            val weight =
+              if weightAttribute == "capital_cost" then Expansion.capitalCost(network, table, branch)
+              else table.float(weightAttribute, branch)
             // The cost limit's per-period factor, and the cost limit's alone. `costWeight`
             // is 1.0 on a flat index, so this is a no-op there; on a multi-period network it
             // is the sum of the `objective` weightings of the periods the branch is active

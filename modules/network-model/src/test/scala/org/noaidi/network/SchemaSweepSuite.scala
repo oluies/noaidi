@@ -343,11 +343,16 @@ object SchemaSweepSuite:
       // moment multi-period was implemented. Masked exactly as `Bus.x` is by
       // `Line.x`, and safe for the same reason the rest of this group is --
       // `Lopf.rejectUnhandled` refuses any network carrying a Process at all.
+      //
+      // `Process.discount_rate` is NOT in this list, and the sweep is why: it
+      // matches an attribute by name across the sources, so once
+      // `Expansion.periodizedCost` read `discount_rate` for a generator, the
+      // Process entry asserted the opposite of the code too. A component-scoped
+      // ruling cannot survive the attribute being named anywhere.
       "Process.cyclic_delay0",
       "Process.cyclic_delay1",
       "Process.delay0",
       "Process.delay1",
-      "Process.discount_rate",
       "Process.maintenance_duration",
       "Process.maintenance_events",
       "Process.maintenance_pu",
@@ -370,20 +375,13 @@ object SchemaSweepSuite:
       // ledger entry into a live gap -- a cap meant for one period applied to the
       // whole horizon -- and the sweep is what surfaced it, which is the job.
       //
-      // `discount_rate` stays. It is only read when an `overnight_cost` is
-      // annuitised, and `Expansion.reject` refuses that on every network,
-      // single- or multi-period.
-      ruled(
-        MultiPeriodOnly,
-        "annuitises overnight_cost, which Expansion.reject refuses on every network",
-      )(
-        "Generator.discount_rate",
-        "Line.discount_rate",
-        "Link.discount_rate",
-        "StorageUnit.discount_rate",
-        "Store.discount_rate",
-        "Transformer.discount_rate",
-      ) ++
+      // `discount_rate` was the last entry in this group and is gone: it is read
+      // now, by `Expansion.periodizedCost`, because an annuitised `overnight_cost`
+      // is built rather than refused. Six rulings deleted in the change that
+      // implemented it, which is what the heading above says to do -- and the
+      // sweep is what insisted, by failing with "7 ruling(s) whose attribute the
+      // sources now name" rather than letting a ledger entry assert the opposite
+      // of the code.
       // ---- Inert in PyPSA itself -----------------------------------------------
       //
       // The strongest form of ruling available: the attribute gets zero hits in

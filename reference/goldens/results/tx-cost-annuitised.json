@@ -1,0 +1,957 @@
+{
+ "bodf": {
+  "0": {
+   "bodf": [
+    [
+     -1.0
+    ]
+   ],
+   "branches": [
+    [
+     "Line",
+     "tie"
+    ]
+   ]
+  }
+ },
+ "determinacy": {
+  "nominal_opt": {
+   "Generator": {
+    "determined": true,
+    "excess": -0.05
+   },
+   "Line": {
+    "determined": true,
+    "excess": -0.010688236498489765
+   }
+  },
+  "objective": 0.02993079647421837,
+  "probe": {
+   "presolve": "off",
+   "run_crossover": "off",
+   "solver": "ipm"
+  },
+  "series": {
+   "bus_marginal_price": {
+    "determined": true,
+    "excess": -0.010999947697324031
+   },
+   "generator_p": {
+    "determined": true,
+    "excess": -0.010687860242842682
+   },
+   "line_p0": {
+    "determined": true,
+    "excess": -0.010688235536857214
+   }
+  },
+  "statistics": {
+   "capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "installed_capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "opex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "optimal_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "supply|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   }
+  }
+ },
+ "lpf": {
+  "bus_v_ang": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0,
+     -0.0009917355371900827
+    ],
+    [
+     0.0,
+     -0.0009917355371900827
+    ],
+    [
+     0.0,
+     -0.0009917355371900827
+    ],
+    [
+     0.0,
+     -0.0009917355371900827
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "dear"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     120.0,
+     0.0
+    ],
+    [
+     120.0,
+     0.0
+    ],
+    [
+     120.0,
+     0.0
+    ],
+    [
+     120.0,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     120.0
+    ],
+    [
+     120.0
+    ],
+    [
+     120.0
+    ],
+    [
+     120.0
+    ]
+   ]
+  },
+  "link_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "link_p0_note": "NaN by construction: lpf does not determine link flow without p_set",
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "optimize": {
+  "bus_marginal_price": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     10.0,
+     60.0
+    ],
+    [
+     10.0,
+     60.0
+    ],
+    [
+     10.0,
+     60.0
+    ],
+    [
+     10.0,
+     60.0
+    ]
+   ]
+  },
+  "condition": "optimal",
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "dear"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     6.882415575744713,
+     113.11758442425528
+    ],
+    [
+     6.882415575744713,
+     113.11758442425528
+    ],
+    [
+     6.882415575744713,
+     113.11758442425528
+    ],
+    [
+     6.882415575744713,
+     113.11758442425528
+    ]
+   ]
+  },
+  "generator_status": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "global_constraint_mu": {
+   "tx": -3013.498022176185
+  },
+  "line_p0": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     6.882415575744713
+    ],
+    [
+     6.882415575744713
+    ],
+    [
+     6.882415575744713
+    ],
+    [
+     6.882415575744713
+    ]
+   ]
+  },
+  "link_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "multi_investment_periods": false,
+  "nominal_opt": {
+   "Generator": {
+    "cheap": 400.0,
+    "dear": 400.0
+   },
+   "Line": {
+    "tie": 6.882415575744713
+   }
+  },
+  "objective": 30029250.98891191,
+  "objective_constant": 0.0,
+  "status": "ok",
+  "storage_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_p_dispatch": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_p_store": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_spill": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "storage_state_of_charge": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "store_e": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "store_p": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  },
+  "total_system_cost": 30029250.98891191,
+  "transformer_p0": {
+   "columns": [],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [],
+    [],
+    [],
+    []
+   ]
+  }
+ },
+ "pf": {
+  "bus_p": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     120.01190319020861,
+     -120.0
+    ],
+    [
+     120.01190319020861,
+     -120.0
+    ],
+    [
+     120.01190319020861,
+     -120.0
+    ],
+    [
+     120.01190319020861,
+     -120.0
+    ]
+   ]
+  },
+  "bus_q": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.11903196221101098,
+     0.0
+    ],
+    [
+     0.11903196221101098,
+     0.0
+    ],
+    [
+     0.11903196221101098,
+     0.0
+    ],
+    [
+     0.11903196221101098,
+     0.0
+    ]
+   ]
+  },
+  "bus_v_ang": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.0,
+     -0.0009918345611561886
+    ],
+    [
+     0.0,
+     -0.0009918345611561886
+    ],
+    [
+     0.0,
+     -0.0009918345611561886
+    ],
+    [
+     0.0,
+     -0.0009918345611561886
+    ]
+   ]
+  },
+  "bus_v_mag_pu": {
+   "columns": [
+    "A",
+    "B"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     1.0,
+     0.9999003246925396
+    ],
+    [
+     1.0,
+     0.9999003246925396
+    ],
+    [
+     1.0,
+     0.9999003246925396
+    ],
+    [
+     1.0,
+     0.9999003246925396
+    ]
+   ]
+  },
+  "converged": {
+   "columns": [
+    "0"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     1.0
+    ],
+    [
+     1.0
+    ],
+    [
+     1.0
+    ],
+    [
+     1.0
+    ]
+   ]
+  },
+  "generator_p": {
+   "columns": [
+    "cheap",
+    "dear"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ],
+    [
+     {
+      "$nan": true
+     },
+     {
+      "$nan": true
+     }
+    ]
+   ]
+  },
+  "generator_q": {
+   "columns": [
+    "cheap",
+    "dear"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.11903196221101098,
+     0.0
+    ],
+    [
+     0.11903196221101098,
+     0.0
+    ],
+    [
+     0.11903196221101098,
+     0.0
+    ],
+    [
+     0.11903196221101098,
+     0.0
+    ]
+   ]
+  },
+  "line_p0": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     120.01190319020861
+    ],
+    [
+     120.01190319020861
+    ],
+    [
+     120.01190319020861
+    ],
+    [
+     120.01190319020861
+    ]
+   ]
+  },
+  "line_p1": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     -119.99999999097228
+    ],
+    [
+     -119.99999999097228
+    ],
+    [
+     -119.99999999097228
+    ],
+    [
+     -119.99999999097228
+    ]
+   ]
+  },
+  "line_q0": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     0.11903196221101098
+    ],
+    [
+     0.11903196221101098
+    ],
+    [
+     0.11903196221101098
+    ],
+    [
+     0.11903196221101098
+    ]
+   ]
+  },
+  "line_q1": {
+   "columns": [
+    "tie"
+   ],
+   "index": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "values": [
+    [
+     3.01521611710059e-08
+    ],
+    [
+     3.01521611710059e-08
+    ],
+    [
+     3.01521611710059e-08
+    ],
+    [
+     3.01521611710059e-08
+    ]
+   ]
+  }
+ },
+ "statistics": {
+  "capex|bus": {
+   "Line|A": 500.0
+  },
+  "capex|bus_carrier": {
+   "Line|AC": 500.0
+  },
+  "capex|carrier": {
+   "Line|AC": 500.0
+  },
+  "capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capex|location": {
+   "Line|": 500.0
+  },
+  "capex|name": {
+   "Line|tie": 500.0
+  },
+  "capex|unit": {
+   "Line|": 500.0
+  },
+  "expanded_capacity|bus": {
+   "Generator|A": 0.0,
+   "Generator|B": 0.0,
+   "Line|A": 6.88242
+  },
+  "expanded_capacity|bus_carrier": {
+   "Generator|AC": 0.0,
+   "Line|AC": 6.88242
+  },
+  "expanded_capacity|carrier": {
+   "Generator|-": 0.0,
+   "Line|AC": 6.88242
+  },
+  "expanded_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capacity|location": {
+   "Generator|": 0.0,
+   "Line|": 6.88242
+  },
+  "expanded_capacity|name": {
+   "Generator|cheap": 0.0,
+   "Generator|dear": 0.0,
+   "Line|tie": 6.88242
+  },
+  "expanded_capacity|unit": {
+   "Generator|": 0.0,
+   "Line|": 6.88242
+  },
+  "expanded_capex|bus": {
+   "Line|A": 500.0
+  },
+  "expanded_capex|bus_carrier": {
+   "Line|AC": 500.0
+  },
+  "expanded_capex|carrier": {
+   "Line|AC": 500.0
+  },
+  "expanded_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "expanded_capex|location": {
+   "Line|": 500.0
+  },
+  "expanded_capex|name": {
+   "Line|tie": 500.0
+  },
+  "expanded_capex|unit": {
+   "Line|": 500.0
+  },
+  "installed_capacity|bus": {
+   "Generator|A": 400.0,
+   "Generator|B": 400.0
+  },
+  "installed_capacity|bus_carrier": {
+   "Generator|AC": 800.0
+  },
+  "installed_capacity|carrier": {
+   "Generator|-": 800.0
+  },
+  "installed_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capacity|location": {
+   "Generator|": 800.0
+  },
+  "installed_capacity|name": {
+   "Generator|cheap": 400.0,
+   "Generator|dear": 400.0
+  },
+  "installed_capacity|unit": {
+   "Generator|": 800.0
+  },
+  "installed_capex|bus": {},
+  "installed_capex|bus_carrier": {},
+  "installed_capex|carrier": {},
+  "installed_capex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "installed_capex|location": {},
+  "installed_capex|name": {},
+  "installed_capex|unit": {},
+  "opex|bus": {
+   "Generator|A": 301449.80222,
+   "Generator|B": 29727301.18669
+  },
+  "opex|bus_carrier": {
+   "Generator|AC": 30028750.98891
+  },
+  "opex|carrier": {
+   "Generator|-": 30028750.98891
+  },
+  "opex|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "opex|location": {
+   "Generator|": 30028750.98891
+  },
+  "opex|name": {
+   "Generator|cheap": 301449.80222,
+   "Generator|dear": 29727301.18669
+  },
+  "opex|unit": {
+   "Generator|": 30028750.98891
+  },
+  "optimal_capacity|bus": {
+   "Generator|A": 400.0,
+   "Generator|B": 400.0,
+   "Line|A": 6.88242
+  },
+  "optimal_capacity|bus_carrier": {
+   "Generator|AC": 800.0,
+   "Line|AC": 6.88242
+  },
+  "optimal_capacity|carrier": {
+   "Generator|-": 800.0,
+   "Line|AC": 6.88242
+  },
+  "optimal_capacity|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "optimal_capacity|location": {
+   "Generator|": 800.0,
+   "Line|": 6.88242
+  },
+  "optimal_capacity|name": {
+   "Generator|cheap": 400.0,
+   "Generator|dear": 400.0,
+   "Line|tie": 6.88242
+  },
+  "optimal_capacity|unit": {
+   "Generator|": 800.0,
+   "Line|": 6.88242
+  },
+  "supply|bus": {
+   "Generator|A": 30144.98022,
+   "Generator|B": 495455.01978,
+   "Line|B": 30144.98022
+  },
+  "supply|bus_carrier": {
+   "Generator|AC": 525600.0,
+   "Line|AC": 30144.98022
+  },
+  "supply|carrier": {
+   "Generator|-": 525600.0,
+   "Line|AC": 30144.98022
+  },
+  "supply|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "supply|location": {
+   "Generator|": 525600.0,
+   "Line|": 30144.98022
+  },
+  "supply|name": {
+   "Generator|cheap": 30144.98022,
+   "Generator|dear": 495455.01978,
+   "Line|tie": 30144.98022
+  },
+  "supply|unit": {
+   "Generator|": 525600.0,
+   "Line|": 30144.98022
+  }
+ }
+}

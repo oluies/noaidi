@@ -627,7 +627,15 @@ object Stats:
           Expansion.nominalAttribute.get(component).map(table.float(_, id)).orNull,
           Expansion.isExtendable(table, id),
           if declares(table, "marginal_cost") then table.float("marginal_cost", id) else null,
-          if declares(table, "capital_cost") then table.float("capital_cost", id) else null,
+          // `Expansion.capitalCost`, not the raw column: upstream's `capex` reads the
+          // `capital_cost` PROPERTY, which annuitises an `overnight_cost` and leaves out
+          // `fom_cost`. Reading the column agreed on every golden for as long as the LOPF
+          // refused an annuitised cost, and then reported 9,999,900 against 16,189.99 on
+          // `annuitised-capital`, whose `both` generator sets a `capital_cost` of 99,999
+          // that PyPSA ignores.
+          if declares(table, "capital_cost") || declares(table, "overnight_cost") then
+            Expansion.capitalCost(n, table, id)
+          else null,
         )
       })
 

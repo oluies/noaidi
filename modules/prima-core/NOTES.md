@@ -416,11 +416,14 @@ for five commits after the refusal they depended on was lifted, which is exactly
 failure the audit is supposed to catch.
 
 
-- **Annuitised and modular capacity.** Capacity expansion itself is implemented —
-  see *Capacity expansion* below — but `overnight_cost` is annuitised over
-  `lifetime` at `discount_rate`, and `p_nom_mod` makes capacity an integer number
-  of blocks. Its default is NaN rather than zero, so it cannot be handled by
-  falling back to `capital_cost`.
+- **Modular capacity.** `p_nom_mod` makes capacity an integer number of blocks,
+  which is a mixed-integer problem rather than this linear one. Its default is
+  NaN rather than zero, so it cannot be handled by falling back.
+- ~~**Annuitised capital.**~~ Built — see *Annuitised capital, and the two
+  coefficients PyPSA keeps for it*. Struck through rather than deleted because
+  what remains refused is three *values* that make the coefficient not a number,
+  and because implementing it found that `network-stats` had been reading the raw
+  `capital_cost` column all along.
 - **Security-constrained expansion of the transmission.** `Sclopf` refuses an
   extendable *branch*; extendable generation is allowed. See the SCLOPF section
   below for why the distinction matters and how it was got wrong first.
@@ -1335,10 +1338,10 @@ That leaves **46**, each with a line saying why it cannot change an answer.
 Nine belong to `Process`, which `Lopf.rejectUnhandled` refuses outright, so its
 attributes are unreachable rather than ignored — the distinction that made
 `investment_periods.csv` a bug and makes this not one. `Process.discount_rate` is
-one of those nine, ruled on the group's grounds; the other **six**
-`discount_rate` entries are ruled separately, read only when an annuitised
-`overnight_cost` is, which `Expansion.reject` refuses on every network. The
-remaining thirty-one are inert in PyPSA's own optimiser, reached under a name
+one of those nine. All seven `discount_rate` rulings are gone now, deleted in the
+change that built the annuity: the sweep matches an attribute by name across the
+sources, so once `periodizedCost` read it for a generator even the `Process`
+entry asserted the opposite of the code. The remaining thirty-one are inert in PyPSA's own optimiser, reached under a name
 that arrives in the data — `Carrier.co2_emissions` is read through
 `GlobalConstraint.carrier_attribute` and appears nowhere in this port — or
 descriptive.
@@ -1998,14 +2001,74 @@ down, and moving `late`'s build year to 2030 is 10,475 and not 11,850 -- it also
 reverses the answer, building `late` to the full 100 MW and `wind` to zero, because
 `late`'s coefficient becomes 90 against `wind`'s 180.
 
+### Annuitised capital, and the two coefficients PyPSA keeps for it
+
+`periodized_cost` reads `capital_cost` only when `overnight_cost` is NaN, which is its
+default. So this port charged `capital_cost` on every network and refused the ones that set
+the other, for the right reason: read as a per-unit cost, a 1000/MW overnight cost is wrong by
+the annuity factor, a factor of twelve on a 25-year asset at 7%.
+
+It is built now. `annuitised-capital` is the fixture and `AnnuitySuite` compares it against an
+objective of 16,989,354.99.
+
+**Three branches of `annuity`, and two of them are reachable by default.** `lifetime` defaults
+to `+inf` and `discount_rate` to NaN, so an `overnight_cost` set on its own is a perpetuity
+with a NaN rate:
+
+    r=0.07  n=25     0.08581052    r / (1 - (1+r)^-n)
+    r=0.0   n=20     0.05          zero rate, so 1/n -- simple depreciation
+    r=0.05  n=inf    0.05          a perpetuity, which is max(r, 0)
+    r=0.0   n=inf    0.0           no interest and no end, so no annual cost
+    r=-0.02 n=inf    0.0           clipped, but only in the infinite branch
+
+The clip is asymmetric: a negative rate on a *finite* lifetime is honoured and discounts below
+simple depreciation. Taken from `costs.py` rather than from the formula, and the factors above
+are printed from `n.c.generators.annuity` on the fixture rather than re-derived.
+
+**`nyears` is the factor a reader assumes is 1.** An annuity is a cost per year and the
+horizon is `Σ objective weighting / 8760`, so a fixture whose six snapshots weigh 1.0 models
+0.07% of a year. The fixture weighs its four snapshots at 1095 — half a year, chosen because
+**a factor of 1.0 cannot test a factor**: dropping `* nyears` was an equivalent mutant while
+the horizon was a whole year, and every assertion passed.
+
+**`overnight_cost` wins and `capital_cost` is ignored**, which upstream only warns about. The
+fixture's `both` generator sets `capital_cost = 99999` beside its overnight cost; summed
+instead it would be the dearest unit on the system rather than the third cheapest, and `perp`
+would build 100 MW where it builds 50.
+
+**And PyPSA keeps two coefficients, which the objective and the statistics read differently:**
+
+    Components.periodized_cost  ->  fom_cost = static["fom_cost"]   the objective's
+    Components.capital_cost     ->  fom_cost = None                 statistics.capex's
+
+One function, one argument apart. `network-stats` had loaded the raw `capital_cost` column,
+which agreed with upstream on every golden for as long as an annuitised cost was refused and
+then reported 9,999,900 against 16,189.99 — `both`'s ignored 99,999 times its 100 MW. Found by
+implementing the annuity, not by reading the statistics code.
+
+**What is still refused** is three values rather than a feature: a missing `discount_rate`
+(PyPSA warns and carries the NaN into the objective), a non-positive `lifetime` (it raises),
+and investment periods of unequal length with an annuitised cost (it raises, and says to
+provide `capital_cost` instead). The last is unreachable from any committed fixture — every
+multi-period golden weights its snapshots equally — and is a named refusal rather than a
+tested branch.
+
+Six `SchemaSweepSuite` rulings went with the refusal, and the sweep is what insisted: it
+matches an attribute by name across the sources, so once `periodizedCost` read
+`discount_rate` for a generator, even the `Process.discount_rate` entry — ruled safe because
+`Process` is refused wholesale — asserted the opposite of the code.
+
 ### What is still refused
 
-`Expansion.reject` is unchanged, and what it refuses really is a different model:
-`overnight_cost`, which PyPSA annuitises over `lifetime` at `discount_rate`, and
-`p_nom_mod`, which makes capacity an integer number of blocks. Both are refused on
-every network, with or without periods; `GapRefusalSuite` now checks the
-composition on the multi-period fixture rather than inferring it from the
-single-period one.
+What `Expansion.reject` still refuses is `p_nom_mod`, which makes capacity an
+integer number of blocks and so a different model. It is refused on every network,
+with or without periods, and `GapRefusalSuite` checks the composition on the
+multi-period fixture rather than inferring it from the single-period one.
+
+`overnight_cost` was refused here too and is built — see *Annuitised capital, and
+the two coefficients PyPSA keeps for it*. On a multi-period network it is built as
+well; what is refused there is an annuitised cost on periods of unequal length,
+which PyPSA raises on and no fixture produces.
 
 `Carrier.max_growth` is the one expansion feature that exists only because there
 are periods -- a limit on how much of a carrier a period may add -- and when this

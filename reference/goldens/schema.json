@@ -597,9 +597,9 @@
    "shut_down_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "float",
+    "type": "static or series",
     "unit": "currency",
-    "varying": false
+    "varying": true
    },
    "sign": {
     "default": 1.0,
@@ -625,9 +625,9 @@
    "start_up_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "float",
+    "type": "static or series",
     "unit": "currency",
-    "varying": false
+    "varying": true
    },
    "status": {
     "default": 1.0,
@@ -1527,9 +1527,9 @@
    "shut_down_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "float",
+    "type": "static or series",
     "unit": "currency",
-    "varying": false
+    "varying": true
    },
    "stand_by_cost": {
     "default": 0.0,
@@ -1548,9 +1548,9 @@
    "start_up_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "float",
+    "type": "static or series",
     "unit": "currency",
-    "varying": false
+    "varying": true
    },
    "status": {
     "default": 1.0,
@@ -2091,9 +2091,9 @@
    "shut_down_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "float",
+    "type": "static or series",
     "unit": "currency",
-    "varying": false
+    "varying": true
    },
    "stand_by_cost": {
     "default": 0.0,
@@ -2112,9 +2112,9 @@
    "start_up_cost": {
     "default": 0.0,
     "status": "Input (optional)",
-    "type": "float",
+    "type": "static or series",
     "unit": "currency",
-    "varying": false
+    "varying": true
    },
    "status": {
     "default": 1.0,

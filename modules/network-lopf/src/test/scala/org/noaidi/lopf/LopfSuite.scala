@@ -1072,47 +1072,56 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
 
   test("an inactive component is excluded from the model, not dispatched at zero") {
     assume(available, "goldens missing")
-    // `active` was read nowhere in this port, so an inactive component was built
-    // into the model like any other. PyPSA removes it -- found by enumerating the
-    // attributes the schema declares and subtracting those the source ever names,
-    // which is the only technique that finds this shape: an attribute nothing
-    // reads has no call site to refuse at and nothing to sabotage in a test.
+    // `active` was read nowhere in this port, so an inactive component was built into the
+    // model like any other. PyPSA removes it -- found by enumerating the attributes the
+    // schema declares and subtracting those the source ever names, which is the only
+    // technique that finds this shape: an attribute nothing reads has no call site to refuse
+    // at and nothing to sabotage in a test.
     //
-    // Compared against `inactive-removed`, which is the same network with the
-    // line genuinely deleted, and *not* against `inactive`'s own `optimize`
-    // block. The two disagree inside PyPSA: `cycle_matrix` keeps the inactive
-    // branch's loop while the Kirchhoff builder drops its flow term, so the row
-    // collapses to a voltage law for a loop that is not closed and pins hv31 to
-    // 27.6 MW on a branch rated 1700. That costs 68,407.58 against the 19,800 a
-    // deleted line gives. PyPSA's own linear flow excludes inactive branches from
-    // topology properly, so its two L2 models disagree about the same network;
-    // this port follows the linear flow. The golden says so in a `not_a_target`
-    // note beside the numbers.
-    val correct = results("inactive-removed")("optimize")
-    val pypsas  = results("inactive")("optimize")
-    assert(pypsas.obj.contains("not_a_target"), "the golden no longer warns that it is not a target")
+    // ==This compared against the wrong network until PyPSA 1.4.0, and said so==
+    //
+    // Through 1.3.0 the two PyPSA answers for the same network disagreed: `cycle_matrix`
+    // kept the inactive branch's loop while the Kirchhoff builder dropped its flow term, so
+    // the row collapsed to a voltage law for a loop that is not closed and pinned hv31 to
+    // 27.6 MW on a branch rated 1700 -- 68,407.58 against the 19,800 a deleted line gives.
+    // So this compared against `inactive-removed`, with a `not_a_target` marker on the
+    // golden and an assertion that the two answers really did differ, "so this is not
+    // passing because the distinction is moot".
+    //
+    // That assertion was a tripwire for the day upstream fixed it, and the pin bump to 1.4.0
+    // is the day: `inactive` now reports 19,800 with hv31 at -300 and hv12 at 46.67, which
+    // is this port's answer including the flow pattern this comment used to predict. The
+    // marker is gone from the generator and `NOT_A_TARGET` is empty.
+    //
+    // It now compares against `inactive`'s OWN block, and asserts the agreement that
+    // replaced the divergence -- which is a stronger test than the one it replaces, because
+    // the deleted-line network cannot tell an implementation that ignores `active` from one
+    // that honours it on the branch that was removed.
+    val own     = results("inactive")("optimize")
+    val removed = results("inactive-removed")("optimize")
+    assert(!own.obj.contains("not_a_target"),
+      "the golden warns it is not a target again, so upstream has regressed")
 
     val n      = network("inactive")
     val result = Lopf.solve(n, params)
     assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
 
-    val target = correct("objective").num
-    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against the deleted-line answer $target")
+    val target = own("objective").num
+    assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
 
-    // The two PyPSA answers really do differ, so this is not passing because the
-    // distinction is moot.
-    assert(
-      math.abs(pypsas("objective").num - target) > 1.0,
-      "PyPSA's two answers now agree, so the inconsistency this pins is gone",
-    )
+    // The two networks agree on the objective now, and that is the point rather than an
+    // aside: a deleted line and a deactivated one are the same model, which is what `active`
+    // means. Asserted so that a future upstream change separating them again fails here
+    // rather than silently making one of the two comparisons meaningless.
+    assertEqualsDouble(removed("objective").num, target, 1e-6 * target,
+      "deleting the line and deactivating it no longer give the same answer")
 
-    // Flows, not just the objective. Both networks cost 19,800 -- the cheap
-    // generator serves everything either way and no rating binds -- so the
-    // objective cannot tell them apart, and asserting only that would pass
-    // against an implementation that ignored `active` entirely. What changes is
-    // where the power goes: hv31 carries the whole 300 MW to hv3 instead of
-    // sharing it with hv23, 197.2 -> 46.7 on hv12.
-    val flows = correct("line_p0")
+    // Flows, not just the objective. Both networks cost 19,800 -- the cheap generator serves
+    // everything either way and no rating binds -- so the objective cannot tell them apart,
+    // and asserting only that would pass against an implementation that ignored `active`
+    // entirely. What changes is where the power goes: hv31 carries the whole 300 MW to hv3
+    // instead of sharing it with hv23, 197.2 -> 46.7 on hv12.
+    val flows = removed("line_p0")
     val whole = Lopf.solve(network("standard-types"), params)
     // Only the lines the deleted-line golden has -- it does not carry an `hv23`
     // column at all, because there is no such line in that network. The inactive
@@ -1187,10 +1196,26 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     // previous dispatch that does not exist. 60 + 0.2 * 300.
     assertEqualsDouble(frameValue(p, 0, "base"), 120.0, 1e-6, "p_init does not bind at the first snapshot")
 
-    // `cold`: `up_time_before = 0` makes PyPSA read `p_init` as 0 *and* scale the
-    // up row by a prior status of zero, which pins the first snapshot to zero.
-    // This is the one attribute here that changes whether a row exists at all.
-    assertEqualsDouble(frameValue(p, 0, "cold"), 0.0, 1e-6, "up_time_before does not hold the unit down")
+    // `cold`: `up_time_before = 0` and it does NOT hold the unit down, which is the reverse
+    // of what this asserted under PyPSA 1.3.0.
+    //
+    // 1.3.0 read `initially_up = up_time_before > 0`, forced `p_init` to 0 where that was
+    // false, and scaled the up row by a prior status of zero -- pinning the first snapshot to
+    // zero, and this was the one attribute in the fixture that changed whether a row existed
+    // at all. 1.4.0's `_status_history` ends `history.where(committable, 1.0)`, so a
+    // non-committable unit is on before the horizon whatever the attribute says, and
+    // `_dispatch_before` returns `p_init` unchanged -- NaN here, which masks the row out.
+    //
+    // So `cold` starts wherever it likes, at its full 120 MW, and the fixture's objective
+    // moved from 50,240 to 48,640. Asserted as the free start rather than deleted, because
+    // the assertion that matters is that the attribute has no effect: an implementation still
+    // reading it the 1.3.0 way lands on 0.0 here.
+    assertEqualsDouble(frameValue(p, 0, "cold"), 120.0, 1e-6,
+      "up_time_before is holding the unit down again, which 1.4.0 stopped doing")
+    // And the unit is still ramp-limited from there, so the row that remains is the ordinary
+    // snapshot-to-snapshot one: 120 -> 60 at t = 2 is exactly -0.5 x 120.
+    assertEqualsDouble(frameValue(p, 2, "cold"), 60.0, 1e-6,
+      "cold's ordinary ramp-down row does not bind")
 
     // `flex`: the time-varying limit. Its down limit of 0.5 * 150 is hit exactly
     // between the first two snapshots, and a `static.contains` reader would see
@@ -1591,18 +1616,26 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(result.status, SolveStatus.Optimal, s"${result.solution}")
 
     val target = expected("objective").num
-    assertEqualsDouble(target, 20175.0, 1e-6, "the golden is not the fixture this test was written for")
+    assertEqualsDouble(target, 16275.0, 1e-6, "the golden is not the fixture this test was written for")
     assertEqualsDouble(result.objective, target, 1e-6 * target, s"against PyPSA's $target")
 
-    // Zero, and PyPSA's own zero rather than this port's choice: `define_objective`
-    // computes the sunk-capital term in both branches and appends it only in the
-    // single-period one. The same network without the flag reports 3,000, so an
-    // implementation that subtracted it would land on 17,175 -- a plausible number
-    // against a plausible-looking total system cost.
-    assertEqualsDouble(expected("objective_constant").num, 0.0, 0.0,
-      "PyPSA's multi-period objective constant is not zero any more")
-    assertEqualsDouble(result.totalSystemCost, target, 1e-6 * target,
-      "the sunk capital is being subtracted on a multi-period network")
+    // 3,900, and it was 0.0 until the pin moved to PyPSA 1.4.0.
+    //
+    // 1.3.0 computed the sunk-capital term in both branches of `define_objective` and
+    // appended it only in the single-period one, so a multi-period network reported a
+    // constant of zero and an objective that included the sunk capital. This port
+    // reproduced that rather than correcting it, and the comment here said so. 1.4.0
+    // appends it in both: the objective drops by exactly 3,900 to 16,275 and the constant
+    // carries it, while `total_system_cost` is unchanged at 20,175.
+    //
+    // That is the number the two readings are separated by, and it is why the guard above
+    // is a pinned objective rather than only a comparison -- the total cost agrees under
+    // either reading, so a port that got the split wrong would pass every assertion keyed
+    // to the total.
+    assertEqualsDouble(expected("objective_constant").num, 3900.0, 1e-6,
+      "PyPSA's multi-period objective constant has moved again")
+    assertEqualsDouble(result.totalSystemCost, 20175.0, 1e-6 * 20175.0,
+      "the total system cost is the same under both readings and must not move")
 
     val capacities = expected("nominal_opt")("Generator").obj
     capacities.foreach { (id, built) =>
@@ -1637,12 +1670,19 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
 
   test("each period's weight is charged once, for the periods the asset exists in") {
     assume(available, "goldens missing")
-    // Three ways to get the capital coefficient wrong, each measured against PyPSA
-    // rather than derived: the port's own arithmetic is what is under test.
+    // Three ways to get the capital coefficient wrong, each measured against PyPSA rather
+    // than derived: the port's own arithmetic is what is under test.
+    //
+    // The TOTAL system cost rather than the objective, and the pin bump to PyPSA 1.4.0 is
+    // why. 1.3.0 appended the sunk-capital term only in the single-period branch of
+    // `define_objective`, so a multi-period objective carried it and the constant was zero;
+    // 1.4.0 appends it in both. Every number below is unchanged under that split -- measured
+    // at 25,150, 10,475, 18,000 and 20,175 on both versions -- while the objective alone
+    // moved by the constant in each case. The invariant is the one worth asserting.
     def solved(file: String, edit: String => String): Double =
       val r = Lopf.solve(mutate("investment-periods-expansion", file, edit), params)
       assertEquals(r.status, SolveStatus.Optimal, s"${r.solution}")
-      r.objective
+      r.totalSystemCost
 
     // Undiscounting 2040 raises `wind`'s coefficient from 180 to 240 and `late`'s
     // from 30 to 60, and undiscounts 2040's operating cost with it. PyPSA: 25,150.

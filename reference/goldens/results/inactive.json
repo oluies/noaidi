@@ -285,24 +285,24 @@
    "values": [
     [
      15.0,
-     -17.765457316756244,
-     75.0,
-     10.043066102384552,
-     -7.851589521525349
+     15.0,
+     15.0,
+     15.0,
+     15.0
     ],
     [
      15.0,
-     -17.765457316756244,
-     75.0,
-     10.043066102384552,
-     -7.851589521525349
+     15.0,
+     15.0,
+     15.0,
+     15.0
     ],
     [
      15.0,
-     -17.765457316756244,
-     75.0,
-     10.043066102384552,
-     -7.851589521525349
+     15.0,
+     15.0,
+     15.0,
+     15.0
     ]
    ]
   },
@@ -319,16 +319,16 @@
    ],
    "values": [
     [
-     162.55653559155218,
-     272.4434644084478
+     435.0,
+     -0.0
     ],
     [
-     189.23431817990348,
-     180.76568182009652
+     370.0,
+     -0.0
     ],
     [
-     158.0828716855747,
-     356.9171283144253
+     515.0,
+     -0.0
     ]
    ]
   },
@@ -362,19 +362,19 @@
     [
      46.6743489016805,
      0.0,
-     -27.556535591552166,
+     -300.0,
      8.325651098319497
     ],
     [
      66.45379095512106,
      0.0,
-     -39.234318179903475,
+     -220.0,
      23.546209044878935
     ],
     [
      39.09700488749101,
      0.0,
-     -23.08287168557469,
+     -380.0,
      0.9029951125089895
     ]
    ]
@@ -409,8 +409,7 @@
     "tr2": 160.0
    }
   },
-  "not_a_target": "PyPSA's `cycle_matrix` keeps the inactive branch's loop while the Kirchhoff builder drops its flow term, so the row collapses to a voltage law for a loop that is not closed and pins hv31 to 27.6 MW on a 1700 MW branch. Deleting the line instead gives 19800 against this 68407.58. Its own linear flow excludes inactive branches from topology properly, so `lpf` and `optimize` here model different networks. Compare an implementation against `inactive-removed`; the `lpf` block on this fixture *is* a target.",
-  "objective": 68407.57647257818,
+  "objective": 19800.0,
   "objective_constant": 0.0,
   "status": "ok",
   "storage_p": {
@@ -504,7 +503,7 @@
     []
    ]
   },
-  "total_system_cost": 68407.57647257818,
+  "total_system_cost": 19800.0,
   "transformer_p0": {
    "columns": [
     "tr1",
@@ -1007,27 +1006,25 @@
   "installed_capex|name": {},
   "installed_capex|unit": {},
   "opex|bus": {
-   "Generator|hv1": 7648.10588,
-   "Generator|hv3": 60759.47059
+   "Generator|hv1": 19800.0
   },
   "opex|bus_carrier": {
-   "Generator|AC": 68407.57647
+   "Generator|AC": 19800.0
   },
   "opex|carrier": {
-   "Generator|-": 68407.57647
+   "Generator|-": 19800.0
   },
   "opex|country": {
    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
   },
   "opex|location": {
-   "Generator|": 68407.57647
+   "Generator|": 19800.0
   },
   "opex|name": {
-   "Generator|peak": 60759.47059,
-   "Generator|slack": 7648.10588
+   "Generator|slack": 19800.0
   },
   "opex|unit": {
-   "Generator|": 68407.57647
+   "Generator|": 19800.0
   },
   "optimal_capacity|bus": {
    "Generator|hv1": 900.0,
@@ -1071,22 +1068,21 @@
    "Transformer|": 320.0
   },
   "supply|bus": {
-   "Generator|hv1": 509.87373,
-   "Generator|hv3": 810.12627,
+   "Generator|hv1": 1320.0,
    "Line|hv2": 152.22514,
-   "Line|hv3": 89.87373,
+   "Line|hv3": 900.0,
    "Line|mv2": 32.77486,
    "Transformer|mv1": 267.77486,
    "Transformer|mv2": 152.22514
   },
   "supply|bus_carrier": {
    "Generator|AC": 1320.0,
-   "Line|AC": 274.87373,
+   "Line|AC": 1085.0,
    "Transformer|AC": 420.0
   },
   "supply|carrier": {
    "Generator|-": 1320.0,
-   "Line|AC": 274.87373,
+   "Line|AC": 1085.0,
    "Transformer|-": 420.0
   },
   "supply|country": {
@@ -1094,21 +1090,20 @@
   },
   "supply|location": {
    "Generator|": 1320.0,
-   "Line|": 274.87373,
+   "Line|": 1085.0,
    "Transformer|": 420.0
   },
   "supply|name": {
-   "Generator|peak": 810.12627,
-   "Generator|slack": 509.87373,
+   "Generator|slack": 1320.0,
    "Line|hv12": 152.22514,
-   "Line|hv31": 89.87373,
+   "Line|hv31": 900.0,
    "Line|mv12": 32.77486,
    "Transformer|tr1": 267.77486,
    "Transformer|tr2": 152.22514
   },
   "supply|unit": {
    "Generator|": 1320.0,
-   "Line|": 274.87373,
+   "Line|": 1085.0,
    "Transformer|": 420.0
   }
  }

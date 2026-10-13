@@ -389,8 +389,8 @@
     "wind": 60.0
    }
   },
-  "objective": 20175.0,
-  "objective_constant": 0.0,
+  "objective": 16275.0,
+  "objective_constant": 3900.0,
   "status": "ok",
   "storage_p": {
    "columns": [],

@@ -2,15 +2,12 @@
  "determinacy": {
   "nominal_opt": {
    "Generator": {
-    "determined": true,
-    "excess": -0.022
+    "determined": true
    },
    "StorageUnit": {
-    "determined": true,
-    "excess": -0.014
+    "determined": true
    }
   },
-  "objective": 1.1632801033556461e-07,
   "probe": {
    "presolve": "off",
    "run_crossover": "off",
@@ -18,32 +15,25 @@
   },
   "series": {
    "bus_marginal_price": {
-    "determined": true,
-    "excess": -0.0111
+    "determined": true
    },
    "generator_p": {
-    "determined": true,
-    "excess": -0.009999998353982263
+    "determined": true
    },
    "storage_p": {
-    "determined": true,
-    "excess": -0.009999999389216222
+    "determined": true
    },
    "storage_p_dispatch": {
-    "determined": true,
-    "excess": -0.009999999658576186
+    "determined": true
    },
    "storage_p_store": {
-    "determined": true,
-    "excess": -0.009999999369622705
+    "determined": true
    },
    "storage_spill": {
-    "determined": true,
-    "excess": -0.009999999871720653
+    "determined": true
    },
    "storage_state_of_charge": {
-    "determined": true,
-    "excess": -0.00999999748392062
+    "determined": true
    }
   },
   "statistics": {

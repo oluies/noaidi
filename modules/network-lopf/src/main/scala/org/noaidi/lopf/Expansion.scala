@@ -244,13 +244,23 @@ object Expansion:
     * `network-stats`' `overnight_cost` metric does, and it has to refuse exactly the networks
     * upstream refuses rather than at load time -- a network whose `capex` is perfectly
     * comparable must not fail to load because one other metric is undefined on it.
+    *
+    * '''Nothing in here throws''', which took a correction: the back-calculation reached
+    * [[horizon]], and that refuses rather than returning. See the comment at the division.
     */
   def overnightCost(network: Network, table: ComponentTable, id: String): Option[Double] =
-    // `stated` rather than `given`, which is a Scala 3 keyword.
+    // `isNaN`, not `!isFinite`, for both tests -- upstream's are `overnight.notna()` and
+    // `discount_rate.isna()`. The distinction is the same one the `lifetime` comment below
+    // makes and the first version of this applied to only one of the three: an infinity is a
+    // number, not a missing value. So an infinite `discount_rate` back-calculates here (the
+    // annuity goes to infinity and the cost to zero) where a finiteness test refused it, and
+    // an infinite `overnight_cost` is returned rather than falling through to `capital_cost`.
+    // Both are exotic and neither is reachable from a fixture; the point is to test what
+    // upstream tests.
     val stated =
       if table.static.contains("overnight_cost") then table.float("overnight_cost", id)
       else Double.NaN
-    if stated.isFinite then Some(stated)
+    if !stated.isNaN then Some(stated)
     else
       val capital = table.float("capital_cost", id)
       if !capital.isFinite || capital == 0.0 then Some(0.0)
@@ -260,8 +270,25 @@ object Expansion:
         // `lifetime` defaults to +inf, which is a number here rather than a missing value --
         // upstream tests `isna()`, and an infinity is not NaN. So the only thing that
         // actually goes missing in practice is the rate.
-        if !rate.isFinite || lifetime.isNaN then None
-        else Some(capital / (annuity(rate, lifetime) * horizon(network)))
+        if rate.isNaN || lifetime.isNaN then None
+        else
+          // The MEAN of the periods' horizons, which is upstream's
+          // `nyears_scalar = nyears.mean()` (`components.py:1269`) -- not `horizon`, which
+          // refuses when they disagree.
+          //
+          // That mattered more than it looks. `horizon` throws, and `Stats.of` calls this for
+          // every asset twice over, so a network with unequal period durations and any asset
+          // priced by `capital_cost` failed to LOAD -- no `capex`, no `supply`, nothing --
+          // with a `RuntimeException` rather than the `IllegalArgumentException` the metric
+          // refusal uses, and in flat contradiction of the paragraph above. The LOPF does not
+          // screen it off either: `rejectUnequalHorizons` only fires when an `overnight_cost`
+          // is set, and `capitalCost` never asks for a horizon on the plain `capital_cost`
+          // path, so such a network solved and used to load.
+          //
+          // Upstream does not refuse here, so neither does this. No golden has unequal
+          // horizons, so the mean is unexercised and says so.
+          val years = nyears(network)
+          Some(capital / (annuity(rate, lifetime) * (years.sum / years.length)))
 
   /** Cost per unit of capacity over the modelled horizon: PyPSA's `periodized_cost`.
     *

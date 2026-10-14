@@ -77,26 +77,8 @@
    "optimal_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
-   "overnight_cost|bus": {
-    "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
-   },
-   "overnight_cost|bus_carrier": {
-    "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
-   },
-   "overnight_cost|carrier": {
-    "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
-   },
    "overnight_cost|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
-   },
-   "overnight_cost|location": {
-    "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
-   },
-   "overnight_cost|name": {
-    "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
-   },
-   "overnight_cost|unit": {
-    "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
    },
    "supply|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -1056,25 +1038,32 @@
    "Line||2040": 184.0
   },
   "overnight_cost|bus": {
-   "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   "Line|A|2030": 183960000.0,
+   "Line|A|2040": 335438211.71382
   },
   "overnight_cost|bus_carrier": {
-   "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   "Line|AC|2030": 183960000.0,
+   "Line|AC|2040": 335438211.71382
   },
   "overnight_cost|carrier": {
-   "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   "Line|AC|2030": 183960000.0,
+   "Line|AC|2040": 335438211.71382
   },
   "overnight_cost|country": {
    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
   },
   "overnight_cost|location": {
-   "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   "Line||2030": 183960000.0,
+   "Line||2040": 335438211.71382
   },
   "overnight_cost|name": {
-   "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   "Line|early|2030": 183960000.0,
+   "Line|early|2040": 183960000.0,
+   "Line|late|2040": 151478211.71382
   },
   "overnight_cost|unit": {
-   "error": "ValueError: Cannot back-calculate overnight_cost for ['early', 'late']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   "Line||2030": 183960000.0,
+   "Line||2040": 335438211.71382
   },
   "supply|bus": {
    "Generator|A|2030": 84.0,

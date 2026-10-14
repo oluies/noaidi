@@ -223,6 +223,46 @@ object Expansion:
       )
     years.head
 
+  /** The overnight cost per unit of capacity, or `None` where PyPSA refuses to produce one.
+    *
+    * `Components.overnight_cost`, which is the inverse of [[capitalCost]] and runs in both
+    * directions:
+    *
+    * {{{
+    * overnight_cost given     ->  that column
+    * capital_cost != 0        ->  capital_cost / (annuity x nyears)   back-calculated
+    * neither                  ->  0
+    * }}}
+    *
+    * The middle case '''raises''' upstream when `discount_rate` or `lifetime` is missing --
+    * "both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set"
+    * -- and `discount_rate` defaults to NaN, so that is most networks. Every golden priced by
+    * `capital_cost` alone records an error for the metric rather than a frame:
+    * `ac-dc-meshed` names six generators, `store-bank` one store.
+    *
+    * `None` rather than a throw, because the caller decides. The LOPF never asks; only
+    * `network-stats`' `overnight_cost` metric does, and it has to refuse exactly the networks
+    * upstream refuses rather than at load time -- a network whose `capex` is perfectly
+    * comparable must not fail to load because one other metric is undefined on it.
+    */
+  def overnightCost(network: Network, table: ComponentTable, id: String): Option[Double] =
+    // `stated` rather than `given`, which is a Scala 3 keyword.
+    val stated =
+      if table.static.contains("overnight_cost") then table.float("overnight_cost", id)
+      else Double.NaN
+    if stated.isFinite then Some(stated)
+    else
+      val capital = table.float("capital_cost", id)
+      if !capital.isFinite || capital == 0.0 then Some(0.0)
+      else
+        val rate     = table.float("discount_rate", id)
+        val lifetime = table.float("lifetime", id)
+        // `lifetime` defaults to +inf, which is a number here rather than a missing value --
+        // upstream tests `isna()`, and an infinity is not NaN. So the only thing that
+        // actually goes missing in practice is the rate.
+        if !rate.isFinite || lifetime.isNaN then None
+        else Some(capital / (annuity(rate, lifetime) * horizon(network)))
+
   /** Cost per unit of capacity over the modelled horizon: PyPSA's `periodized_cost`.
     *
     * {{{

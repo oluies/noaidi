@@ -37,6 +37,9 @@
    "expanded_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "fom|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "installed_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
@@ -48,6 +51,27 @@
    },
    "optimal_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "overnight_cost|bus": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|bus_carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "overnight_cost|location": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|name": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|unit": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
    },
    "supply|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -965,6 +989,15 @@
   "expanded_capex|unit": {
    "Store|": 720.0
   },
+  "fom|bus": {},
+  "fom|bus_carrier": {},
+  "fom|carrier": {},
+  "fom|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "fom|location": {},
+  "fom|name": {},
+  "fom|unit": {},
   "installed_capacity|bus": {
    "Generator|b": 520.0,
    "Store|b": 350.0
@@ -1062,6 +1095,27 @@
   "optimal_capacity|unit": {
    "Generator|": 520.0,
    "Store|": 410.0
+  },
+  "overnight_cost|bus": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|bus_carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "overnight_cost|location": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|name": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|unit": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['grow']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
   },
   "supply|bus": {
    "Generator|b": 798.67271,

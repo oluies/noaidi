@@ -111,7 +111,29 @@
     "determined": true
    }
   },
-  "statistics": {}
+  "statistics": {
+   "overnight_cost|bus": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|bus_carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|country": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|location": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|name": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|unit": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   }
+  }
  },
  "lpf": {
   "bus_v_ang": {
@@ -1574,6 +1596,13 @@
    "Line|": 0.0,
    "Link|": 0.0
   },
+  "fom|bus": {},
+  "fom|bus_carrier": {},
+  "fom|carrier": {},
+  "fom|country": {},
+  "fom|location": {},
+  "fom|name": {},
+  "fom|unit": {},
   "installed_capacity|bus": {
    "Generator|Frankfurt": 2649.7589,
    "Generator|Manchester": 4090.80978,
@@ -1794,6 +1823,27 @@
    "Generator|": 8274.16854,
    "Line|": 5613.82931,
    "Link|": 4003.9011
+  },
+  "overnight_cost|bus": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|bus_carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|country": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|location": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|name": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|unit": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
   },
   "supply|bus": {
    "Generator|Frankfurt": 8604.50788,

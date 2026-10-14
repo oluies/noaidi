@@ -2426,6 +2426,8 @@ STATISTICS_METRICS = (
     "optimal_capacity",
     "installed_capacity",
     "expanded_capacity",
+    "overnight_cost",
+    "fom",
 )
 
 # Every grouping dimension `statistics` offers, in the order its own container lists them.

@@ -60,10 +60,15 @@ def diff(old, new) -> list:
 
 
 def edited(**sections) -> dict:
-    """`BASE` with one or more sections deep-replaced."""
+    """`BASE` with one or more sections deep-replaced, or added if `BASE` lacks them.
+
+    Added rather than required, because `determinacy` is not part of `BASE`: it is a block
+    about the generating environment rather than an answer, and the cases for it have to be
+    able to put one there.
+    """
     out = json.loads(json.dumps(BASE))
     for section, changes in sections.items():
-        out[section].update(changes)
+        out.setdefault(section, {}).update(changes)
     return out
 
 
@@ -194,6 +199,22 @@ CASES: list[tuple[str, dict, dict, int, str]] = [
     ("a network only on the new side is named",
      {"net": BASE}, {"net": BASE, "extra": BASE}, 1, "**extra** is new"),
     ("two empty directories are a usage error", {}, {}, 2, "no result files"),
+    # The case the 1.4.0 drift run needed. `determinacy` records which metric groups two
+    # solves of the same network disagree about, which is a property of the solver build and
+    # the platform -- the goldens are macOS/aarch64, the runner Linux/x86_64 -- so it differs
+    # with nothing upstream having moved. That run reported 114 such differences across four
+    # networks, every one of them inside this block, and failed the job.
+    ("a determinacy block that differs is not drift",
+     {"net": edited(determinacy={"series": {"line_p0": {"determined": True}}})},
+     {"net": edited(determinacy={"series": {"line_p0": {"determined": False}}})},
+     0, "every result is unchanged"),
+    # And skipping it must not switch the rest of the file off, which is the half a blanket
+    # exclusion would get wrong.
+    ("an answer beside a differing determinacy block still fails",
+     {"net": edited(determinacy={"series": {"line_p0": {"determined": True}}})},
+     {"net": edited(optimize={"objective": 17300.0},
+                    determinacy={"series": {"line_p0": {"determined": False}}})},
+     1, "Numeric"),
 ]
 
 

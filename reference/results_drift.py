@@ -111,6 +111,35 @@ NOT_REPRODUCIBLE = {
     },
 }
 
+# Top-level blocks that describe the GENERATING ENVIRONMENT rather than an answer.
+#
+# `determinacy` is the one. `generate_goldens.py` solves every network twice -- simplex, then
+# interior point with crossover and presolve off -- and records which metric groups the two
+# solves disagree about, so `StatsSuite` can skip comparing a metric over an optimal face.
+# Useful, and not an answer: whether a given group lands on a face is a property of the
+# solver build and the platform, not of PyPSA's model.
+#
+# Measured, and the measurement is why this exists. The first drift run after the 1.4.0 pin
+# reported 114 differences across `ac-dc-co2`, `ac-dc-txcost`, `storage-cyclic-co2` and
+# `storage-hvdc` -- exactly the networks the block marks degenerate, minus `scigrid-de` which
+# `NOT_REPRODUCIBLE` already covers -- and EVERY reported difference was inside this block.
+# Nothing in `optimize` or `statistics` had moved. The goldens were generated on
+# macOS/aarch64 with Python 3.14 and the runner is Linux/x86_64 with 3.13, and the two
+# disagree about which groups are a tie-break. Noise in the one tool whose job is to tell
+# noise from signal.
+#
+# That block had already shed two drift-prone fields for the same reason -- a per-series
+# `excess` margin and the objective gap between the two solves -- and this is the third and
+# last of it: the surviving content is the group MEMBERSHIP, which cannot be made
+# platform-independent because it is a statement about the solver.
+#
+# Nothing is left unguarded by skipping it. `StatsSuite` pins the block's content directly --
+# "the determinacy measurement finds the five networks it should", and the branch-only claim
+# for three of them -- and those cases read the committed goldens, so they hold on whatever
+# platform runs the suite. A verdict flipping is a test failure there, which is the right
+# place for it: it is not news about upstream.
+NOT_COMPARED = ("determinacy",)
+
 # Enough to see the shape of a drift without pasting a 852-bus frame into a job
 # summary. The count of what was withheld is always printed -- a silent truncation
 # reads as "that was all of it".
@@ -275,6 +304,12 @@ def compare_directories(old_dir: Path, new_dir: Path, rel_tol: float, abs_tol: f
     for name in sorted(old_names & new_names):
         old_body = load(old_dir / f"{name}.json")
         new_body = load(new_dir / f"{name}.json")
+        # Dropped from both sides before anything is compared, so a block that describes
+        # the generating environment cannot be reported as an upstream change. See
+        # `NOT_COMPARED`.
+        old_body = {k: v for k, v in old_body.items() if k not in NOT_COMPARED}
+        new_body = {k: v for k, v in new_body.items() if k not in NOT_COMPARED}
+
         policy = NOT_REPRODUCIBLE.get(name)
         if policy is None:
             drifts.extend(compare_value(name, old_body, new_body, rel_tol, abs_tol))

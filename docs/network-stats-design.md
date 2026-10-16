@@ -597,8 +597,24 @@ two solver outputs, so it moves with any change to either. Measured across the P
 the whole difference being `excess` values shifting by 7e-7 to 1.6e-2 relative. Noise in the
 one tool whose job is to tell noise from signal.
 
-So the series and capacity blocks carry the verdict alone, and the objective gap between the
-two solves went the same way. The per-**group** deviations in the `statistics` block stay,
+So the series and capacity blocks carry the verdict alone, the objective gap between the two
+solves went the same way, and in the end **`results_drift.py` stopped comparing the block at
+all** — three rounds of the same lesson, each one smaller than the last.
+
+The third round is the one with the sharpest evidence. The first drift run after the PyPSA
+1.4.0 pin reported 114 differences across `ac-dc-co2`, `ac-dc-txcost`, `storage-cyclic-co2`
+and `storage-hvdc` — exactly the networks the block marks degenerate, minus `scigrid-de`
+which the comparator already covered — and **every reported difference was inside this
+block**. Nothing in `optimize` or `statistics` had moved. The goldens are macOS/aarch64 on
+Python 3.14 and the runner is Linux/x86_64 on 3.13, and the two disagree about which groups
+are a tie-break.
+
+The surviving content is the group *membership*, and that cannot be made
+platform-independent, because it is a statement about the solver rather than about PyPSA's
+model. So it is excluded from drift by name, and nothing is left unguarded: `StatsSuite` pins
+the block's content directly, and those cases read the committed goldens, so they hold on
+whatever platform runs the suite. A verdict flipping is a test failure there, which is the
+right place for it — it is not news about upstream. The per-**group** deviations in the `statistics` block stay,
 because those are the ones that matter and the ones that hold still: 14 to 538, three orders
 above the tolerance.
 

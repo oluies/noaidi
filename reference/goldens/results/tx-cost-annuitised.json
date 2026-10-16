@@ -49,6 +49,9 @@
    "expanded_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "fom|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "installed_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
@@ -59,6 +62,9 @@
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
    "optimal_capacity|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "overnight_cost|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
    "supply|country": {
@@ -834,6 +840,15 @@
   "expanded_capex|unit": {
    "Line|": 500.0
   },
+  "fom|bus": {},
+  "fom|bus_carrier": {},
+  "fom|carrier": {},
+  "fom|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "fom|location": {},
+  "fom|name": {},
+  "fom|unit": {},
   "installed_capacity|bus": {
    "Generator|A": 400.0,
    "Generator|B": 400.0
@@ -917,6 +932,27 @@
   "optimal_capacity|unit": {
    "Generator|": 800.0,
    "Line|": 6.88242
+  },
+  "overnight_cost|bus": {
+   "Line|A": 13764.83115
+  },
+  "overnight_cost|bus_carrier": {
+   "Line|AC": 13764.83115
+  },
+  "overnight_cost|carrier": {
+   "Line|AC": 13764.83115
+  },
+  "overnight_cost|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "overnight_cost|location": {
+   "Line|": 13764.83115
+  },
+  "overnight_cost|name": {
+   "Line|tie": 13764.83115
+  },
+  "overnight_cost|unit": {
+   "Line|": 13764.83115
   },
   "supply|bus": {
    "Generator|A": 30144.98022,

@@ -64,6 +64,8 @@ private[stats] object StatsSchema:
       |  extendable    BOOLEAN,
       |  marginal_cost DOUBLE,
       |  capital_cost  DOUBLE,
+      |  fom_cost      DOUBLE,
+      |  overnight_cost DOUBLE,
       |  PRIMARY KEY (component, entity)
       |)""".stripMargin,
 

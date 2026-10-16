@@ -126,6 +126,9 @@
    "expanded_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "fom|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "installed_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
@@ -137,6 +140,27 @@
    },
    "optimal_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "overnight_cost|bus": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|bus_carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|country": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|location": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|name": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|unit": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
    },
    "supply|bus": {
     "undetermined": {
@@ -4039,6 +4063,15 @@
    "Link|": 10.600570000000005,
    "StorageUnit|": 573506.75226
   },
+  "fom|bus": {},
+  "fom|bus_carrier": {},
+  "fom|carrier": {},
+  "fom|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "fom|location": {},
+  "fom|name": {},
+  "fom|unit": {},
   "installed_capacity|bus": {
    "Generator|0": 450.0,
    "Generator|1": 100.0,
@@ -4268,6 +4301,27 @@
    "Line|": 4532.70299,
    "Link|": 1559.24329,
    "StorageUnit|": 3343.81245
+  },
+  "overnight_cost|bus": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|bus_carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|country": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|location": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|name": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|unit": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
   },
   "supply|bus": {
    "Generator|0": 2224.05133,

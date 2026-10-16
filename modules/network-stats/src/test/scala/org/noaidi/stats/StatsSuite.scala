@@ -91,6 +91,8 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     "optimal_capacity"   -> ((s, g) => s.optimalCapacity(g)),
     "installed_capacity" -> ((s, g) => s.installedCapacity(g)),
     "expanded_capacity"  -> ((s, g) => s.expandedCapacity(g)),
+    "overnight_cost"     -> ((s, g) => s.overnightCost(g)),
+    "fom"                -> ((s, g) => s.fom(g)),
   )
 
   /** The floor below which a group is a solver's zero rather than a group.

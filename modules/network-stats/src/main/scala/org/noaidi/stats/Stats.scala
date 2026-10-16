@@ -59,6 +59,8 @@ final class Stats private (
     private val conn: Connection,
     private val multiPeriod: Boolean,
     private val hasCountry: Boolean,
+    /** Assets PyPSA cannot give an overnight cost for; see [[overnightCost]]. */
+    private val unpriceable: Seq[String],
 ) extends AutoCloseable:
 
   /** One row per result row, columns by name. For anything the named metrics do not cover.
@@ -361,6 +363,68 @@ final class Stats private (
       key -> (if math.abs(chosen) > math.abs(had) then chosen - had else 0.0)
     }
 
+  /** Fixed O&M over the modelled horizon, by `groupBy`.
+    *
+    * `p_nom_opt x fom_cost`, unweighted. `fom_cost` is already a cost for the horizon rather
+    * than an annual one -- that is why [[Expansion.periodizedCost]] adds it to the annuity
+    * instead of annuitising it -- so there is nothing for a period weighting to do, and
+    * upstream's `fom` has no `has_investment_periods` branch either.
+    *
+    * Empty on every golden but `annuitised-capital`, whose `new` generator is the only asset
+    * anywhere that sets `fom_cost`: 100 MW at 7.5 is 750. The others are zero and `drop_zero`
+    * removes them, so this is a metric with one live comparison and `StatsSuite` skips the
+    * rest as trivial rather than counting them as agreement.
+    *
+    * ==The unweighted claim is not under test, and that is measured==
+    *
+    * `annuitised-capital` is a flat index, so its period weighting is 1.0 and passing one
+    * through here changes nothing: `weighted = true` is an '''equivalent mutant''', checked
+    * rather than assumed. The claim rests on reading `fom` upstream, which has no
+    * `has_investment_periods` branch where `capex` does.
+    *
+    * Closing it needs `fom_cost` on a multi-period golden, and every candidate carries pinned
+    * numbers that would move with it -- `tx-cost-periods` is the natural one, an extendable
+    * `Line` over two periods. Named here rather than counted as coverage, which is the same
+    * hole `nyears` had until `annuitised-capital`'s horizon stopped being a whole year.
+    *
+    * Note the metric and the objective disagree on purpose: `Expansion.periodizedCost` adds
+    * `fom_cost` to the annuity and `Lopf` then multiplies the lot by `costWeight`, so the
+    * objective '''does''' weight it. Upstream's `periodized_cost` does the same. It is this
+    * statistic alone that reports it flat.
+    */
+  def fom(groupBy: String = "carrier"): Map[String, Double] =
+    capital(groupBy, "e.nominal * COALESCE(e.fom_cost, 0)", weighted = false)
+
+  /** Overnight investment cost of the chosen capacity, by `groupBy`.
+    *
+    * `p_nom_opt x overnight_cost`, unweighted, where `overnight_cost` is
+    * [[Expansion.overnightCost]] -- the column where it is set and
+    * `capital_cost / (annuity x nyears)` where it is not.
+    *
+    * ==It refuses the networks upstream refuses==
+    *
+    * The back-calculation needs `discount_rate` and `lifetime`, and
+    * `Components.overnight_cost` raises without them: "both 'discount_rate' and 'lifetime'
+    * must be provided when 'overnight_cost' is not set". `discount_rate` defaults to NaN, so
+    * that is every network priced by `capital_cost` alone -- `ac-dc-meshed` names six
+    * generators and `store-bank` one store, and `generate_goldens.py` records an error in
+    * place of a frame for both.
+    *
+    * So this refuses them too, by name, rather than returning a partial sum over the assets
+    * it can price. A number that is short by whatever the unpriceable assets cost is the
+    * failure this module is arranged against, and the group set would not show it: the
+    * missing assets simply would not appear.
+    */
+  def overnightCost(groupBy: String = "carrier"): Map[String, Double] =
+    if unpriceable.nonEmpty then
+      throw new IllegalArgumentException(
+        s"${unpriceable.length} asset(s) have neither an overnight_cost nor the " +
+          s"discount_rate and lifetime to back-calculate one from capital_cost: " +
+          s"${unpriceable.take(6).mkString(", ")}${if unpriceable.length > 6 then ", ..." else ""}. " +
+          "PyPSA raises here rather than pricing the rest."
+      )
+    else capital(groupBy, "e.nominal * COALESCE(e.overnight_cost, 0)", weighted = false)
+
   /** The shared body of the four metrics that are a single sum over `capital_share`.
     *
     * `cost` is an expression over `entity`, interpolated -- which is safe only because the
@@ -456,7 +520,18 @@ object Stats:
       // one whose countries are all empty -- which is the distinction PyPSA's own grouper
       // makes by raising.
       val n = result.network
-      new Stats(conn, n.isMultiPeriod, n.table("Bus").exists(_.static.contains("country")))
+      // The third is a list rather than a flag because the refusal names them, and because
+      // `generate_goldens.py` records upstream's own message naming them too -- six
+      // generators on `ac-dc-meshed`, one store on `store-bank`.
+      val unpriceable = Expansion.nominalAttribute.keys.toSeq.sorted.flatMap { component =>
+        n.table(component).toSeq.flatMap { table =>
+          table.ids
+            .filter(id => Expansion.overnightCost(n, table, id).isEmpty)
+            .map(id => s"$component '$id'")
+        }
+      }
+      new Stats(conn, n.isMultiPeriod,
+                n.table("Bus").exists(_.static.contains("country")), unpriceable)
     catch
       case e: Throwable =>
         conn.close()
@@ -616,7 +691,7 @@ object Stats:
       // `bus0` for a branch, which is PyPSA's own placement and the asymmetry
       // `TechCapacityLimit` reproduces: a branch counts at the end it leaves.
       val busAttr = if branch then "bus0" else "bus"
-      insert("entity", 10)(table.ids.map { id =>
+      insert("entity", 12)(table.ids.map { id =>
         Seq(
           component,
           id,
@@ -635,6 +710,14 @@ object Stats:
           // that PyPSA ignores.
           if declares(table, "capital_cost") || declares(table, "overnight_cost") then
             Expansion.capitalCost(n, table, id)
+          else null,
+          if declares(table, "fom_cost") then table.float("fom_cost", id) else null,
+          // NULL where upstream refuses to produce one. `Stats.overnightCost` refuses the
+          // same networks by name; the row still loads, because a network whose `capex` is
+          // perfectly comparable must not fail to load because one other metric is undefined
+          // on it.
+          if Expansion.nominalAttribute.contains(component) then
+            Expansion.overnightCost(n, table, id).map(Double.box).orNull
           else null,
         )
       })

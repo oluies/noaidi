@@ -474,9 +474,21 @@ has an implementation.
 
 ### What is still not covered
 
-Eleven metrics: `overnight_cost`, `fom`, `system_cost`, `withdrawal`, `transmission`,
-`energy_balance`, `curtailment`, `capacity_factor`, `revenue`, `market_value`, `prices`.
-`overnight_cost` is refused by the LOPF today, so it is a decision rather than a query.
+Nine metrics: `system_cost`, `withdrawal`, `transmission`, `energy_balance`,
+`curtailment`, `capacity_factor`, `revenue`, `market_value`, `prices`.
+
+`overnight_cost` and `fom` are done, and `overnight_cost` is the first metric here that
+**refuses a network**. It is the inverse of `capex`: the column where it is set, and
+`capital_cost / (annuity x nyears)` where it is not — and that back-calculation raises
+upstream without `discount_rate` and `lifetime`, which `discount_rate` defaults to NaN.
+Every golden priced by `capital_cost` alone records an error for the metric rather than a
+frame, `ac-dc-meshed` naming six generators and `store-bank` one store, so the module refuses
+the same networks rather than summing over the assets it can price.
+
+`fom` carries an unclosed hole, stated rather than counted: the only golden with a non-zero
+`fom_cost` is flat-index, so the claim that the metric is unweighted is an equivalent
+mutant — measured, not assumed. Closing it needs `fom_cost` on a multi-period golden, and
+`tx-cost-periods` is the candidate.
 
 ## The capacity metrics, where the two "expanded" metrics disagree
 

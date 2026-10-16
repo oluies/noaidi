@@ -28,6 +28,9 @@
    "expanded_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "fom|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "installed_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
@@ -39,6 +42,27 @@
    },
    "optimal_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "overnight_cost|bus": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|bus_carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|carrier": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|country": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|location": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|name": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "overnight_cost|unit": {
+    "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
    },
    "supply|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -983,6 +1007,15 @@
    "Generator||2040": 2500.0,
    "Generator||2050": 4250.0
   },
+  "fom|bus": {},
+  "fom|bus_carrier": {},
+  "fom|carrier": {},
+  "fom|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "fom|location": {},
+  "fom|name": {},
+  "fom|unit": {},
   "installed_capacity|bus": {
    "Generator|b|2030": 700.0,
    "Generator|b|2040": 700.0,
@@ -1099,6 +1132,27 @@
    "Generator||2030": 800.0,
    "Generator||2040": 950.0,
    "Generator||2050": 1125.0
+  },
+  "overnight_cost|bus": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|bus_carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|carrier": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|country": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|location": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|name": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+  },
+  "overnight_cost|unit": {
+   "error": "ValueError: Cannot back-calculate overnight_cost for ['w2030', 'w2040', 'w2050']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
   },
   "supply|bus": {
    "Generator|b|2030": 600.0,

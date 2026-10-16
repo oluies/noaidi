@@ -11946,6 +11946,7 @@
       "s_nom_extendable",
       "s_nom_max",
       "capital_cost",
+      "discount_rate",
       "build_year",
       "lifetime",
       "length",

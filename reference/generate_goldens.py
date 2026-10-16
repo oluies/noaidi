@@ -1756,11 +1756,22 @@ def tx_cost_periods():
     n.add("Carrier", "AC")
     n.buses["carrier"] = "AC"
     # Radial, so no cycle and no Kirchhoff row couples the two corridors.
+    # `discount_rate` on both lines, and it changes no coefficient here: `periodized_cost`
+    # reads it only when `overnight_cost` is set, and neither line sets one. What it does is
+    # let `statistics.overnight_cost` BACK-CALCULATE instead of raising --
+    # `capital_cost / (annuity x nyears)` -- which is the one arm of that metric no other
+    # golden exercises. Every network priced by `capital_cost` alone records the refusal
+    # instead, because `discount_rate` defaults to NaN, so without this the division itself
+    # was untested: inverting it or dropping the horizon factor passed the whole suite.
+    #
+    # `early` keeps the default `lifetime` of +inf, so its annuity is the rate and the
+    # perpetuity branch is in the back-calculation too; `late` already carries 30.
     n.add("Line", "early", bus0="A", bus1="B", x=0.1, r=0.01, s_nom=0.0,
-          s_nom_extendable=True, s_nom_max=200.0, capital_cost=10.0, length=1.0, carrier="AC")
+          s_nom_extendable=True, s_nom_max=200.0, capital_cost=10.0, length=1.0, carrier="AC",
+          discount_rate=0.04)
     n.add("Line", "late", bus0="A", bus1="C", x=0.1, r=0.01, s_nom=0.0,
           s_nom_extendable=True, s_nom_max=200.0, capital_cost=10.0, length=1.0,
-          carrier="AC", build_year=2040, lifetime=30)
+          carrier="AC", build_year=2040, lifetime=30, discount_rate=0.04)
 
     n.add("Generator", "cheap", bus="A", p_nom=400.0, marginal_cost=5.0)
     # Different prices at the two ends, so the two corridors are worth different amounts and
@@ -2426,6 +2437,8 @@ STATISTICS_METRICS = (
     "optimal_capacity",
     "installed_capacity",
     "expanded_capacity",
+    "overnight_cost",
+    "fom",
 )
 
 # Every grouping dimension `statistics` offers, in the order its own container lists them.

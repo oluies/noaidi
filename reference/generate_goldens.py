@@ -2325,8 +2325,7 @@ def determinacy(build, multi_invest: bool) -> dict:
                 b = float(right.get(key, 0.0))
                 allowed = DETERMINACY_ABS + DETERMINACY_REL * max(abs(a), abs(b))
                 if abs(a - b) > allowed:
-                    label = "|".join(str(part) for part in key) if isinstance(key, tuple) else str(key)
-                    moved[label] = jsonable(abs(a - b))
+                    moved[key_label(key)] = jsonable(abs(a - b))
             if moved:
                 stats[f"{metric}|{groupby}"] = {"undetermined": dict(sorted(moved.items()))}
     out["statistics"] = stats
@@ -2423,11 +2422,17 @@ NETWORKS = {
 
 # The statistics metrics recorded per network.
 #
-# Two, not nineteen, and that is the skeleton's scope rather than a judgement about the rest:
-# `supply` and `opex` weight DIFFERENTLY -- `supply` delegates to `energy_balance` and uses
-# `snapshot_weightings.generators`, `opex` uses `snapshot_weightings.objective` times the
-# period's `objective` -- so a port that confused the two columns passes one and fails the
-# other. Recording a metric nothing compares against would be a golden with no reader.
+# All nineteen, in `statistics`' own order, and the reference deliberately runs AHEAD of the
+# port: `StatsSuite` implements thirteen of them and names the rest in a `pending` set, with a
+# case asserting that set is exactly the difference in both directions. The alternative --
+# recording only what is implemented -- means regenerating every golden to add a metric, and
+# it hides what the next batch costs until someone pays it.
+#
+# This started at two, `supply` and `opex`, on the argument that those two weight DIFFERENTLY
+# -- `supply` delegates to `energy_balance` and reads `snapshot_weightings.generators`, `opex`
+# reads `snapshot_weightings.objective` times the period's `objective` -- so a port that
+# confused the two columns passes one and fails the other. That is still the sharpest pair
+# here; it was the claim that a golden with no reader is worthless that did not survive.
 STATISTICS_METRICS = (
     "supply",
     "opex",
@@ -2439,6 +2444,15 @@ STATISTICS_METRICS = (
     "expanded_capacity",
     "overnight_cost",
     "fom",
+    "system_cost",
+    "capacity_factor",
+    "curtailment",
+    "transmission",
+    "energy_balance",
+    "withdrawal",
+    "revenue",
+    "market_value",
+    "prices",
 )
 
 # Every grouping dimension `statistics` offers, in the order its own container lists them.
@@ -2480,6 +2494,25 @@ MULTI_INVEST = frozenset({
     "operational-limit-retired",
     "tx-cost-periods",
 })
+
+
+def key_label(key) -> str:
+    """The `|`-joined key a statistics frame's index entry becomes.
+
+    A tuple joins; a plain string does NOT, and that distinction is the whole
+    reason this is a function. Every metric but `prices` is keyed by
+    `(component, group)` and so hands over a tuple, while `prices` is keyed by
+    BUS and hands over a string -- which `"|".join` happily iterates character by
+    character, recording `Bremen` as `B|r|e|m|e|n`. Written twice and guarded
+    once, so the two call sites now share it.
+
+    Named `key_label` rather than `label` because `capture_network` binds a local
+    `label` in a `for` loop over sub-networks, and a module-level `label` is
+    shadowed there: the first version recorded
+    `TypeError: 'str' object is not callable` for every `prices` grouping on
+    every network.
+    """
+    return "|".join(str(part) for part in key) if isinstance(key, tuple) else str(key)
 
 
 def jsonable(value):
@@ -2947,11 +2980,16 @@ def capture_network(name: str, build) -> dict:
                     # and it read exactly like a PyPSA limitation -- the generator records
                     # errors rather than swallowing them, which is what made it look upstream
                     # until the same call was run by hand and worked.
+                    #
+                    # `key_label()` and not `"|".join(key)`, which is the same mistake one level
+                    # down: `prices` is keyed by BUS rather than by `(component, group)`, so
+                    # its index holds plain strings and joining one iterates CHARACTERS. Every
+                    # golden recorded `prices|name` for `Bremen` as `B|r|e|m|e|n`. The
+                    # determinacy probe beside this already had the guard; this did not.
                     if isinstance(frame, pd.DataFrame):
                         frame = frame.stack(future_stack=True).dropna()
                     results["statistics"][f"{metric}|{groupby}"] = {
-                        "|".join(str(part) for part in key): jsonable(value)
-                        for key, value in frame.items()
+                        key_label(key): jsonable(value) for key, value in frame.items()
                     }
                 except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
                     results["statistics"][f"{metric}|{groupby}"] = {

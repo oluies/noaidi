@@ -117,8 +117,80 @@
    }
   },
   "statistics": {
+   "capacity_factor|bus": {
+    "undetermined": {
+     "Line|0": 0.05171841486108497,
+     "Line|2": 0.05167959999999994,
+     "Line|3": 0.026149307081896223,
+     "Link|0": 0.011103607401145577,
+     "Link|1": 0.03029386666666667
+    }
+   },
+   "capacity_factor|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "capacity_factor|name": {
+    "undetermined": {
+     "Generator|Gas 2": 0.2,
+     "Line|0": 0.05171841486108497,
+     "Line|2": 0.05167959999999994,
+     "Line|3": 0.026149307081896223,
+     "Link|TL 0": 0.011103607401145577,
+     "Link|TL 1": 0.03029386666666667
+    }
+   },
    "capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "curtailment|bus": {
+    "undetermined": {
+     "Link|0": 502.7729599999948,
+     "Link|1": 503.14022000000114,
+     "StorageUnit|1": 1.6368999999999687,
+     "StorageUnit|3": 0.11977000000001681,
+     "StorageUnit|4": 1.0411599999999908
+    }
+   },
+   "curtailment|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "curtailment|name": {
+    "undetermined": {
+     "Link|TL 0": 502.7729599999948,
+     "Link|TL 1": 503.14022000000114,
+     "StorageUnit|Storage 1": 1.6368999999999687,
+     "StorageUnit|Storage 3": 0.11977000000001681,
+     "StorageUnit|Storage 4": 1.0411599999999908
+    }
+   },
+   "energy_balance|bus": {
+    "undetermined": {
+     "Line|0": 503.1406200000001,
+     "Line|1": 504.7767899999999,
+     "Line|3": 503.2603799999997,
+     "Line|4": 504.18135000000257,
+     "Link|0": 503.14060000000245,
+     "Link|1": 503.1402199999993,
+     "Link|3": 503.14060000000245,
+     "Link|4": 503.1402199999993,
+     "StorageUnit|1": 1.6369000000000042,
+     "StorageUnit|2": 1.6364800000001196,
+     "StorageUnit|3": 0.11977999999999867,
+     "StorageUnit|4": 1.0411300000000008,
+     "StorageUnit|5": 0.9208899999994173
+    }
+   },
+   "energy_balance|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "energy_balance|name": {
+    "undetermined": {
+     "StorageUnit|Storage 1": 1.6369000000000042,
+     "StorageUnit|Storage 2": 1.6364800000001196,
+     "StorageUnit|Storage 3": 0.11977999999999867,
+     "StorageUnit|Storage 4": 1.0411300000000008,
+     "StorageUnit|Storage 5": 0.9208899999994173
+    }
    },
    "expanded_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -134,6 +206,57 @@
    },
    "installed_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "market_value|bus": {
+    "undetermined": {
+     "Line|0": 2.697266332922993,
+     "Line|2": 35.11728778212182,
+     "Line|3": 29.096147177395153,
+     "Line|4": 1.3478248255737952,
+     "Line|5": 0.6216353199022819,
+     "Link|0": 0.34280536721641397,
+     "Link|1": 1.7915964566217326,
+     "StorageUnit|1": 0.361314233122755,
+     "StorageUnit|3": 0.025016538901736496,
+     "StorageUnit|4": 0.8112955917691487
+    }
+   },
+   "market_value|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 0.02472045952735158,
+     "Link|AC": 0.12866441222648461
+    }
+   },
+   "market_value|carrier": {
+    "undetermined": {
+     "Line|AC": 0.02472045952735158,
+     "Link|AC": 0.12866441222648461
+    }
+   },
+   "market_value|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "market_value|location": {
+    "undetermined": {
+     "Line|": 0.02472045952735158,
+     "Link|": 0.12866441222648461
+    }
+   },
+   "market_value|name": {
+    "undetermined": {
+     "Line|0": 5.725618509596288,
+     "Line|2": 5.7083073293254785,
+     "Link|TL 1": 3.1936637059314563,
+     "StorageUnit|Storage 1": 0.361314233122755,
+     "StorageUnit|Storage 3": 0.025016538901736496,
+     "StorageUnit|Storage 4": 0.8112955917691487
+    }
+   },
+   "market_value|unit": {
+    "undetermined": {
+     "Line|": 0.02472045952735158,
+     "Link|": 0.12866441222648461
+    }
    },
    "opex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -161,6 +284,40 @@
    },
    "overnight_cost|unit": {
     "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "prices|bus": {
+    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+   },
+   "prices|country": {
+    "error": "ValueError: Grouping prices by 'country' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+   },
+   "prices|name": {
+    "undetermined": {
+     "0": 0.2982799999999912,
+     "1": 0.7702500000000043,
+     "3": 0.03410999999999831,
+     "4": 0.17180000000000462
+    }
+   },
+   "revenue|bus": {
+    "undetermined": {
+     "Line|0": 48832.10051000002,
+     "Line|1": 48832.00413999986,
+     "Line|3": 48832.0998999998,
+     "Line|4": 48832.106000000145,
+     "Link|0": 48832.10024999967,
+     "Link|1": 48832.104700000025,
+     "Link|3": 48832.1001799996,
+     "Link|4": 48832.10534999997
+    }
+   },
+   "revenue|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "revenue|name": {
+    "undetermined": {
+     "Generator|Gas 2": 0.09395
+    }
    },
    "supply|bus": {
     "undetermined": {
@@ -206,6 +363,114 @@
     }
    },
    "supply|unit": {
+    "undetermined": {
+     "Line|": 274.2766499999998,
+     "Link|": 175.96695999999793
+    }
+   },
+   "system_cost|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "transmission|bus": {
+    "undetermined": {
+     "Line|0": 131.04734000000008,
+     "Line|1": 373.7294499999989,
+     "Line|2": 372.09328000000005,
+     "Line|3": 410.0954300000003,
+     "Line|4": 94.08590000000186,
+     "Line|5": 93.16495000000214,
+     "Link|0": 503.14060000000245,
+     "Link|1": 503.1402199999993
+    }
+   },
+   "transmission|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 837.6199699999997
+    }
+   },
+   "transmission|carrier": {
+    "undetermined": {
+     "Line|AC": 837.6199699999997
+    }
+   },
+   "transmission|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "transmission|location": {
+    "undetermined": {
+     "Line|": 837.6199699999997
+    }
+   },
+   "transmission|name": {
+    "undetermined": {
+     "Line|0": 131.04734000000008,
+     "Line|1": 373.7294499999989,
+     "Line|2": 372.09328000000005,
+     "Line|3": 410.0954300000003,
+     "Line|4": 94.08590000000186,
+     "Line|5": 93.16495000000214,
+     "Link|TL 0": 503.14060000000245,
+     "Link|TL 1": 503.1402199999993
+    }
+   },
+   "transmission|unit": {
+    "undetermined": {
+     "Line|": 837.6199699999997
+    }
+   },
+   "withdrawal|bus": {
+    "undetermined": {
+     "Line|0": 503.1406200000001,
+     "Line|1": 373.74315000000024,
+     "Line|3": 406.41745999999995,
+     "Line|4": 3.6779699999988225,
+     "Link|1": 87.98329,
+     "Link|3": 503.14060000000245,
+     "Link|4": 415.1569299999992,
+     "StorageUnit|1": 1.6368400000000065,
+     "StorageUnit|2": 1.636449999999968,
+     "StorageUnit|3": 0.11950000000000216,
+     "StorageUnit|4": 1.041369999999997
+    }
+   },
+   "withdrawal|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 274.2766499999998,
+     "Link|AC": 175.96695999999793
+    }
+   },
+   "withdrawal|carrier": {
+    "undetermined": {
+     "Line|AC": 274.2766499999998,
+     "Link|AC": 175.96695999999793
+    }
+   },
+   "withdrawal|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "withdrawal|location": {
+    "undetermined": {
+     "Line|": 274.2766499999998,
+     "Link|": 175.96695999999793
+    }
+   },
+   "withdrawal|name": {
+    "undetermined": {
+     "Line|0": 131.04734000000008,
+     "Line|1": 373.75683000000026,
+     "Line|2": 372.09328000000005,
+     "Line|3": 402.73948999999993,
+     "Line|4": 94.08590000000186,
+     "Line|5": 93.16495000000214,
+     "Link|TL 0": 503.14060000000245,
+     "Link|TL 1": 327.17363999999907,
+     "StorageUnit|Storage 1": 1.6368400000000065,
+     "StorageUnit|Storage 2": 1.636449999999968,
+     "StorageUnit|Storage 3": 0.11950000000000216,
+     "StorageUnit|Storage 4": 1.041369999999997
+    }
+   },
+   "withdrawal|unit": {
     "undetermined": {
      "Line|": 274.2766499999998,
      "Link|": 175.96695999999793
@@ -3841,6 +4106,128 @@
   }
  },
  "statistics": {
+  "capacity_factor|bus": {
+   "Generator|0": 0.1372871111111111,
+   "Generator|1": 0.4213340605393414,
+   "Generator|2": 0.3131948666666667,
+   "Generator|3": 0.42255000000000004,
+   "Generator|4": 0.47406309999999996,
+   "Generator|5": 0.5946578605487319,
+   "Line|0": 0.898067902357917,
+   "Line|1": 0.34620627253400715,
+   "Line|2": 0.8997663,
+   "Line|3": 0.5567943900233141,
+   "Line|4": 0.6703056718993692,
+   "Line|5": 0.6609053342070945,
+   "Link|0": 0.5417745049092142,
+   "Link|1": 0.8331466000000001,
+   "Load|0": {
+    "$nan": true
+   },
+   "Load|1": {
+    "$nan": true
+   },
+   "Load|2": {
+    "$nan": true
+   },
+   "Load|3": {
+    "$nan": true
+   },
+   "Load|4": {
+    "$nan": true
+   },
+   "Load|5": {
+    "$nan": true
+   },
+   "StorageUnit|0": 1.0,
+   "StorageUnit|1": 0.35199080000000005,
+   "StorageUnit|2": 0.5821875265676982,
+   "StorageUnit|3": 0.2269032907613163,
+   "StorageUnit|4": 0.22821101743118605,
+   "StorageUnit|5": 0.49040413933732113
+  },
+  "capacity_factor|bus_carrier": {
+   "Generator|AC": 0.514218481807053,
+   "Line|AC": 0.5839804848982616,
+   "Link|AC": 0.5978347933118251,
+   "Load|AC": {
+    "$nan": true
+   },
+   "StorageUnit|AC": 0.5068822236127508
+  },
+  "capacity_factor|carrier": {
+   "Generator|gas": 0.0723148469043642,
+   "Generator|wind": 0.5558847423660517,
+   "Line|AC": 0.5839804848982616,
+   "Link|AC": 0.5978347933118251,
+   "Load|-": {
+    "$nan": true
+   },
+   "StorageUnit|battery": 0.5068822236127508
+  },
+  "capacity_factor|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capacity_factor|location": {
+   "Generator|": 0.514218481807053,
+   "Line|": 0.5839804848982616,
+   "Link|": 0.5978347933118251,
+   "Load|": {
+    "$nan": true
+   },
+   "StorageUnit|": 0.5068822236127508
+  },
+  "capacity_factor|name": {
+   "Generator|Gas 0": 0.02,
+   "Generator|Gas 1": 0.1583333227631807,
+   "Generator|Wind 0": 0.5477920000000001,
+   "Generator|Wind 1": 0.4672627232572578,
+   "Generator|Wind 2": 0.3131948666666667,
+   "Generator|Wind 3": 0.42255000000000004,
+   "Generator|Wind 4": 0.47406309999999996,
+   "Generator|Wind 5": 0.5946578605487319,
+   "Line|0": 0.898067902357917,
+   "Line|1": 0.34620627253400715,
+   "Line|2": 0.8997663,
+   "Line|3": 0.5567943900233141,
+   "Line|4": 0.6703056718993692,
+   "Line|5": 0.6609053342070945,
+   "Link|TL 0": 0.5417745049092142,
+   "Link|TL 1": 0.8331466000000001,
+   "Load|0": {
+    "$nan": true
+   },
+   "Load|1": {
+    "$nan": true
+   },
+   "Load|2": {
+    "$nan": true
+   },
+   "Load|3": {
+    "$nan": true
+   },
+   "Load|4": {
+    "$nan": true
+   },
+   "Load|5": {
+    "$nan": true
+   },
+   "StorageUnit|Storage 0": 1.0,
+   "StorageUnit|Storage 1": 0.35199080000000005,
+   "StorageUnit|Storage 2": 0.5821875265676982,
+   "StorageUnit|Storage 3": 0.2269032907613163,
+   "StorageUnit|Storage 4": 0.22821101743118605,
+   "StorageUnit|Storage 5": 0.49040413933732113
+  },
+  "capacity_factor|unit": {
+   "Generator|": 0.514218481807053,
+   "Line|": 0.5839804848982616,
+   "Link|": 0.5978347933118251,
+   "Load|": {
+    "$nan": true
+   },
+   "StorageUnit|": 0.5068822236127508
+  },
   "capex|bus": {
    "Generator|0": 297802.53496,
    "Generator|1": 3529178.63103,
@@ -3914,6 +4301,127 @@
    "Line|": 439.29661,
    "Link|": 104.17807,
    "StorageUnit|": 581342.35671
+  },
+  "curtailment|bus": {
+   "Generator|0": 10458.0,
+   "Generator|1": 5300.30189,
+   "Link|0": 65359.6156,
+   "Link|1": 18542.01671,
+   "StorageUnit|1": 954.63266,
+   "StorageUnit|2": 21893.27258,
+   "StorageUnit|3": 318.07108,
+   "StorageUnit|4": 159.23176,
+   "StorageUnit|5": 103475.28635
+  },
+  "curtailment|bus_carrier": {
+   "Generator|AC": 15758.30189,
+   "Link|AC": 83901.63231,
+   "StorageUnit|AC": 126800.49443
+  },
+  "curtailment|carrier": {
+   "Generator|gas": 15758.30189,
+   "Link|AC": 83901.63231,
+   "StorageUnit|battery": 126800.49443
+  },
+  "curtailment|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "curtailment|location": {
+   "Generator|": 15758.30189,
+   "Link|": 83901.63231,
+   "StorageUnit|": 126800.49443
+  },
+  "curtailment|name": {
+   "Generator|Gas 0": 10458.0,
+   "Generator|Gas 1": 5300.30189,
+   "Link|TL 0": 65359.6156,
+   "Link|TL 1": 18542.01671,
+   "StorageUnit|Storage 1": 954.63266,
+   "StorageUnit|Storage 2": 21893.27258,
+   "StorageUnit|Storage 3": 318.07108,
+   "StorageUnit|Storage 4": 159.23176,
+   "StorageUnit|Storage 5": 103475.28635
+  },
+  "curtailment|unit": {
+   "Generator|": 15758.30189,
+   "Link|": 83901.63231,
+   "StorageUnit|": 126800.49443
+  },
+  "energy_balance|bus": {
+   "Generator|0": 2224.05133,
+   "Generator|1": 21717.29691,
+   "Generator|2": 1691.25223,
+   "Generator|3": 1521.17989,
+   "Generator|4": 1706.62717,
+   "Generator|5": 92067.91351,
+   "Line|0": -8754.1019,
+   "Line|1": -12404.89497,
+   "Line|2": 21158.99687,
+   "Line|3": 40291.81976,
+   "Line|4": 22604.05794,
+   "Line|5": -62895.87771,
+   "Link|0": 24560.13288,
+   "Link|1": 8822.01671,
+   "Link|3": -24560.13288,
+   "Link|4": -8822.01671,
+   "Load|0": -18714.0823,
+   "Load|1": -18079.786,
+   "Load|2": -21417.91362,
+   "Load|3": -17234.79569,
+   "Load|4": -15479.43664,
+   "Load|5": -23579.06064,
+   "StorageUnit|0": 684.0,
+   "StorageUnit|1": -54.63266,
+   "StorageUnit|2": -1432.33547,
+   "StorageUnit|3": -18.07108,
+   "StorageUnit|4": -9.23176,
+   "StorageUnit|5": -5592.97517
+  },
+  "energy_balance|bus_carrier": {
+   "Generator|AC": 120928.32103,
+   "Load|AC": -114505.07489,
+   "StorageUnit|AC": -6423.24615
+  },
+  "energy_balance|carrier": {
+   "Generator|gas": 1465.32212,
+   "Generator|wind": 119462.99891,
+   "Load|-": -114505.07489,
+   "StorageUnit|battery": -6423.24615
+  },
+  "energy_balance|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "energy_balance|location": {
+   "Generator|": 120928.32103,
+   "Load|": -114505.07489,
+   "StorageUnit|": -6423.24615
+  },
+  "energy_balance|name": {
+   "Generator|Gas 0": 252.0,
+   "Generator|Gas 1": 1213.32212,
+   "Generator|Wind 0": 1972.05133,
+   "Generator|Wind 1": 20503.97479,
+   "Generator|Wind 2": 1691.25223,
+   "Generator|Wind 3": 1521.17989,
+   "Generator|Wind 4": 1706.62717,
+   "Generator|Wind 5": 92067.91351,
+   "Load|0": -18714.0823,
+   "Load|1": -18079.786,
+   "Load|2": -21417.91362,
+   "Load|3": -17234.79569,
+   "Load|4": -15479.43664,
+   "Load|5": -23579.06064,
+   "StorageUnit|Storage 0": 684.0,
+   "StorageUnit|Storage 1": -54.63266,
+   "StorageUnit|Storage 2": -1432.33547,
+   "StorageUnit|Storage 3": -18.07108,
+   "StorageUnit|Storage 4": -9.23176,
+   "StorageUnit|Storage 5": -5592.97517
+  },
+  "energy_balance|unit": {
+   "Generator|": 120928.32103,
+   "Load|": -114505.07489,
+   "StorageUnit|": -6423.24615
   },
   "expanded_capacity|bus": {
    "Generator|0": 0.0,
@@ -4178,6 +4686,114 @@
    "Link|": 93.5775,
    "StorageUnit|": 7835.60445
   },
+  "market_value|bus": {
+   "Generator|0": 109.46469394229773,
+   "Generator|1": 178.79816494842797,
+   "Generator|2": 168.4816903129319,
+   "Generator|3": 111.7478511418767,
+   "Generator|4": 110.47682618621867,
+   "Generator|5": 103.31680652281761,
+   "Line|0": -416.77370747986714,
+   "Line|1": -130.36136458862657,
+   "Line|2": 576.2915774907328,
+   "Line|3": 527.2018375664834,
+   "Line|4": 80.62612425037831,
+   "Line|5": -215.48381480901182,
+   "Link|0": 113.44542295381306,
+   "Link|1": 200.31870193472955,
+   "Link|3": {
+    "$nan": true
+   },
+   "Link|4": {
+    "$nan": true
+   },
+   "Load|0": -115.23625806942587,
+   "Load|1": -207.02893173833394,
+   "Load|2": -211.08521105542968,
+   "Load|3": -110.38683826055627,
+   "Load|4": -107.49337595659004,
+   "Load|5": -110.13146135851424,
+   "StorageUnit|0": 110.14347842105263,
+   "StorageUnit|1": 69.56417838193498,
+   "StorageUnit|2": 42.19742823430492,
+   "StorageUnit|3": -14.256787916609374,
+   "StorageUnit|4": -27.46868164226822,
+   "StorageUnit|5": 1.3267517275663305
+  },
+  "market_value|bus_carrier": {
+   "Generator|AC": 118.10390650137025,
+   "Line|AC": 8.613379539478824,
+   "Link|AC": 24.408538351308472,
+   "Load|AC": -144.83037032090067,
+   "StorageUnit|AC": 10.846328871073132
+  },
+  "market_value|carrier": {
+   "Generator|gas": 276.0792823398739,
+   "Generator|wind": 116.16619522797475,
+   "Line|AC": 8.613379539478824,
+   "Link|AC": 24.408538351308472,
+   "Load|-": -144.83037032090067,
+   "StorageUnit|battery": 10.846328871073132
+  },
+  "market_value|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "market_value|location": {
+   "Generator|": 118.10390650137025,
+   "Line|": 8.613379539478824,
+   "Link|": 24.408538351308472,
+   "Load|": -144.83037032090067,
+   "StorageUnit|": 10.846328871073132
+  },
+  "market_value|name": {
+   "Generator|Gas 0": 110.14347857142857,
+   "Generator|Gas 1": 310.5431931327976,
+   "Generator|Gas 2": {
+    "$nan": true
+   },
+   "Generator|Gas 3": {
+    "$nan": true
+   },
+   "Generator|Gas 4": {
+    "$nan": true
+   },
+   "Generator|Gas 5": {
+    "$nan": true
+   },
+   "Generator|Wind 0": 109.37795495370506,
+   "Generator|Wind 1": 171.00215726365676,
+   "Generator|Wind 2": 168.4816903129319,
+   "Generator|Wind 3": 111.7478511418767,
+   "Generator|Wind 4": 110.47682618621867,
+   "Generator|Wind 5": 103.31680652281761,
+   "Line|0": 93.70628539538026,
+   "Line|1": 0.0211433840331896,
+   "Line|2": 93.67602643041864,
+   "Line|3": 0.0030423283367212333,
+   "Line|4": 0.0042789521675480864,
+   "Line|5": 0.0060432701208471724,
+   "Link|TL 0": 0.0020965342697113337,
+   "Link|TL 1": 91.0262940119622,
+   "Load|0": -115.23625806942587,
+   "Load|1": -207.02893173833394,
+   "Load|2": -211.08521105542968,
+   "Load|3": -110.38683826055627,
+   "Load|4": -107.49337595659004,
+   "Load|5": -110.13146135851424,
+   "StorageUnit|Storage 0": 110.14347842105263,
+   "StorageUnit|Storage 1": 69.56417838193498,
+   "StorageUnit|Storage 2": 42.19742823430492,
+   "StorageUnit|Storage 3": -14.256787916609374,
+   "StorageUnit|Storage 4": -27.46868164226822,
+   "StorageUnit|Storage 5": 1.3267517275663305
+  },
+  "market_value|unit": {
+   "Generator|": 118.10390650137025,
+   "Line|": 8.613379539478824,
+   "Link|": 24.408538351308472,
+   "Load|": -144.83037032090067,
+   "StorageUnit|": 10.846328871073132
+  },
   "opex|bus": {
    "Generator|0": 653.7395,
    "Generator|1": 6910.38211,
@@ -4323,6 +4939,124 @@
   "overnight_cost|unit": {
    "error": "ValueError: Cannot back-calculate overnight_cost for ['Wind 0', 'Gas 0', 'Wind 1', 'Gas 1', 'Wind 2', 'Gas 2', 'Wind 3', 'Gas 3', 'Wind 4', 'Gas 4', 'Wind 5', 'Gas 5']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
   },
+  "prices|bus": {
+   "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+  },
+  "prices|bus_carrier": {
+   "AC": 128.00807
+  },
+  "prices|carrier": {
+   "AC": 128.00807
+  },
+  "prices|country": {
+   "error": "ValueError: Grouping prices by 'country' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+  },
+  "prices|location": {
+   "": 128.00807
+  },
+  "prices|name": {
+   "0": 113.04089,
+   "1": 187.90762,
+   "2": 194.69004,
+   "3": 112.12997,
+   "4": 110.59925,
+   "5": 108.34473
+  },
+  "prices|unit": {
+   "": 128.00807
+  },
+  "revenue|bus": {
+   "Generator|0": 243455.08375,
+   "Generator|1": 3883012.85126,
+   "Generator|2": 284945.04303,
+   "Generator|3": 169988.59625,
+   "Generator|4": 188542.75199,
+   "Generator|5": 9512162.79991,
+   "Line|0": -948487.05188,
+   "Line|1": -1964475.73961,
+   "Line|2": 3733399.73074,
+   "Line|3": 4519659.62029,
+   "Line|4": 2459745.70426,
+   "Line|5": -6979052.97215,
+   "Link|0": 2786234.64877,
+   "Link|1": 1802464.33061,
+   "Link|3": -2786183.15775,
+   "Link|4": -983411.25916,
+   "Load|0": -2156540.81977,
+   "Load|1": -3743038.79804,
+   "Load|2": -4521004.85484,
+   "Load|3": -1902494.58549,
+   "Load|4": -1663936.89812,
+   "Load|5": -2596796.41908,
+   "StorageUnit|0": 75338.13913,
+   "StorageUnit|1": 22037.35578,
+   "StorageUnit|2": 502660.08107,
+   "StorageUnit|3": -970.4733,
+   "StorageUnit|4": -940.29896,
+   "StorageUnit|5": 63686.59132
+  },
+  "revenue|bus_carrier": {
+   "Generator|AC": 14282107.12618,
+   "Line|AC": 820789.29166,
+   "Link|AC": 819104.56248,
+   "Load|AC": -16583812.37535,
+   "StorageUnit|AC": 661811.39504
+  },
+  "revenue|carrier": {
+   "Generator|gas": 404545.05717,
+   "Generator|wind": 13877562.06901,
+   "Line|AC": 820789.29166,
+   "Link|AC": 819104.56248,
+   "Load|-": -16583812.37535,
+   "StorageUnit|battery": 661811.39504
+  },
+  "revenue|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "revenue|location": {
+   "Generator|": 14282107.12618,
+   "Line|": 820789.29166,
+   "Link|": 819104.56248,
+   "Load|": -16583812.37535,
+   "StorageUnit|": 661811.39504
+  },
+  "revenue|name": {
+   "Generator|Gas 0": 27756.15652,
+   "Generator|Gas 1": 376788.90065,
+   "Generator|Wind 0": 215698.92723,
+   "Generator|Wind 1": 3506223.95061,
+   "Generator|Wind 2": 284945.04303,
+   "Generator|Wind 3": 169988.59625,
+   "Generator|Wind 4": 188542.75199,
+   "Generator|Wind 5": 9512162.79991,
+   "Line|0": 213255.2914,
+   "Line|1": 318.61954,
+   "Line|2": 606863.02832,
+   "Line|3": 26.08153,
+   "Line|4": 130.54263,
+   "Line|5": 195.72824,
+   "Link|TL 0": 51.49102,
+   "Link|TL 1": 819053.07145,
+   "Load|0": -2156540.81977,
+   "Load|1": -3743038.79804,
+   "Load|2": -4521004.85484,
+   "Load|3": -1902494.58549,
+   "Load|4": -1663936.89812,
+   "Load|5": -2596796.41908,
+   "StorageUnit|Storage 0": 75338.13913,
+   "StorageUnit|Storage 1": 22037.35578,
+   "StorageUnit|Storage 2": 502660.08107,
+   "StorageUnit|Storage 3": -970.4733,
+   "StorageUnit|Storage 4": -940.29896,
+   "StorageUnit|Storage 5": 63686.59132
+  },
+  "revenue|unit": {
+   "Generator|": 14282107.12618,
+   "Line|": 820789.29166,
+   "Link|": 819104.56248,
+   "Load|": -16583812.37535,
+   "StorageUnit|": 661811.39504
+  },
   "supply|bus": {
    "Generator|0": 2224.05133,
    "Generator|1": 21717.29691,
@@ -4395,6 +5129,189 @@
    "Line|": 95292.36321,
    "Link|": 33558.11616,
    "StorageUnit|": 27296.92046
+  },
+  "system_cost|bus": {
+   "Generator|0": 298456.27446000004,
+   "Generator|1": 3536089.01314,
+   "Generator|2": 363167.80704,
+   "Generator|3": 201841.52388999998,
+   "Generator|4": 244791.1143,
+   "Generator|5": 9512162.79991,
+   "Line|0": 10.14093,
+   "Line|1": 73.10975,
+   "Line|2": 3.69354,
+   "Line|3": 29.55873,
+   "Line|4": 136.24172,
+   "Line|5": 186.55195,
+   "Link|0": 51.49102,
+   "Link|1": 52.68705,
+   "StorageUnit|0": 12813.81514,
+   "StorageUnit|1": 8343.28123,
+   "StorageUnit|2": 502660.08106999996,
+   "StorageUnit|3": 5752.39262,
+   "StorageUnit|4": 3302.6860699999997,
+   "StorageUnit|5": 63686.59132
+  },
+  "system_cost|bus_carrier": {
+   "Generator|AC": 14156508.53275,
+   "Line|AC": 439.29661,
+   "Link|AC": 104.17807,
+   "StorageUnit|AC": 596558.8474699999
+  },
+  "system_cost|carrier": {
+   "Generator|gas": 72444.12469,
+   "Generator|wind": 14084064.40806,
+   "Line|AC": 439.29661,
+   "Link|AC": 104.17807,
+   "StorageUnit|battery": 596558.8474699999
+  },
+  "system_cost|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "system_cost|location": {
+   "Generator|": 14156508.53275,
+   "Line|": 439.29661,
+   "Link|": 104.17807,
+   "StorageUnit|": 596558.8474699999
+  },
+  "system_cost|name": {
+   "Generator|Gas 0": 42579.06215,
+   "Generator|Gas 1": 29865.06253,
+   "Generator|Wind 0": 255877.2123,
+   "Generator|Wind 1": 3506223.9506,
+   "Generator|Wind 2": 363167.80704,
+   "Generator|Wind 3": 201841.52388999998,
+   "Generator|Wind 4": 244791.1143,
+   "Generator|Wind 5": 9512162.79991,
+   "Line|0": 10.14093,
+   "Line|1": 73.10975,
+   "Line|2": 3.69354,
+   "Line|3": 29.55873,
+   "Line|4": 136.24172,
+   "Line|5": 186.55195,
+   "Link|TL 0": 51.49102,
+   "Link|TL 1": 52.68705,
+   "StorageUnit|Storage 0": 12813.81514,
+   "StorageUnit|Storage 1": 8343.28123,
+   "StorageUnit|Storage 2": 502660.08106999996,
+   "StorageUnit|Storage 3": 5752.39262,
+   "StorageUnit|Storage 4": 3302.6860699999997,
+   "StorageUnit|Storage 5": 63686.59132
+  },
+  "system_cost|unit": {
+   "Generator|": 14156508.53275,
+   "Line|": 439.29661,
+   "Link|": 104.17807,
+   "StorageUnit|": 596558.8474699999
+  },
+  "transmission|bus": {
+   "Line|0": 2275.78437,
+   "Line|1": 14680.67934,
+   "Line|2": -6478.31753,
+   "Line|3": -7903.99059,
+   "Line|4": -30508.04854,
+   "Line|5": 32387.82917,
+   "Link|0": -24560.13288,
+   "Link|1": -8822.01671
+  },
+  "transmission|bus_carrier": {
+   "Line|AC": 4453.93621,
+   "Link|AC": -33382.14959
+  },
+  "transmission|carrier": {
+   "Line|AC": 4453.93621,
+   "Link|AC": -33382.14959
+  },
+  "transmission|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "transmission|location": {
+   "Line|": 4453.93621,
+   "Link|": -33382.14959
+  },
+  "transmission|name": {
+   "Line|0": 2275.78437,
+   "Line|1": 14680.67934,
+   "Line|2": -6478.31753,
+   "Line|3": -7903.99059,
+   "Line|4": -30508.04854,
+   "Line|5": 32387.82917,
+   "Link|TL 0": -24560.13288,
+   "Link|TL 1": -8822.01671
+  },
+  "transmission|unit": {
+   "Line|": 4453.93621,
+   "Link|": -33382.14959
+  },
+  "withdrawal|bus": {
+   "Line|0": 8754.1019,
+   "Line|1": 14875.07101,
+   "Line|2": 194.39167,
+   "Line|3": 334.46516,
+   "Line|4": 8238.45575,
+   "Line|5": 62895.87771,
+   "Link|1": 87.98329,
+   "Link|3": 24560.13288,
+   "Link|4": 8910.0,
+   "Load|0": 18714.0823,
+   "Load|1": 18079.786,
+   "Load|2": 21417.91362,
+   "Load|3": 17234.79569,
+   "Load|4": 15479.43664,
+   "Load|5": 23579.06064,
+   "StorageUnit|1": 185.71211,
+   "StorageUnit|2": 6672.21882,
+   "StorageUnit|3": 43.07108,
+   "StorageUnit|4": 21.73176,
+   "StorageUnit|5": 26797.43283
+  },
+  "withdrawal|bus_carrier": {
+   "Line|AC": 95292.36321,
+   "Link|AC": 33558.11616,
+   "Load|AC": 114505.07489,
+   "StorageUnit|AC": 33720.16661
+  },
+  "withdrawal|carrier": {
+   "Line|AC": 95292.36321,
+   "Link|AC": 33558.11616,
+   "Load|-": 114505.07489,
+   "StorageUnit|battery": 33720.16661
+  },
+  "withdrawal|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "withdrawal|location": {
+   "Line|": 95292.36321,
+   "Link|": 33558.11616,
+   "Load|": 114505.07489,
+   "StorageUnit|": 33720.16661
+  },
+  "withdrawal|name": {
+   "Line|0": 2275.78437,
+   "Line|1": 15069.46269,
+   "Line|2": 6478.31753,
+   "Line|3": 8572.92091,
+   "Line|4": 30508.04854,
+   "Line|5": 32387.82917,
+   "Link|TL 0": 24560.13288,
+   "Link|TL 1": 8997.98329,
+   "Load|0": 18714.0823,
+   "Load|1": 18079.786,
+   "Load|2": 21417.91362,
+   "Load|3": 17234.79569,
+   "Load|4": 15479.43664,
+   "Load|5": 23579.06064,
+   "StorageUnit|Storage 1": 185.71211,
+   "StorageUnit|Storage 2": 6672.21882,
+   "StorageUnit|Storage 3": 43.07108,
+   "StorageUnit|Storage 4": 21.73176,
+   "StorageUnit|Storage 5": 26797.43283
+  },
+  "withdrawal|unit": {
+   "Line|": 95292.36321,
+   "Link|": 33558.11616,
+   "Load|": 114505.07489,
+   "StorageUnit|": 33720.16661
   }
  }
 }

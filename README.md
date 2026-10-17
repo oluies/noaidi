@@ -41,9 +41,9 @@ optimisation.
 | `network-lopf` | L2: linear optimal power flow with storage, stores, capacity expansion, delayed links and multi-investment periods, N-1 security-constrained LOPF, and unit commitment via Prima's branch-and-bound. |
 | `network-io` | L1: PyPSA's netCDF export, read into the same model the CSV reader produces. |
 | `network-pf` | L2: power flow — linear (one SPD solve per sub-network) and non-linear Newton-Raphson AC. No LP solver involved. |
-| `network-stats` | L3: PyPSA's `statistics` in SQL. Loads a solved result into an in-memory DuckDB and answers metrics as queries. A consumer of the solve — nothing below it knows it exists, and the cross-build is untouched. Ten of nineteen metrics over every component including branches at their ports, all seven grouping dimensions, per-period grouping, and a per-group determinacy measurement in the goldens so a metric over a degenerate optimum is skipped rather than compared; see [`docs/network-stats-design.md`](docs/network-stats-design.md). |
+| `network-stats` | L3: PyPSA's `statistics` in SQL. Loads a solved result into an in-memory DuckDB and answers metrics as queries. A consumer of the solve — nothing below it knows it exists, and the cross-build is untouched. All nineteen metrics over every component including `Load` and branches at their ports, all seven grouping dimensions, per-period grouping, and a per-group determinacy measurement in the goldens so a metric over a degenerate optimum is skipped rather than compared — which the quotient and dual metrics each showed to be calibrated in the wrong units, three times over. The last three read the bus marginal price, which is a DUAL, so the suite measures per network whether the prices themselves agree before comparing a metric built on them: below 1e-6 on 31 of the 39 goldens and a different vertex on the rest, up to 22.3; see [`docs/network-stats-design.md`](docs/network-stats-design.md). |
 
-1,140 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
+1,152 tests pass in the aggregated build and 14 more in `prima-ortools`, which CI
 runs as a separate step, plus 48 in the opt-in Netlib module and 20 in
 `prima-cyfra`, which need hardware and a corpus no runner has.
 Against Netlib — the first oracle here independent of ojAlgo — 16 of 19 feasible

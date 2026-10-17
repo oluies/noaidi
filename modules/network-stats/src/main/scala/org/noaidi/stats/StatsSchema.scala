@@ -53,6 +53,11 @@ private[stats] object StatsSchema:
     // One row per entity, carrying everything a grouping dimension needs. `bus` is the
     // component's own bus, or `bus0` for a branch -- which is PyPSA's choice and the same
     // asymmetry `TechCapacityLimit` reproduces, so a branch counts at the end it leaves.
+    //
+    // `sign` is the one column here that is NOT a dimension or a cost: it is the +1/-1
+    // multiplier `energy_balance` applies to a one-port's own series, and it is NULL for a
+    // branch -- which is what makes `e.sign IS NULL` upstream's `c in branch_components` test
+    // wherever this schema needs it. See `injection`.
     """CREATE TABLE entity (
       |  component     VARCHAR NOT NULL,
       |  entity        VARCHAR NOT NULL,
@@ -66,6 +71,7 @@ private[stats] object StatsSchema:
       |  capital_cost  DOUBLE,
       |  fom_cost      DOUBLE,
       |  overnight_cost DOUBLE,
+      |  sign          DOUBLE,
       |  PRIMARY KEY (component, entity)
       |)""".stripMargin,
 
@@ -180,16 +186,32 @@ private[stats] object StatsSchema:
 
     // Signed injection into a bus, one row per (entity, port, snapshot).
     //
-    // This is PyPSA's `energy_balance`, which `supply` delegates to with `at_port="all"`: a
-    // component contributes at EVERY port, with the sign of that port. `supply` then keeps
-    // the positive part.
+    // This is PyPSA's `energy_balance`, and [[Stats.supply]], [[Stats.withdrawal]] and
+    // [[Stats.energyBalance]] are its three directions -- the positive part, the negative part
+    // negated, and the whole thing. Upstream is one function with a `direction` argument over
+    // exactly this expression:
+    //
+    //     sign = -1.0 if c in branch_components else static.get("sign", 1.0)
+    //     p    = sign * dynamic[f"p{port}"]
+    //
+    // ==`sign` is a column, not a constant per component==
+    //
+    // It is +1 for a generator, a storage unit and a store and -1 for a LOAD, and upstream
+    // reads it off `static` rather than deciding by component name -- so a one-port with an
+    // unusual sign is honoured. `entity.sign` carries it for the one-ports and is NULL for a
+    // branch, which makes `e.sign IS NOT NULL` exactly upstream's own `c in
+    // branch_components` test rather than a list repeated here.
     //
     // ==The branch sign rule is the bus balance's own==
     //
     // Port 0 sends, so its injection is `-p0`; port 1 receives `p0` scaled by that port's
-    // efficiency. For a line the efficiency is 1, so the two ports contribute `-p0` and
-    // `+p0` and the positive part sums to `|p0|` -- which is exactly what the goldens show.
-    // Measured on `ac-dc-meshed`:
+    // efficiency. Upstream writes both as `-p{port}` because it stores a link's `p1` already
+    // negated and scaled -- `assign_solution` sets `p1 = -p * efficiency` -- so `-p1` is
+    // `+p * efficiency`, which is what the second branch below computes from `p0`.
+    //
+    // For a line the efficiency is 1, so the two ports contribute `-p0` and `+p0` and the
+    // positive part sums to `|p0|` -- which is exactly what the goldens show. Measured on
+    // `ac-dc-meshed`:
     //
     //     Line 0   sum |p0| = 3846.70123   golden supply|name Line|0 = 3846.70123
     //     Line 1   sum |p0| = 7200.23445   golden supply|name Line|1 = 7200.23445
@@ -203,11 +225,21 @@ private[stats] object StatsSchema:
     // `efficiency` is a row in `fact` rather than a column on `entity` for the same reason
     // `marginal_cost` is: it is `static or series` upstream. `COALESCE(..., 1.0)` covers the
     // passive branches, which have no such attribute at all.
+    //
+    // ==A storage unit injects its NET `p`, not its discharge==
+    //
+    // This read `discharge` for two releases and agreed with upstream on every golden, which
+    // is what an equivalent mutant looks like: `supply` keeps the positive part, and a unit
+    // that charges and discharges at the same snapshot is paying round-trip losses for
+    // nothing, so no optimum here does it. `energy_balance` is not a positive part, so the
+    // difference stops being invisible the moment the whole signed series is reported --
+    // `clip(p, 0)` and `discharge` differ exactly when both halves run at once.
     """CREATE VIEW injection AS
-      |SELECT f.component, f.entity, f.snapshot, 0 AS port, f.value AS value
+      |SELECT f.component, f.entity, f.snapshot, 0 AS port,
+      |       e.sign * f.value AS value
       |FROM fact f
-      |WHERE (f.quantity = 'p'         AND f.component IN ('Generator', 'Store'))
-      |   OR (f.quantity = 'discharge' AND f.component = 'StorageUnit')
+      |JOIN entity e ON e.component = f.component AND e.entity = f.entity
+      |WHERE f.quantity = 'p' AND e.sign IS NOT NULL
       |UNION ALL
       |SELECT f.component, f.entity, f.snapshot, 0 AS port, -f.value AS value
       |FROM fact f
@@ -220,6 +252,35 @@ private[stats] object StatsSchema:
       |  ON  eff.component = f.component AND eff.entity = f.entity
       |  AND eff.snapshot  = f.snapshot  AND eff.quantity = 'efficiency'
       |WHERE f.quantity = 'p0'""".stripMargin,
+
+    // The one series PyPSA calls a component's OPERATION, unsigned.
+    //
+    // `get_operation` in `statistics/expressions.py:39`, which is its own little dispatch and
+    // not the same choice `injection` makes:
+    //
+    //     passive branch  ->  p0      (there is no `p` to read)
+    //     Store           ->  e       (the ENERGY LEVEL, not the power)
+    //     anything else   ->  p       (a one-port, or a link, whose `p` IS its `p0`)
+    //
+    // Two metrics read it and both divide by it: [[Stats.capacityFactor]] takes its weighted
+    // MEAN over the horizon against `optimal_capacity`, and `market_value` will take its
+    // weighted sum as the denominator of a revenue.
+    //
+    // The `Store` row is the one worth pausing on. A store's capacity is an ENERGY, `e_nom`,
+    // so a capacity factor over its power would be dividing MW by MWh; upstream divides the
+    // mean energy LEVEL by the energy capacity, which is a state of charge rather than a
+    // utilisation. Reproduced rather than corrected.
+    //
+    // `e.sign IS NULL` is the branch test, as in `injection`, so a controllable branch reads
+    // `p0` -- which is the same number upstream's `p` branch returns for a link, since
+    // `assign_solution` writes both from one solution array.
+    """CREATE VIEW operation AS
+      |SELECT f.component, f.entity, f.snapshot, ABS(f.value) AS value
+      |FROM fact f
+      |JOIN entity e ON e.component = f.component AND e.entity = f.entity
+      |WHERE (f.quantity = 'p0' AND e.sign IS NULL)
+      |   OR (f.quantity = 'e'  AND f.component = 'Store')
+      |   OR (f.quantity = 'p'  AND e.sign IS NOT NULL AND f.component <> 'Store')""".stripMargin,
 
     // Branches that carry power between two buses of the SAME carrier, which is PyPSA's own
     // definition of transmission -- `get_transmission_branches` maps every `bus*` column

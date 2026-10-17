@@ -54,7 +54,8 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * not was EXACTLY the branch kinds -- so that the day branches arrived, the assertion
     * would fail rather than the agreement widening in silence. That is what happened.
     */
-  private val covered = Set("Generator", "StorageUnit", "Store", "Line", "Link", "Transformer")
+  private val covered =
+    Set("Generator", "StorageUnit", "Store", "Load", "Line", "Link", "Transformer")
 
   /** The component part of a `"Component|group"` or `"Component|group|period"` key. */
   private def component(key: String): String = key.takeWhile(_ != '|')
@@ -96,6 +97,9 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     "system_cost"        -> ((s, g) => s.systemCost(g)),
     "curtailment"        -> ((s, g) => s.curtailment(g)),
     "transmission"       -> ((s, g) => s.transmission(g)),
+    "energy_balance"     -> ((s, g) => s.energyBalance(g)),
+    "withdrawal"         -> ((s, g) => s.withdrawal(g)),
+    "capacity_factor"    -> ((s, g) => s.capacityFactor(g)),
   )
 
   /** Metrics the goldens record and this module does not answer yet, named rather than absent.
@@ -124,8 +128,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * below 1e-4 and `market_value` carries 1,112 NaNs. A floor that reads as negligible for
     * MWh is a floor that suppresses real groups for a ratio.
     */
-  private val pending: Set[String] =
-    Set("energy_balance", "withdrawal", "capacity_factor", "revenue", "market_value", "prices")
+  private val pending: Set[String] = Set("revenue", "market_value", "prices")
 
   /** The metrics this suite actually compares: everything recorded, less [[pending]].
     *
@@ -263,6 +266,42 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
             .exists(e => e.str.startsWith("AttributeError") && e.str.contains("country"))
       })
 
+  /** Metrics whose own determinacy block understates the face, with the blocks to read too.
+    *
+    * `DETERMINACY_ABS` in the generator is 1e-2 and '''absolute''', calibrated by measuring
+    * the worst agreement on anything that is a point -- 7e-3, on `ac-dc-meshed`'s flows. That
+    * is the right shape for an energy or a cost and the wrong one for a QUOTIENT:
+    * `capacity_factor` divides a weighted mean of `|operation|` by a capacity, so the same
+    * solver noise arrives divided by the horizon's weighting and by the megawatts, and the
+    * floor calibrated in MWh is three orders too loose for it.
+    *
+    * Measured on `storage-cyclic-co2`, whose `Storage 1` is flagged under both
+    * `energy_balance|name` and `withdrawal|name` at 1.64 and not under `capacity_factor|name`
+    * at all: 1.67 MWh over 36 weighted hours and 25 MW of capacity is 0.0019, which passes a
+    * 1e-2 test. The same vertex, reported in two units. `storage-hvdc` shows it again at
+    * 99.24 MWh and 0.0018.
+    *
+    * So a quotient over the dispatch inherits the verdict of '''every''' metric over that
+    * dispatch. Reading one of them is not enough, and that was the first attempt: a branch
+    * contributes `-p0` at one port and `+p0 * efficiency` at the other, so `energy_balance`
+    * nets a line to nearly nothing and says nothing about whether its flow moved, while
+    * `transmission` -- the signed sum at one port -- says so plainly. Measured: the union over
+    * the six covers every kind that disagrees on all four degenerate networks, with nothing
+    * left over, where `energy_balance` alone missed `Line` and `Link` on all four.
+    *
+    * '''Not''' a union across every metric of any kind, which was the other candidate. A face
+    * is a property of the solution rather than of a metric, so "loose anywhere means loose
+    * everywhere" is true in principle -- and it would take `ac-dc-meshed`'s generators out of
+    * `capex` and `supply` and the rest because one `curtailment` group moved by 0.0122. This
+    * rule costs only the metric with the measurement problem.
+    */
+  private val dispatchMetrics =
+    Set("supply", "withdrawal", "energy_balance", "transmission", "curtailment",
+        "capacity_factor")
+
+  private val inheritsDeterminacy: Map[String, Set[String]] =
+    Map("capacity_factor" -> dispatchMetrics)
+
   /** Whether this golden is worth comparing at all, with the reason read from the golden. */
   private def comparable(name: String): Option[String] =
     val optimize = results(name)("optimize")
@@ -325,7 +364,10 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                   //
                   // Still far finer than the whole-network skip it replaces: on `ac-dc-co2`
                   // only `Line` and `Link` are loose, and every generator group is compared.
-                  val loose = undetermined(name, metric, groupBy).map(component)
+                  val loose = (undetermined(name, metric, groupBy) ++
+                    inheritsDeterminacy.getOrElse(metric, Set.empty)
+                      .flatMap(over => undetermined(name, over, groupBy)))
+                    .map(component)
                   val wantedHere = wanted.filterNot((key, _) => loose.contains(component(key)))
                   val shared  = wantedHere.filter((key, _) => covered.contains(component(key)))
                   val skipped = wantedHere.keySet.map(component) -- covered
@@ -351,8 +393,19 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                       significant(shared).keySet,
                       s"$name/$metric|$groupBy: different groups from PyPSA")
                     shared.foreach { (key, want) =>
-                      assertEqualsDouble(mine.getOrElse(key, 0.0), want,
-                        1e-4 * math.max(1.0, math.abs(want)), s"$name/$metric|$groupBy at $key")
+                      // A NaN is an ANSWER here, not a missing one, so it is asserted rather
+                      // than tolerated: `capacity_factor` divides by `optimal_capacity` and a
+                      // `Load` has no `p_nom`, so upstream reports NaN for every load in
+                      // every golden. `assertEqualsDouble` would fail on `|NaN - NaN|`, and
+                      // reporting a number where PyPSA reports NaN is exactly the kind of
+                      // invented answer this suite exists to catch.
+                      if want.isNaN then
+                        assert(mine.get(key).exists(_.isNaN),
+                          s"$name/$metric|$groupBy at $key: PyPSA reports NaN, this reports " +
+                            mine.get(key).fold("no group")(_.toString))
+                      else
+                        assertEqualsDouble(mine.getOrElse(key, 0.0), want,
+                          1e-4 * math.max(1.0, math.abs(want)), s"$name/$metric|$groupBy at $key")
                     }
             }
         }
@@ -373,42 +426,41 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(missing, List.empty[String])
   }
 
-  test("the determinacy measurement finds the seven networks it should") {
+  test("the determinacy measurement finds the eight networks it should") {
     assume(available, "goldens missing")
     // Pinned, for the reason the floor's own list is pinned: a measurement that silently
     // started finding nothing would restore every comparison against a face and look like a
     // pass.
     //
-    // Seven, where it was five. `curtailment` is what added the two new ones, and it is worth
-    // saying why it is the most tie-break-sensitive metric here: it reads the DISTANCE between
-    // a dispatch and its own headroom, so a generator sitting anywhere on an optimal face
-    // moves it, where `supply` and `opex` only move when the TOTAL moves. `ac-dc-meshed` and
-    // `annuitised-capital` are both fully determinate in every other metric.
+    // Eight, where it was five before `curtailment` and `capacity_factor` landed. Both are
+    // more tie-break-sensitive than the sums that came first, and for the same reason: they
+    // read a dispatch against something other than itself. `curtailment` reads the DISTANCE
+    // between a dispatch and its own headroom and `capacity_factor` reads `|p|`, which has a
+    // kink at zero -- so a generator sitting anywhere on an optimal face moves both, where
+    // `supply` and `opex` only move when the total moves.
     val affected = networks.filter { n =>
       groupings.exists(g => comparedMetrics.exists(m => undetermined(n, m, g).nonEmpty))
     }
     assertEquals(affected, List("ac-dc-co2", "ac-dc-meshed", "ac-dc-txcost",
-                                "annuitised-capital", "scigrid-de",
+                                "ac-dc-txvolume-exact", "annuitised-capital", "scigrid-de",
                                 "storage-cyclic-co2", "storage-hvdc"))
 
-    // Every undetermined ONE-PORT group outside `scigrid-de`, with the metric that found it.
+    // Which metric finds a ONE-PORT kind loose, per network and outside `scigrid-de`.
     //
     // This replaces two coarser claims -- "three of the five are degenerate in their branches
     // alone" and a separate pin on `storage-hvdc`'s two generators -- both of which stopped
-    // being true when `curtailment` and `system_cost` landed. A one-port group coming loose is
-    // the expensive kind: a loose BRANCH group costs comparisons on components this module
-    // only recently covered at all, and a loose one-port group costs the comparisons that
-    // were the whole point. So they are enumerated rather than counted.
+    // being true when `curtailment` landed. A one-port kind coming loose is the expensive
+    // kind: a loose BRANCH kind costs comparisons on components this module only recently
+    // covered at all, and a loose one-port kind costs the comparisons that were the whole
+    // point of the module.
     //
-    // Every margin here is between 0.01 and 100 against a `DETERMINACY_ABS` of 1e-2, which is
-    // the band where interior-point tolerance and a genuine face cannot be told apart. They
-    // are treated as faces because that direction costs a skipped group and the other costs a
-    // comparison that breaks on a tie-break.
+    // By kind rather than by key, because the comparison skips by kind: the keys are in the
+    // goldens and a list of them here would be four hundred lines of `scigrid-de`-shaped
+    // churn without saying anything the kind does not.
     //
     // `scigrid-de` is excluded because it is degenerate across four component kinds and this
-    // suite skips it whole for a degenerate dispatch -- its `dispatch_note` already says so,
-    // and enumerating ~1,500 of its groups here would pin the solver rather than the measure.
-    val onePortKinds = Set("Generator", "StorageUnit", "Store")
+    // suite skips it whole for a degenerate dispatch -- its own `dispatch_note` says so.
+    val onePortKinds = Set("Generator", "StorageUnit", "Store", "Load")
     val faces = networks
       .filterNot(_ == "scigrid-de")
       .map { n =>
@@ -416,40 +468,30 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
           comparedMetrics.flatMap { m =>
             undetermined(n, m, g)
               .filter(k => onePortKinds.contains(component(k)))
-              .map(k => s"$m $k")
+              .map(k => s"$m ${component(k)}")
           }
         }.toSet
       }
-      .filter((_, keys) => keys.nonEmpty)
+      .filter((_, kinds) => kinds.nonEmpty)
       .toMap
     assertEquals(faces, Map(
-      "ac-dc-meshed" -> Set("curtailment Generator|Frankfurt Wind"),
-      "ac-dc-txcost" -> Set("curtailment Generator|Frankfurt Wind",
-                            "curtailment Generator|NO",
-                            "curtailment Generator|Norway",
-                            "system_cost Generator|Norway Gas"),
-      "annuitised-capital" -> Set("curtailment Generator|both",
-                                  "curtailment Generator|perp"),
-      "storage-cyclic-co2" -> Set("curtailment StorageUnit|1",
-                                  "curtailment StorageUnit|3",
-                                  "curtailment StorageUnit|4",
-                                  "curtailment StorageUnit|Storage 1",
-                                  "curtailment StorageUnit|Storage 3",
-                                  "curtailment StorageUnit|Storage 4"),
-      "storage-hvdc" -> Set("capex Generator|Gas 2",
-                            "expanded_capex Generator|2",
-                            "expanded_capex Generator|Gas 2",
-                            "system_cost Generator|Gas 2",
-                            "curtailment StorageUnit|4",
-                            "curtailment StorageUnit|5",
-                            "curtailment StorageUnit|Storage 4",
-                            "curtailment StorageUnit|Storage 5"),
+      "ac-dc-meshed" -> Set("curtailment Generator"),
+      "ac-dc-txcost" -> Set("capacity_factor Generator", "curtailment Generator",
+                            "system_cost Generator"),
+      "annuitised-capital" -> Set("curtailment Generator"),
+      "storage-cyclic-co2" -> Set("capacity_factor Generator", "curtailment StorageUnit",
+                                  "energy_balance StorageUnit", "withdrawal StorageUnit"),
+      "storage-hvdc" -> Set("capacity_factor Generator", "capex Generator",
+                            "curtailment StorageUnit", "energy_balance StorageUnit",
+                            "expanded_capex Generator", "system_cost Generator",
+                            "withdrawal StorageUnit"),
     ))
 
-    // `ac-dc-co2` is the one network that is still degenerate in its BRANCHES alone, which is
-    // what let branch coverage ship in the first place: widening `covered` cost nothing on the
+    // The two networks that are still degenerate in their BRANCHES alone, which is what let
+    // branch coverage ship in the first place: widening `covered` cost nothing on the
     // one-ports that were already being compared there.
-    assertEquals(faces.get("ac-dc-co2"), None)
+    assertEquals(faces.keySet.intersect(Set("ac-dc-co2", "ac-dc-txvolume-exact")),
+      Set.empty[String])
   }
 
   test("every metric the generator records is implemented here or named as pending") {
@@ -543,9 +585,21 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         assertEquals(loaded("Generator"), Set("p", "marginal_cost", "p_max_pu"))
         assertEquals(loaded("Link"), Set("p0", "marginal_cost", "efficiency", "p_max_pu"))
         assertEquals(loaded("Store"), Set("e", "p", "marginal_cost", "marginal_cost_storage"))
-        // `Load` is a one-port with no solved series, listed explicitly in `quantitiesOf`
-        // rather than falling through, so it contributes no rows at all.
-        assertEquals(loaded.get("Load"), None)
+        // `Load` has no solved series -- there is no load variable -- and contributes one
+        // row anyway, because `assign_solution` writes `Load.p` from `p_set`. So the `p`
+        // here is an INPUT, and `entity.sign` of -1 is what makes it a withdrawal rather
+        // than a supply. It contributed nothing at all until `energy_balance` arrived, which
+        // is the change that made four metrics possible.
+        assertEquals(loaded("Load"), Set("p"))
+        // And the sign column, which decides every branch/one-port split in the two views
+        // over `fact`. NULL is "this is a branch".
+        assertEquals(
+          stats
+            .query("SELECT component, sign FROM entity GROUP BY component, sign ORDER BY component")
+            .map(r => r("component").toString -> Option(r("sign")).map(_.toString))
+            .toMap,
+          Map("Generator" -> Some("1.0"), "Link" -> None, "Load" -> Some("-1.0"),
+              "Store" -> Some("1.0")))
     }
   }
 
@@ -587,7 +641,13 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // The floor is a judgement, so this pins what it actually does rather than arguing that
     // it is small. Two kinds of group fall below it, and only one of them is interesting.
     //
-    // NON-ZERO, and there are five, every one in `scigrid-de`:
+    // NON-ZERO, and there are twenty-three, every one in `scigrid-de` -- which is the claim
+    // that matters, because that is the one network this suite skips for a degenerate
+    // dispatch. The floor hides no real number from any comparison that runs.
+    //
+    // Pinned by `network/metric` and count rather than key by key. The five `supply` ones are
+    // worth naming in full because they are the boundary case the first version of this got
+    // wrong:
     //
     //   1e-05   supply|name  Generator|320 Wind Onshore
     //   1e-05   supply|name  Generator|434 Wind Onshore
@@ -595,26 +655,18 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     //   8e-05   supply|name  Generator|378 Wind Onshore
     //   0.0001  supply|name  Generator|307_220kV Wind Onshore
     //
-    // All five are real -- upstream's round-to-five rule admits `1e-5` at any scale -- and
-    // all five are in the one network this suite skips for a degenerate dispatch. So the
-    // floor hides no real number from any comparison that runs.
-    //
-    // The last one is exactly `GroupFloor`, and it is in this list because `significant`
-    // keeps `> GroupFloor` rather than `>=`. The first version of this case said four,
-    // enumerated with a strict `<` in a throwaway script, and the boundary group was the
-    // difference -- which is the kind of thing a pinned list catches and a sentence about
-    // magnitudes does not.
-    //
+    // All five are real -- upstream's round-to-five rule admits `1e-5` at any scale -- and the
+    // last is exactly `GroupFloor`, which is in the list because `significant` keeps
+    // `> GroupFloor` rather than `>=`. The first version of this case said four, enumerated
+    // with a strict `<` in a throwaway script, and the boundary group was the difference.
+    // `energy_balance` reports the same five, being the signed metric `supply` is the positive
+    // half of.
     val hidden  = allGoldenGroups.filter((_, _, _, v, _) => math.abs(v) <= GroupFloor)
     val nonZero = hidden.filter((_, _, _, v, _) => v != 0.0)
-    assertEquals(nonZero.map((n, b, k, _, _) => s"$n/$b/$k").sorted,
-      List(
-        "scigrid-de/supply|name/Generator|264_220kV Wind Onshore",
-        "scigrid-de/supply|name/Generator|307_220kV Wind Onshore",
-        "scigrid-de/supply|name/Generator|320 Wind Onshore",
-        "scigrid-de/supply|name/Generator|378 Wind Onshore",
-        "scigrid-de/supply|name/Generator|434 Wind Onshore",
-      ))
+    assertEquals(
+      nonZero.groupBy((n, b, _, _, _) => s"$n/${b.split('|').head}").view.mapValues(_.size).toMap,
+      Map("scigrid-de/supply" -> 5, "scigrid-de/energy_balance" -> 5,
+          "scigrid-de/capacity_factor" -> 13))
     assert(nonZero.forall((_, _, _, _, skipped) => skipped),
       "the floor hides a non-zero group in a network this suite actually compares")
     // EXACTLY ZERO, and there are many, all of them from the two `expanded_*` metrics. Those
@@ -632,6 +684,18 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     val zeroBlocks = hidden.filter((_, _, _, v, _) => v == 0.0)
       .map((_, b, _, _, _) => b.split('|').head).distinct
     assertEquals(zeroBlocks.sorted, List("expanded_capacity", "expanded_capex"))
+
+    // And the NaNs, which this case would otherwise drop in silence: every comparison above
+    // tests a magnitude, and `NaN <= GroupFloor` is false, so a NaN group is in neither the
+    // hidden set nor the kept one. There are 1,291 of them across 31 of the 41 networks and
+    // every single one is `capacity_factor` for a `Load` -- upstream dividing by an
+    // `optimal_capacity` a load has no `p_nom` for. The comparison asserts them directly; the
+    // census is here so that a NaN appearing in some OTHER metric is a failure rather than a
+    // group this case quietly stopped counting.
+    val nans = allGoldenGroups.filter((_, _, _, v, _) => v.isNaN)
+    assertEquals(nans.map((_, b, k, _, _) => s"${b.split('|').head}/${component(k)}").distinct,
+      List("capacity_factor/Load"))
+    assertEquals(nans.size, 1291)
   }
 
   test("expanded_capex reports a zero group, because PyPSA does not re-drop the difference") {
@@ -659,11 +723,18 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
 
   test("the smallest group in a compared network is far above the floor") {
     assume(available, "goldens missing")
-    // The other half, and the one that says the margin is not a coincidence of the five
-    // above. `store-per-period`'s 0.6 is the smallest group PyPSA reports in any network this
-    // suite compares, which is 6,000x the floor. Asserted as a floor on the margin rather
-    // than as the exact number, because a new fixture may legitimately lower it -- but not by
-    // three orders of magnitude without someone looking.
+    // The other half, and the one that says the margin is not a coincidence of the groups
+    // above. `phase-shift`'s `capacity_factor` of 0.0160985 is the smallest group PyPSA
+    // reports in any network this suite compares, which is 161x the floor. Asserted as a
+    // floor on the margin rather than as the exact number, because a new fixture may
+    // legitimately lower it -- but not by two orders of magnitude without someone looking.
+    //
+    // It was `store-per-period`'s 0.6 at 6,000x until `capacity_factor` landed, and the drop
+    // is the thing to watch rather than a surprise: a capacity factor is DIMENSIONLESS, so
+    // its groups live between 0 and 1 while an energy's live in the thousands. `market_value`
+    // is a price and will narrow this again. See [[pending]] -- the floor is absolute, which
+    // is what makes it comparable to upstream's round-to-five rule and also what makes it the
+    // wrong shape for a ratio, and 161x is the margin that is left.
     //
     // Exact zeros are excluded here and counted as hidden by the case above, which is not an
     // inconsistency: a zero is not a group whose margin can be measured, and PyPSA's own

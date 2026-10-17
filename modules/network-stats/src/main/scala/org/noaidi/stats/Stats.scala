@@ -167,20 +167,15 @@ final class Stats private (
     * '''A third port is refused rather than dropped.''' `Lopf` builds a link with `bus2` --
     * `efficiency2` is read there -- and this schema carries two ports, so such a network
     * would lose a third of its branch supply silently. [[Stats.of]] turns it away by name.
+    *
+    * ==It is `energy_balance`'s positive half, and now says so in one line==
+    *
+    * This was its own query until [[energyBalance]] and [[withdrawal]] arrived, and the three
+    * are one `SELECT` over `injection` with a different filter -- which is what upstream is
+    * too: one function with a `direction` argument. See [[balance]].
     */
   def supply(groupBy: String = "carrier"): Map[String, Double] =
-    grouped(s"""
-      |SELECT i.component                      AS component,
-      |       d.${dimension(groupBy)}           AS grp$periodSelect,
-      |       ROUND(SUM(i.value * s.w_generators), 5) AS value
-      |FROM injection i
-      |JOIN dimensions d
-      |  ON d.component = i.component AND d.entity = i.entity AND d.port = i.port
-      |JOIN snapshot s USING (snapshot)
-      |WHERE i.value > 0
-      |GROUP BY i.component, grp$periodGroup
-      |HAVING ROUND(SUM(i.value * s.w_generators), 5) <> 0
-      |""".stripMargin)
+    balance(groupBy, filter = "WHERE i.value > 0", term = "i.value")
 
   /** Operating cost by `groupBy`.
     *
@@ -557,6 +552,121 @@ final class Stats private (
       |HAVING ROUND(SUM(f.value * s.w_generators), 5) <> 0
       |""".stripMargin)
 
+  /** Net energy at every bus the component touches, in MWh, by `groupBy`.
+    *
+    * PyPSA's `energy_balance` with `direction="both"`, which is the metric [[supply]] and
+    * [[withdrawal]] are the two halves of. All three are one `SUM` over the `injection` view
+    * weighted by `w_generators`; this one applies no filter at all, `supply` keeps the
+    * positive rows and `withdrawal` negates the negative ones.
+    *
+    * '''Signed, and the sign is the whole content.''' A generator contributes positively, a
+    * load negatively, a branch negatively at the end it leaves and positively at the end it
+    * reaches. Summing the whole metric over every group of a network recovers zero to solver
+    * tolerance, because that is the bus balance.
+    *
+    * This is the first metric here that reports `Load`, and `Load` is the reason three of the
+    * six that followed it needed a schema change rather than a query -- see `quantitiesOf`
+    * for what a load contributes and why its `p` is an input.
+    */
+  def energyBalance(groupBy: String = "carrier"): Map[String, Double] =
+    balance(groupBy, filter = "", term = "i.value")
+
+  /** Energy taken OUT at every bus the component touches, in MWh, by `groupBy`.
+    *
+    * `-p.clip(upper=0)` summed, which is the negative part of [[energyBalance]] reported as a
+    * positive number. A load is the obvious contributor and not the only one: a storage unit
+    * charging withdraws, a store filling withdraws, and a branch withdraws at `bus0` whatever
+    * it delivers at `bus1`.
+    *
+    * '''Not''' `energy_balance` negated. A group containing both a generator and a load would
+    * net to the difference under [[energyBalance]] and reports the load's whole consumption
+    * here, because the clip happens per `(entity, port, snapshot)` and not per group.
+    */
+  def withdrawal(groupBy: String = "carrier"): Map[String, Double] =
+    balance(groupBy, filter = "WHERE i.value < 0", term = "-i.value")
+
+  /** The shared body of the three directions of PyPSA's `energy_balance`.
+    *
+    * `filter` and `term` are interpolated, and as with [[capital]]'s `cost` that is safe only
+    * because the three call sites are the only ones and each passes a literal.
+    */
+  private def balance(groupBy: String, filter: String, term: String): Map[String, Double] =
+    grouped(s"""
+      |SELECT i.component                      AS component,
+      |       d.${dimension(groupBy)}           AS grp$periodSelect,
+      |       ROUND(SUM(($term) * s.w_generators), 5) AS value
+      |FROM injection i
+      |JOIN dimensions d
+      |  ON d.component = i.component AND d.entity = i.entity AND d.port = i.port
+      |JOIN snapshot s USING (snapshot)
+      |$filter
+      |GROUP BY i.component, grp$periodGroup
+      |HAVING ROUND(SUM(($term) * s.w_generators), 5) <> 0
+      |""".stripMargin)
+
+  /** Mean utilisation of the chosen capacity, per unit, by `groupBy`.
+    *
+    * A ratio rather than a sum, and the first metric here that is one:
+    *
+    * {{{
+    * capacity_factor = mean_t |operation|  /  optimal_capacity
+    * }}}
+    *
+    * Three things about it are upstream's and none of them is what the name suggests.
+    *
+    * ==The mean is weighted, and the weights are normalised PER PERIOD==
+    *
+    * `_aggregate_timeseries(..., agg="mean")` does not average: it divides the weighting
+    * column by its own sum and then sums. On a multi-period index that division is
+    * `weights.groupby(level=0).transform(lambda w: w / w.sum())` -- per period, so each
+    * period's factor is a mean over that period's snapshots alone rather than over the
+    * horizon. `w_generators` again, as everywhere an energy is involved.
+    *
+    * ==The numerator is `get_operation`, which is a different series per component==
+    *
+    * `p` for a one-port and a controllable branch, `p0` for a passive one, and '''`e` for a
+    * `Store`''' -- the energy LEVEL. So a store's capacity factor is its mean state of charge
+    * against `e_nom_opt`, not a utilisation of any power rating. See `operation` in
+    * [[StatsSchema]].
+    *
+    * ==A `Load` reports NaN, and that is the answer rather than a gap==
+    *
+    * Upstream divides by `optimal_capacity.reindex(df.index)`, and a load has no `p_nom` for
+    * `optimal_capacity` to report, so the reindex supplies NaN and the division propagates
+    * it. Every golden records `capacity_factor` for its loads as a NaN, 1,291 of them, and
+    * this reproduces that rather than dropping the group -- a dropped group would be a group
+    * PyPSA has and this does not, which `StatsSuite` compares on.
+    *
+    * The division is on already-rounded, already-zero-dropped operands and the quotient is
+    * NOT re-rounded, which is why this is the one metric here whose values carry more than
+    * five decimals.
+    */
+  def capacityFactor(groupBy: String = "carrier"): Map[String, Double] =
+    val capacity = optimalCapacity(groupBy)
+    // The per-period normaliser. `COALESCE(period, '')` rather than `period`, because a flat
+    // index has one NULL period and `JOIN ... USING (period)` on a NULL matches nothing.
+    val mean = grouped(s"""
+      |WITH span AS (
+      |  SELECT COALESCE(period, '') AS period_key, SUM(w_generators) AS total
+      |  FROM snapshot
+      |  GROUP BY COALESCE(period, '')
+      |)
+      |SELECT o.component                      AS component,
+      |       d.${dimension(groupBy)}           AS grp$periodSelect,
+      |       ROUND(SUM(o.value * s.w_generators / span.total), 5) AS value
+      |FROM operation o
+      |JOIN dimensions d
+      |  ON d.component = o.component AND d.entity = o.entity AND d.port = 0
+      |JOIN snapshot s ON s.snapshot = o.snapshot
+      |JOIN span ON span.period_key = COALESCE(s.period, '')
+      |GROUP BY o.component, grp$periodGroup
+      |HAVING ROUND(SUM(o.value * s.w_generators / span.total), 5) <> 0
+      |""".stripMargin)
+    // `reindex(df.index)`, so a group the capacity has and the operation does not is dropped
+    // rather than reported as a zero -- and one the operation has and the capacity does not
+    // is a NaN rather than an absence.
+    mean.map((key, value) => key -> value / capacity.getOrElse(key, Double.NaN))
+
   /** The shared body of the four metrics that are a single sum over `capital_share`.
     *
     * `cost` is an expression over `entity`, interpolated -- which is safe only because the
@@ -823,14 +933,22 @@ object Stats:
       // `bus0` for a branch, which is PyPSA's own placement and the asymmetry
       // `TechCapacityLimit` reproduces: a branch counts at the end it leaves.
       val busAttr = if branch then "bus0" else "bus"
-      insert("entity", 12)(table.ids.map { id =>
+      insert("entity", 13)(table.ids.map { id =>
         Seq(
           component,
           id,
           carrierOf(table, busAttr, id),
           if declares(table, busAttr) then table.string(busAttr, id) else null,
           if branch && declares(table, "bus1") then table.string("bus1", id) else null,
-          result.capacity(component, id),
+          // NULL where the component has no capacity attribute at all, which is `Load` and
+          // only `Load`. `LopfResult.capacity` reads `Expansion.nominalAttribute` unguarded
+          // and threw `key not found: Load` the moment loads were loaded -- loudly, which is
+          // the right direction, and the guard belongs here because a load genuinely has no
+          // capacity rather than a capacity of zero. It is what makes `optimal_capacity`
+          // report no load group, which is in turn why `capacity_factor` reports NaN for one.
+          if Expansion.nominalAttribute.contains(component) then
+            Double.box(result.capacity(component, id))
+          else null,
           Expansion.nominalAttribute.get(component).map(table.float(_, id)).orNull,
           Expansion.isExtendable(table, id),
           if declares(table, "marginal_cost") then table.float("marginal_cost", id) else null,
@@ -851,6 +969,14 @@ object Stats:
           if Expansion.nominalAttribute.contains(component) then
             Expansion.overnightCost(n, table, id).map(Double.box).orNull
           else null,
+          // NULL for a branch and the declared `sign` for a one-port, which is the shape
+          // `injection` reads as "is this a branch". PyPSA's own test is `c in
+          // branch_components` and its own fall-back is `static.get("sign", 1.0)`, so a
+          // one-port that declares no `sign` gets 1.0 here rather than a NULL that would
+          // take it out of every energy balance.
+          if branch then null
+          else if declares(table, "sign") then Double.box(table.float("sign", id))
+          else Double.box(1.0),
         )
       })
 
@@ -932,9 +1058,12 @@ object Stats:
           Seq("p", "soc", "charge", "discharge", "spill",
               "marginal_cost", "marginal_cost_storage", "spill_cost", "p_max_pu")
         case "Store" => Seq("e", "p", "marginal_cost", "marginal_cost_storage")
-        // Consumption, which enters the bus balance as a constant. It has no solved series
-        // and so no row in `fact`; `withdrawal` will read it off the network when it exists.
-        case "Load" => Seq.empty
+        // Consumption. It has no solved series -- there is no load variable -- and yet it
+        // has a `p`, because `assign_solution` writes one:
+        // `_set_dynamic_data(n, "Load", "p", get_switchable_as_dense("Load", "p_set"))`.
+        // So `p` here is the INPUT `p_set`, resolved per snapshot, and `entity.sign` of -1
+        // is what turns it into a withdrawal.
+        case "Load" => Seq("p")
         case other =>
           throw new IllegalStateException(
             s"'$other' is a one-port this module has no series for. Every other one-port " +
@@ -957,6 +1086,15 @@ object Stats:
   ): Double =
     val component = table.spec.name
     quantity match
+      // A load has no variable, so its `p` is its own `p_set` -- which is what
+      // `assign_solution` assigns, and it does NOT mask it by the activity window.
+      //
+      // So an inactive load still reports its full consumption to every metric here, while
+      // `Lopf` leaves it out of the balance it is inactive in. That is upstream's own
+      // asymmetry and it is reproduced rather than reconciled; it is also UNEXERCISED, since
+      // no `loads.csv` in the goldens carries a `build_year`, a `lifetime` or an `active`
+      // column. Read off `optimize.py:1281` rather than measured, and said so here.
+      case "p" if component == "Load" => table.valueAt("p_set", id, t)
       case "p" | "p0"     => result.dispatch(component, id, t)
       case "soc"          => result.stateOfCharge(id, t)
       case "charge"       => result.charging(id, t)

@@ -1,7 +1,7 @@
 package org.noaidi.stats
 
 import java.nio.file.Files
-import org.noaidi.lopf.{CsvFixtures, Lopf}
+import org.noaidi.lopf.{CsvFixtures, Lopf, LopfResult}
 import org.noaidi.prima.{PdhgParams, SolveStatus}
 
 /** Every implemented metric against PyPSA's own `statistics`, never against arithmetic.
@@ -100,35 +100,49 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     "energy_balance"     -> ((s, g) => s.energyBalance(g)),
     "withdrawal"         -> ((s, g) => s.withdrawal(g)),
     "capacity_factor"    -> ((s, g) => s.capacityFactor(g)),
+    "revenue"            -> ((s, g) => s.revenue(g)),
+    "market_value"       -> ((s, g) => s.marketValue(g)),
+    "prices"             -> ((s, g) => s.prices(g)),
   )
 
   /** Metrics the goldens record and this module does not answer yet, named rather than absent.
     *
-    * `STATISTICS_METRICS` in the generator is PyPSA's full nineteen and every golden carries
-    * all of them, which is deliberate -- the reference runs ahead of the port. The case below
-    * asserts this set is EXACTLY the difference between what is recorded and what [[metrics]]
-    * implements, in both directions, so the hole cannot grow by accident and cannot outlive
-    * what it describes.
+    * '''Empty, and kept.''' `STATISTICS_METRICS` in the generator is PyPSA's full nineteen and
+    * [[metrics]] now implements all nineteen, so there is nothing to name today. The mechanism
+    * stays because the next upstream release is what it is for: a metric added to
+    * `statistics` lands in every golden on the first regeneration, and the case below then
+    * fails unless it is either implemented or listed here. An empty set is the state that
+    * mechanism is supposed to be in.
     *
-    * Each of the six needs something the schema does not carry:
+    * It carried six names for two releases and the reason each one was there is worth keeping,
+    * because it is what the two batches cost: `energy_balance`, `withdrawal`,
+    * `capacity_factor`, `revenue` and `market_value` all report `Load`, which `quantitiesOf`
+    * gave no rows in `fact`; `revenue`, `market_value` and `prices` need the bus marginal
+    * price, which was in no table; and `prices` is keyed by BUS rather than by component.
     *
-    *   - `energy_balance`, `withdrawal`, `capacity_factor`, `revenue` and `market_value` all
-    *     report `Load`, which `quantitiesOf` deliberately gives no rows in `fact`
-    *   - `revenue`, `market_value` and `prices` need the bus marginal price, which is
-    *     `LopfResult.marginalPrice` and is in no table here
-    *   - `prices` is keyed by BUS rather than by component, so `grouped`'s key shape does not
-    *     fit it either
-    *
-    * ==Two of them will need the floor rethought, which is worth knowing in advance==
+    * ==The floor has narrowed twice and will not narrow again==
     *
     * [[GroupFloor]] is absolute and in the units of an energy or a cost, which is what makes
-    * it comparable to upstream's round-to-five rule. `capacity_factor` is '''dimensionless'''
-    * and `market_value` is a price, so their groups live near 1 rather than near 1,000:
-    * measured on the goldens, `scigrid-de` reports thirteen `capacity_factor` groups at or
-    * below 1e-4 and `market_value` carries 1,112 NaNs. A floor that reads as negligible for
-    * MWh is a floor that suppresses real groups for a ratio.
+    * it comparable to upstream's round-to-five rule, and two of the metrics that landed are
+    * neither: `capacity_factor` is '''dimensionless''' and `market_value` is a price. The
+    * smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor to
+    * `phase-shift`'s 0.0160985 at 161x. Nineteen of nineteen are in now, so that is the
+    * margin, measured rather than predicted.
     */
-  private val pending: Set[String] = Set("revenue", "market_value", "prices")
+  private val pending: Set[String] = Set.empty
+
+  /** Metrics keyed by BUS rather than by component, which the comparison below cannot share.
+    *
+    * `prices` alone. Every other metric returns a frame keyed by `(component, group)` --
+    * upstream does not aggregate across components -- so the comparison splits a key on `|`,
+    * reads the component kind off the front and skips by kind. `prices` is keyed by the bus
+    * grouper alone, so there is no kind to read and `covered` has nothing to say about it.
+    *
+    * It gets its own block at the end of the same case rather than a case of its own, which
+    * keeps it inside the one solve: 41 more networks solved twice is minutes, and `scigrid-de`
+    * alone is 60,000 variables.
+    */
+  private val busKeyed: Set[String] = Set("prices")
 
   /** The metrics this suite actually compares: everything recorded, less [[pending]].
     *
@@ -137,17 +151,24 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * a statement about the reference rather than about this module, and it would move with
     * each batch for no reason a reader could act on.
     */
-  private lazy val comparedMetrics: List[String] = recordedMetrics.filterNot(pending)
+  private lazy val comparedMetrics: List[String] =
+    recordedMetrics.filterNot(m => pending(m) || busKeyed(m))
 
   /** One golden number, keeping a tagged NaN as a NaN rather than throwing on it.
     *
-    * `generate_goldens.py` writes `{"$nan": true}` because JSON has no NaN literal, and
-    * `market_value` produces 1,112 of them -- it divides a revenue by a supply and several
-    * assets supply nothing. `ujson`'s `.num` raises `InvalidData` on the tag, which is a
-    * failure that names the encoding rather than the metric.
+    * `generate_goldens.py` writes `{"$nan": true}` and `{"$inf": "+"}` because JSON has no
+    * literal for either, and `market_value` produces both -- it divides a mean revenue by a
+    * mean operation, and an asset that never operated has a zero denominator. 1,112 NaNs
+    * across the goldens, plus one `+inf` on `ac-dc-txvolume`. `ujson`'s `.num` raises
+    * `InvalidData` on the tag, which is a failure that names the encoding rather than the
+    * metric.
     */
   private def number(v: ujson.Value): Double =
-    if v.objOpt.exists(_.contains("$nan")) then Double.NaN else v.num
+    v.objOpt match
+      case Some(tag) if tag.contains("$nan") => Double.NaN
+      case Some(tag) if tag.contains("$inf") =>
+        if tag("$inf").str == "-" then Double.NegativeInfinity else Double.PositiveInfinity
+      case _ => v.num
 
   /** The floor below which a group is a solver's zero rather than a group.
     *
@@ -266,6 +287,72 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
             .exists(e => e.str.startsWith("AttributeError") && e.str.contains("country"))
       })
 
+  /** Metrics built on the bus marginal price, which is a DUAL variable.
+    *
+    * `revenue` prices an injection with it, `market_value` divides that by what the asset
+    * operated, and `prices` reports it on its own. Every other metric here reads the primal.
+    *
+    * The distinction is not bookkeeping. A dual face is far more common than a primal one:
+    * any bus whose marginal unit sits at a bound has an INTERVAL of valid prices, and two
+    * solvers pick different points in it while agreeing on the objective, the dispatch and
+    * every primal metric. `prima-core/NOTES.md` records this for the LOPF -- "nodal prices
+    * agree wherever the dual is unique and are a different point of the same optimal dual
+    * face elsewhere" -- and these three are the first metrics to inherit it.
+    *
+    * So they are compared only where [[dualAgrees]] says the prices themselves agree, which
+    * is measured per network rather than assumed or listed.
+    */
+  private val dualMetrics: Set[String] = Set("revenue", "market_value", "prices")
+
+  /** Whether this network's nodal prices agree with PyPSA's, cell by cell.
+    *
+    * Measured against `optimize.bus_marginal_price` at the same `1e-4` relative tolerance the
+    * metrics are compared at, so "the dual agrees" means exactly "a metric built on it can be
+    * compared". Measured rather than pinned, because the alternative -- a list of networks
+    * someone maintains -- would go stale in the direction that looks like a pass: a port that
+    * started getting a price wrong would keep comparing the metric over it.
+    *
+    * The case below pins which networks it rejects, so the measurement cannot quietly start
+    * rejecting everything either.
+    *
+    * ==Measured, and the spread is three orders wide==
+    *
+    * Across the 39 goldens the worst disagreement is below 1e-6 on 31 of them -- solver
+    * tolerance, nothing more -- and on the rest it is a different vertex of the dual: 22.3 on
+    * `ramp-limits`, 15.0 on `link-delay-wrap` where PyPSA prices a bus at 15 and this port at
+    * 0, 5.0 on `link-delay`, 3.87 on `ac-dc-dispatch`. Those are not near misses and no
+    * tolerance makes them one.
+    */
+  private def dualAgrees(name: String, result: LopfResult): Boolean =
+    val frame = results(name)("optimize").obj.get("bus_marginal_price")
+    frame.forall { prices =>
+      val buses = prices("columns").arr.map(_.str).toVector
+      prices("values").arr.zipWithIndex.forall { (row, t) =>
+        row.arr.zipWithIndex.forall { (want, bus) =>
+          val wanted = want.numOpt.getOrElse(0.0)
+          math.abs(result.marginalPrice(buses(bus), t) - wanted) <=
+            1e-4 * math.max(1.0, math.abs(wanted))
+        }
+      }
+    }
+
+  /** Whether `prices` is comparable on this network at all, which its WEIGHTS decide too.
+    *
+    * `prices` is a load-weighted average, so it reads the dispatch as well as the dual: its
+    * weight is `withdrawal(groupby="bus")`. A network whose withdrawal is one vertex of a
+    * primal face therefore has a `prices` that moves even where every individual price holds
+    * still -- measured on `storage-cyclic-co2`, whose per-cell prices agree to 2e-6 and whose
+    * `prices|bus_carrier` comes out 0.045 away from upstream's 128.008, because its storage
+    * units trade 1.67 MWh of charging among themselves.
+    *
+    * So the whole metric is skipped on a network where either half is loose, rather than a
+    * grouping or a key: an aggregated group mixes buses, and nothing in the golden says which
+    * of them contributed the movement.
+    */
+  private def pricesComparable(name: String): Boolean =
+    groupings.forall(g => undetermined(name, "prices", g).isEmpty) &&
+      groupings.forall(g => undetermined(name, "withdrawal", g).isEmpty)
+
   /** Metrics whose own determinacy block understates the face, with the blocks to read too.
     *
     * `DETERMINACY_ABS` in the generator is 1e-2 and '''absolute''', calibrated by measuring
@@ -300,7 +387,19 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         "capacity_factor")
 
   private val inheritsDeterminacy: Map[String, Set[String]] =
-    Map("capacity_factor" -> dispatchMetrics)
+    Map(
+      "capacity_factor" -> dispatchMetrics,
+      // `revenue` and `market_value` are a dispatch TIMES a price, so a face in either moves
+      // them -- and they are the one place where a tiny dual difference becomes a large
+      // relative one, because a branch's two ports nearly cancel. Measured:
+      // `ac-dc-txvolume-exact`'s `revenue|bus_carrier Link|DC` is -82.36 as the net of two
+      // terms near 1,136,000, so prices agreeing to 4e-9 relative still leave the group 1.1e-4
+      // away. `storage-hvdc`'s `market_value|bus_carrier Line|AC` is the same shape at 3.4e-4.
+      // Neither is a tolerance question: the dispatch there is a face, and `transmission`
+      // says so where the price frame does not.
+      "revenue"      -> (dispatchMetrics ++ dualMetrics),
+      "market_value" -> (dispatchMetrics ++ dualMetrics),
+    )
 
   /** Whether this golden is worth comparing at all, with the reason read from the golden. */
   private def comparable(name: String): Option[String] =
@@ -332,10 +431,15 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       val result = solved.get
       assume(result.status == SolveStatus.Optimal, s"$name did not solve: ${result.status}")
 
+      // Measured once per network, because it decides three of the nineteen metrics and
+      // reads every bus at every snapshot.
+      val duals = dualAgrees(name, result)
+
       scala.util.Using.resource(Stats.of(result)) { stats =>
         var compared = 0
         groupings.foreach { groupBy =>
           comparedMetrics.map(m => m -> (() => metrics(m)(stats, groupBy)))
+            .filterNot((metric, _) => dualMetrics.contains(metric) && !duals)
             .foreach { (metric, run) =>
               // PyPSA's `country` grouper raises when it is REACHED, and a metric with no
               // rows never reaches it: `transmission|country` on a network with no
@@ -364,11 +468,34 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                   //
                   // Still far finer than the whole-network skip it replaces: on `ac-dc-co2`
                   // only `Line` and `Link` are loose, and every generator group is compared.
+                  // The inherited verdicts are read at EVERY grouping, not just this one,
+                  // and that is the third correction the same measurement problem forced. An
+                  // aggregated group mixes entities, so a face in any one of them moves it --
+                  // and the probe's absolute floor sees the movement at the grouping where
+                  // the group is largest. Measured on `ac-dc-txvolume-exact`:
+                  // `revenue|bus` flags `Link|London` and `revenue|bus_carrier` does not,
+                  // because `Link|DC` is 82.36 as the net of two terms near 1,136,000 and the
+                  // two solves differ by 0.009 -- just under `DETERMINACY_ABS`.
                   val loose = (undetermined(name, metric, groupBy) ++
-                    inheritsDeterminacy.getOrElse(metric, Set.empty)
-                      .flatMap(over => undetermined(name, over, groupBy)))
+                    inheritsDeterminacy.getOrElse(metric, Set.empty).flatMap(over =>
+                      groupings.flatMap(g => undetermined(name, over, g))))
                     .map(component)
-                  val wantedHere = wanted.filterNot((key, _) => loose.contains(component(key)))
+                  // Keys where upstream's answer is NaN or an infinity because its
+                  // DENOMINATOR is exactly zero, which is a fact about the solver rather than
+                  // about the metric. PyPSA's simplex returns an exact zero for an asset that
+                  // did not operate; a restarted PDHG at 1e-9 returns 1e-8 to 1e-13, so the
+                  // quotient is a plausible-looking number instead of a NaN -- measured, 17
+                  // groups across the goldens, from 3e-5 to 6.9e12. No threshold separates
+                  // those from a real group, because `0 / 0` can land anywhere.
+                  //
+                  // `market_value` only. `capacity_factor`'s NaNs are STRUCTURAL -- a load has
+                  // no `p_nom` at all -- and are asserted rather than skipped.
+                  val undefined =
+                    if metric == "market_value" then
+                      wanted.collect { case (key, value) if !value.isFinite => key }.toSet
+                    else Set.empty[String]
+                  val wantedHere = wanted.filterNot((key, _) =>
+                    loose.contains(component(key)) || undefined.contains(key))
                   val shared  = wantedHere.filter((key, _) => covered.contains(component(key)))
                   val skipped = wantedHere.keySet.map(component) -- covered
 
@@ -389,6 +516,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                     assertEquals(
                       significant(mine).keySet
                         .filterNot(k => loose.contains(component(k)))
+                        .filterNot(undefined.contains)
                         .filter(k => covered.contains(component(k))),
                       significant(shared).keySet,
                       s"$name/$metric|$groupBy: different groups from PyPSA")
@@ -399,15 +527,50 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                       // every golden. `assertEqualsDouble` would fail on `|NaN - NaN|`, and
                       // reporting a number where PyPSA reports NaN is exactly the kind of
                       // invented answer this suite exists to catch.
+                      // Two branches rather than one, because `NaN == NaN` is false and an
+                      // `assertEquals` on them fails with "values are not equal, even if they
+                      // have the same toString()". An infinity compares fine.
                       if want.isNaN then
                         assert(mine.get(key).exists(_.isNaN),
                           s"$name/$metric|$groupBy at $key: PyPSA reports NaN, this reports " +
+                            mine.get(key).fold("no group")(_.toString))
+                      else if want.isInfinite then
+                        assert(mine.get(key).contains(want),
+                          s"$name/$metric|$groupBy at $key: PyPSA reports $want, this reports " +
                             mine.get(key).fold("no group")(_.toString))
                       else
                         assertEqualsDouble(mine.getOrElse(key, 0.0), want,
                           1e-4 * math.max(1.0, math.abs(want)), s"$name/$metric|$groupBy at $key")
                     }
             }
+        }
+        // `prices` gets its own block rather than its own case, inside the same solve. The
+        // comparison above reads a component kind off the front of every key and skips by
+        // kind; `prices` is keyed by the bus grouper alone, so there is no kind to read --
+        // which also makes its determinacy skip finer, per KEY rather than per kind.
+        groupings.foreach { groupBy =>
+          if !duals || !pricesComparable(name) then ()
+          else expected(name, "prices", groupBy) match
+            case None =>
+              // `bus` on every network and `country` on all but two: upstream raises
+              // `ValueError` for the first and `AttributeError` for the second, and unlike
+              // the component metrics it raises on EVERY network, because a network always
+              // has buses for the grouper to reach.
+              intercept[IllegalArgumentException](stats.prices(groupBy))
+            case Some(wanted) =>
+              val loose  = undetermined(name, "prices", groupBy)
+              val mine   = stats.prices(groupBy)
+              val shared = wanted.filterNot((key, _) => loose.contains(key))
+              if shared.values.exists(v => math.abs(v) > 1e-9) then
+                compared += 1
+                assertEquals(
+                  significant(mine).keySet.filterNot(loose.contains),
+                  significant(shared).keySet,
+                  s"$name/prices|$groupBy: different groups from PyPSA")
+                shared.foreach { (key, want) =>
+                  assertEqualsDouble(mine.getOrElse(key, 0.0), want,
+                    1e-4 * math.max(1.0, math.abs(want)), s"$name/prices|$groupBy at $key")
+                }
         }
         // Reaching the end having compared nothing is the failure every `assume` above can
         // produce by accident, and it looks identical to a pass.
@@ -426,24 +589,24 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(missing, List.empty[String])
   }
 
-  test("the determinacy measurement finds the eight networks it should") {
+  test("the determinacy measurement finds the ten networks it should") {
     assume(available, "goldens missing")
     // Pinned, for the reason the floor's own list is pinned: a measurement that silently
     // started finding nothing would restore every comparison against a face and look like a
     // pass.
     //
-    // Eight, where it was five before `curtailment` and `capacity_factor` landed. Both are
-    // more tie-break-sensitive than the sums that came first, and for the same reason: they
-    // read a dispatch against something other than itself. `curtailment` reads the DISTANCE
-    // between a dispatch and its own headroom and `capacity_factor` reads `|p|`, which has a
-    // kink at zero -- so a generator sitting anywhere on an optimal face moves both, where
-    // `supply` and `opex` only move when the total moves.
+    // Ten, where it was five before `curtailment`, `capacity_factor`, `revenue` and
+    // `market_value` landed. All four read a dispatch against something other than itself --
+    // its own headroom, its own capacity, a price -- where the metrics before them were plain
+    // weighted sums, and a sum only moves when the total does. `ac-dc-dispatch` and
+    // `ramp-limits` are the two that are new here and they are flagged in the DUAL metrics
+    // alone: their dispatch is a point and their prices are a face.
     val affected = networks.filter { n =>
       groupings.exists(g => comparedMetrics.exists(m => undetermined(n, m, g).nonEmpty))
     }
-    assertEquals(affected, List("ac-dc-co2", "ac-dc-meshed", "ac-dc-txcost",
-                                "ac-dc-txvolume-exact", "annuitised-capital", "scigrid-de",
-                                "storage-cyclic-co2", "storage-hvdc"))
+    assertEquals(affected, List("ac-dc-co2", "ac-dc-dispatch", "ac-dc-meshed", "ac-dc-txcost",
+                                "ac-dc-txvolume-exact", "annuitised-capital", "ramp-limits",
+                                "scigrid-de", "storage-cyclic-co2", "storage-hvdc"))
 
     // Which metric finds a ONE-PORT kind loose, per network and outside `scigrid-de`.
     //
@@ -475,23 +638,31 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       .filter((_, kinds) => kinds.nonEmpty)
       .toMap
     assertEquals(faces, Map(
-      "ac-dc-meshed" -> Set("curtailment Generator"),
+      "ac-dc-co2" -> Set("market_value Generator", "market_value Load",
+                         "revenue Generator", "revenue Load"),
+      "ac-dc-dispatch" -> Set("market_value Generator", "market_value Load",
+                              "revenue Generator", "revenue Load"),
+      "ac-dc-meshed" -> Set("curtailment Generator", "revenue Generator"),
       "ac-dc-txcost" -> Set("capacity_factor Generator", "curtailment Generator",
-                            "system_cost Generator"),
+                            "revenue Generator", "system_cost Generator"),
+      "ac-dc-txvolume-exact" -> Set("revenue Generator"),
       "annuitised-capital" -> Set("curtailment Generator"),
+      "ramp-limits" -> Set("market_value Generator", "market_value Load",
+                           "revenue Generator", "revenue Load"),
       "storage-cyclic-co2" -> Set("capacity_factor Generator", "curtailment StorageUnit",
-                                  "energy_balance StorageUnit", "withdrawal StorageUnit"),
+                                  "energy_balance StorageUnit", "market_value StorageUnit",
+                                  "revenue Generator", "withdrawal StorageUnit"),
       "storage-hvdc" -> Set("capacity_factor Generator", "capex Generator",
                             "curtailment StorageUnit", "energy_balance StorageUnit",
-                            "expanded_capex Generator", "system_cost Generator",
+                            "expanded_capex Generator", "market_value StorageUnit",
+                            "revenue Generator", "system_cost Generator",
                             "withdrawal StorageUnit"),
     ))
 
-    // The two networks that are still degenerate in their BRANCHES alone, which is what let
-    // branch coverage ship in the first place: widening `covered` cost nothing on the
-    // one-ports that were already being compared there.
-    assertEquals(faces.keySet.intersect(Set("ac-dc-co2", "ac-dc-txvolume-exact")),
-      Set.empty[String])
+    // `ac-dc-txvolume` is gone from the list and that is not a regression: its only
+    // undetermined groups were in `prices`, and `prices` is compared by its own block rather
+    // than through `comparedMetrics`. The dual-agreement measurement is what skips it.
+    assertEquals(faces.get("ac-dc-txvolume"), None)
   }
 
   test("every metric the generator records is implemented here or named as pending") {
@@ -628,7 +799,10 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       json.obj.get("statistics").toList.flatMap(_.obj.toList).flatMap { (block, frame) =>
         // `comparedMetrics` rather than every block, for the reason given there: a floor
         // measured over a metric nobody compares describes the reference, not this module.
-        if frame.obj.contains("error") || pending.contains(block.split('|').head) then Nil
+        // `prices` is out as well -- its keys are buses, so `component(key)` reads a bus name
+        // and `covered` would filter it by accident rather than by decision.
+        if frame.obj.contains("error") || !comparedMetrics.contains(block.split('|').head) then
+          Nil
         else
           frame.obj.toList
             .filter((key, _) => covered.contains(component(key)))
@@ -641,7 +815,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // The floor is a judgement, so this pins what it actually does rather than arguing that
     // it is small. Two kinds of group fall below it, and only one of them is interesting.
     //
-    // NON-ZERO, and there are twenty-three, every one in `scigrid-de` -- which is the claim
+    // NON-ZERO, and there are forty, every one in `scigrid-de` -- which is the claim
     // that matters, because that is the one network this suite skips for a degenerate
     // dispatch. The floor hides no real number from any comparison that runs.
     //
@@ -666,7 +840,8 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(
       nonZero.groupBy((n, b, _, _, _) => s"$n/${b.split('|').head}").view.mapValues(_.size).toMap,
       Map("scigrid-de/supply" -> 5, "scigrid-de/energy_balance" -> 5,
-          "scigrid-de/capacity_factor" -> 13))
+          "scigrid-de/capacity_factor" -> 13, "scigrid-de/market_value" -> 14,
+          "scigrid-de/revenue" -> 3))
     assert(nonZero.forall((_, _, _, _, skipped) => skipped),
       "the floor hides a non-zero group in a network this suite actually compares")
     // EXACTLY ZERO, and there are many, all of them from the two `expanded_*` metrics. Those
@@ -692,10 +867,29 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // `optimal_capacity` a load has no `p_nom` for. The comparison asserts them directly; the
     // census is here so that a NaN appearing in some OTHER metric is a failure rather than a
     // group this case quietly stopped counting.
-    val nans = allGoldenGroups.filter((_, _, _, v, _) => v.isNaN)
-    assertEquals(nans.map((_, b, k, _, _) => s"${b.split('|').head}/${component(k)}").distinct,
-      List("capacity_factor/Load"))
-    assertEquals(nans.size, 1291)
+    //
+    // Two metrics produce them and for different reasons. `capacity_factor`'s are STRUCTURAL
+    // -- a load has no `p_nom` for `optimal_capacity` to report -- and the comparison asserts
+    // them directly. `market_value`'s are NUMERICAL: its denominator is exactly zero wherever
+    // the asset did not operate, which is a `0 / 0` upstream and an epsilon over an epsilon
+    // here, so those keys are skipped per key and the census is what bounds the skip.
+    val nonFinite = allGoldenGroups.filter((_, _, _, v, _) => !v.isFinite)
+    assertEquals(
+      nonFinite
+        .groupBy((_, b, k, v, _) =>
+          s"${b.split('|').head}/${component(k)}/${if v.isNaN then "nan" else "inf"}")
+        .view.mapValues(_.size).toMap,
+      Map(
+        "capacity_factor/Load/nan" -> 1291,
+        "market_value/Line/nan"    -> 559,
+        "market_value/Line/inf"    -> 1,
+        "market_value/Link/nan"    -> 67,
+        "market_value/Generator/nan" -> 329,
+        "market_value/Generator/inf" -> 5,
+        "market_value/Transformer/nan" -> 146,
+        "market_value/StorageUnit/nan" -> 5,
+        "market_value/Load/nan"    -> 16,
+      ))
   }
 
   test("expanded_capex reports a zero group, because PyPSA does not re-drop the difference") {
@@ -724,17 +918,27 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
   test("the smallest group in a compared network is far above the floor") {
     assume(available, "goldens missing")
     // The other half, and the one that says the margin is not a coincidence of the groups
-    // above. `phase-shift`'s `capacity_factor` of 0.0160985 is the smallest group PyPSA
-    // reports in any network this suite compares, which is 161x the floor. Asserted as a
+    // above. `ac-dc-dispatch`'s `market_value` of 0.0003846008 is the smallest group PyPSA
+    // reports in any network this suite compares, which is 3.8x the floor. Asserted as a
     // floor on the margin rather than as the exact number, because a new fixture may
-    // legitimately lower it -- but not by two orders of magnitude without someone looking.
+    // legitimately lower it -- but not past the floor without someone looking.
     //
-    // It was `store-per-period`'s 0.6 at 6,000x until `capacity_factor` landed, and the drop
-    // is the thing to watch rather than a surprise: a capacity factor is DIMENSIONLESS, so
-    // its groups live between 0 and 1 while an energy's live in the thousands. `market_value`
-    // is a price and will narrow this again. See [[pending]] -- the floor is absolute, which
-    // is what makes it comparable to upstream's round-to-five rule and also what makes it the
-    // wrong shape for a ratio, and 161x is the margin that is left.
+    // ==3.8x, down from 6,000x, and the trend is the point==
+    //
+    // It was `store-per-period`'s 0.6 until `capacity_factor` landed and then
+    // `phase-shift`'s 0.0160985 until `market_value` did. Both are RATIOS where the metrics
+    // before them were energies and costs: a capacity factor lives between 0 and 1 and a
+    // market value is a currency per MWh, while a supply lives in the thousands. The floor is
+    // absolute, which is what makes it comparable to upstream's round-to-five rule and also
+    // what makes it the wrong shape for a ratio.
+    //
+    // It is still safe, and for a reason narrower than the margin: the floor governs the
+    // GROUP SET comparison only, and every group it admits is compared by value on both
+    // sides. What the floor used to protect against for `market_value` -- a group this
+    // solver reports where upstream reports none -- is now handled by the non-finite skip
+    // instead, which removes exactly the `0 / 0` groups rather than everything small.
+    // Nineteen of nineteen metrics are in, so this is the margin, measured rather than
+    // predicted.
     //
     // Exact zeros are excluded here and counted as hidden by the case above, which is not an
     // inconsistency: a zero is not a group whose margin can be measured, and PyPSA's own
@@ -750,8 +954,8 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // the goldens looks like.
     assert(compared.nonEmpty, "no compared golden group to measure the floor against")
     val smallest = compared.min
-    assert(smallest > 100.0 * GroupFloor,
-      s"the smallest compared group is $smallest, within 100x of the floor $GroupFloor")
+    assert(smallest > 3.0 * GroupFloor,
+      s"the smallest compared group is $smallest, within 3x of the floor $GroupFloor")
   }
 
   test("the floor drops the solver artefact and keeps a real group") {

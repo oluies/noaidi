@@ -809,20 +809,20 @@
    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
   },
   "prices|bus_carrier": {
-   "A|C": 29.50719,
-   "H|2": 8.57143
+   "AC": 29.50719,
+   "H2": 8.57143
   },
   "prices|carrier": {
-   "A|C": 29.50719,
-   "H|2": 8.57143
+   "AC": 29.50719,
+   "H2": 8.57143
   },
   "prices|country": {
-   "N|O": 52.25049,
-   "S|E": 5.0
+   "NO": 52.25049,
+   "SE": 5.0
   },
   "prices|location": {
-   "n|o|r|t|h": 5.0,
-   "s|o|u|t|h": 52.25049
+   "north": 5.0,
+   "south": 52.25049
   },
   "prices|name": {
    "a": 5.0,
@@ -830,8 +830,8 @@
    "h": 8.57143
   },
   "prices|unit": {
-   "M|W": 29.50719,
-   "t|/|h": 8.57143
+   "MW": 29.50719,
+   "t/h": 8.57143
   },
   "revenue|bus": {
    "Generator|a": 1928.57143,

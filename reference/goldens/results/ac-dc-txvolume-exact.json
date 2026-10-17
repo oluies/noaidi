@@ -2228,31 +2228,31 @@
    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
   },
   "prices|bus_carrier": {
-   "A|C": 635.00401,
-   "D|C": 461.3115
+   "AC": 635.00401,
+   "DC": 461.3115
   },
   "prices|carrier": {
-   "A|C": 635.00401,
-   "D|C": 461.3115
+   "AC": 635.00401,
+   "DC": 461.3115
   },
   "prices|country": {
-   "D|E": 577.24113,
-   "N|O": 498.01378,
-   "U|K": 654.17041
+   "DE": 577.24113,
+   "NO": 498.01378,
+   "UK": 654.17041
   },
   "prices|location": {
    "": 599.39424
   },
   "prices|name": {
-   "B|r|e|m|e|n": 573.24755,
-   "B|r|e|m|e|n| |D|C": 487.90594,
-   "F|r|a|n|k|f|u|r|t": 631.62735,
-   "L|o|n|d|o|n": 878.51092,
-   "M|a|n|c|h|e|s|t|e|r": 699.7052,
-   "N|o|r|w|a|y": 506.24125,
-   "N|o|r|w|a|y| |D|C": 482.14225,
-   "N|o|r|w|i|c|h": 559.71651,
-   "N|o|r|w|i|c|h| |D|C": 407.54388
+   "Bremen": 573.24755,
+   "Bremen DC": 487.90594,
+   "Frankfurt": 631.62735,
+   "London": 878.51092,
+   "Manchester": 699.7052,
+   "Norway": 506.24125,
+   "Norway DC": 482.14225,
+   "Norwich": 559.71651,
+   "Norwich DC": 407.54388
   },
   "prices|unit": {
    "": 599.39424

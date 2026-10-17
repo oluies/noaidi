@@ -2605,31 +2605,31 @@
    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
   },
   "prices|bus_carrier": {
-   "A|C": 0.10832,
-   "D|C": 0.10631
+   "AC": 0.10832,
+   "DC": 0.10631
   },
   "prices|carrier": {
-   "A|C": 0.10832,
-   "D|C": 0.10631
+   "AC": 0.10832,
+   "DC": 0.10631
   },
   "prices|country": {
-   "D|E": 0.10786,
-   "N|O": 0.10256,
-   "U|K": 0.1104
+   "DE": 0.10786,
+   "NO": 0.10256,
+   "UK": 0.1104
   },
   "prices|location": {
    "": 0.10796
   },
   "prices|name": {
-   "B|r|e|m|e|n": 0.1078,
-   "B|r|e|m|e|n| |D|C": 0.10778,
-   "F|r|a|n|k|f|u|r|t": 0.10794,
-   "L|o|n|d|o|n": 0.11393,
-   "M|a|n|c|h|e|s|t|e|r": 0.11,
-   "N|o|r|w|a|y": 0.10273,
-   "N|o|r|w|a|y| |D|C": 0.10223,
-   "N|o|r|w|i|c|h": 0.10896,
-   "N|o|r|w|i|c|h| |D|C": 0.10985
+   "Bremen": 0.1078,
+   "Bremen DC": 0.10778,
+   "Frankfurt": 0.10794,
+   "London": 0.11393,
+   "Manchester": 0.11,
+   "Norway": 0.10273,
+   "Norway DC": 0.10223,
+   "Norwich": 0.10896,
+   "Norwich DC": 0.10985
   },
   "prices|unit": {
    "": 0.10796

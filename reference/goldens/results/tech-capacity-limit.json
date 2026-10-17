@@ -1016,10 +1016,10 @@
    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
   },
   "prices|bus_carrier": {
-   "A|C": 80.0
+   "AC": 80.0
   },
   "prices|carrier": {
-   "A|C": 80.0
+   "AC": 80.0
   },
   "prices|country": {
    "error": "ValueError: Grouping prices by 'country' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."

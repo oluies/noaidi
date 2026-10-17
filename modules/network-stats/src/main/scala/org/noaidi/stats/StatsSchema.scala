@@ -2,10 +2,14 @@ package org.noaidi.stats
 
 /** The star schema a solved result is loaded into, as DDL.
   *
-  * One long fact table and four dimensions. Long rather than wide because the quantities
-  * differ by component — a generator has one series, a storage unit has five — so a wide
-  * table is a sparse column per component per quantity and every query has to know which of
-  * them exist for the components it touches.
+  * Two long fact tables and five dimensions, with nine views over them. Long rather than wide
+  * because the quantities differ by component — a generator has one series, a storage unit has
+  * five — so a wide table is a sparse column per component per quantity and every query has to
+  * know which of them exist for the components it touches.
+  *
+  * The second fact table is `price`, and it is separate rather than a `quantity` in `fact`
+  * because it is keyed by BUS: a nodal price belongs to the bus rather than to anything
+  * attached to it, and `prices` groups buses rather than components.
   *
   * ==The weightings are columns, not pre-multiplied into `value`==
   *
@@ -117,6 +121,32 @@ private[stats] object StatsSchema:
     """CREATE TABLE carrier (
       |  name      VARCHAR PRIMARY KEY,
       |  nice_name VARCHAR
+      |)""".stripMargin,
+
+    // The dual of each bus balance, one row per (bus, snapshot).
+    //
+    // The first DUAL quantity in this schema, and the last three metrics all read it:
+    // `revenue` prices an injection with it, `market_value` divides that by what the asset
+    // operated, and `prices` reports it on its own.
+    //
+    // `LopfResult.marginalPrice` already divides by `Periods.objectiveWeight` -- the
+    // snapshot's `objective` weighting times its period's -- because PyPSA divides its own
+    // `buses_t.marginal_price` by exactly that in `assign_solution`. So what is stored here is
+    // a price per unit of energy, and a metric that sums it back up multiplies the weighting
+    // in again.
+    //
+    // ==It is the one number here that can be a different point of the same optimum==
+    //
+    // A nodal price is a dual variable, and a dual face is far more common than a primal one:
+    // every bus whose marginal unit is at a bound has an interval of valid prices. NOTES
+    // records this for the LOPF, and `StatsSuite` inherits the determinacy measurement that
+    // covers it -- the generator's probe solves twice and compares, so a price group that two
+    // solvers disagree about is skipped rather than compared.
+    """CREATE TABLE price (
+      |  bus      VARCHAR NOT NULL,
+      |  snapshot INTEGER NOT NULL,
+      |  value    DOUBLE  NOT NULL,
+      |  PRIMARY KEY (bus, snapshot)
       |)""".stripMargin,
 
     // Which periods an asset exists in, for the per-period capital factor that
@@ -357,4 +387,91 @@ private[stats] object StatsSchema:
       |LEFT JOIN bus b      ON b.name = p.bus
       |LEFT JOIN carrier c  ON c.name = e.carrier
       |LEFT JOIN carrier bc ON bc.name = b.carrier""".stripMargin,
+
+    // Every grouping dimension of a BUS, which is not the same view as `dimensions`.
+    //
+    // `prices` is the one metric keyed by bus rather than by component, and upstream groups it
+    // by reading a column of `n.c.buses.static` directly:
+    //
+    //     col = "carrier" if key == "bus_carrier" else key
+    //
+    // So `bus_carrier` and `carrier` are the SAME grouping here -- both the bus's own carrier
+    // -- `name` is the bus's name, and anything else must be a static bus column or upstream
+    // raises `ValueError: Grouping prices by 'bus' is not supported`. Which is why `bus` is
+    // absent below: there is no `bus` column on `buses.csv`, and every golden records that
+    // refusal.
+    //
+    // ==And the carrier is RAW, not the nice name==
+    //
+    // `prices` ends with `self._apply_option_kwargs(df, nice_names=False)`, with a comment
+    // upstream saying to add it "once integrated in function". Every other metric here maps a
+    // carrier through `nice_name` and this one does not: `statistics-dimensions` sets
+    // `nice_name` on both its carriers and the golden records `prices|carrier` as `AC` and
+    // `H2` rather than `Alternating current` and `H2`. So this view reads the column, where
+    // `dimensions` reads the chain.
+    """CREATE VIEW bus_dimensions AS
+      |SELECT b.name                     AS name,
+      |       COALESCE(b.carrier, '')    AS carrier,
+      |       COALESCE(b.carrier, '')    AS bus_carrier,
+      |       COALESCE(b.country, '')    AS country,
+      |       COALESCE(b.location, '')   AS location,
+      |       COALESCE(b.unit, '')       AS unit
+      |FROM bus b""".stripMargin,
+
+    // How much is withdrawn at each bus at each snapshot, in MW and unweighted.
+    //
+    // This is `withdrawal(groupby="bus", groupby_time=False)` -- the weight `prices` averages
+    // with under its default `weighting="load"`. Unweighted because `groupby_time=False`
+    // returns the raw series: the snapshot weighting enters once, in `prices` itself, on both
+    // the numerator and the denominator.
+    //
+    // ==A bus appears because something ATTACHES to it, not because it withdraws==
+    //
+    // The clip is inside the `SUM` and there is no `WHERE`, so a bus with a component port on
+    // it has a row at every snapshot even when that row is zero. Upstream computes
+    // `-p.clip(upper=0)` for every component and then groups, which produces zeros rather
+    // than absences, and the distinction decides an answer: `link-delay`'s bus `a` carries a
+    // generator and a link that never run, so upstream's weight for it is zero at every
+    // snapshot and its price comes out `0 / 0` -- a NaN, which the golden records. Filtering
+    // on `i.value < 0` instead made that bus look like one nothing attaches to, which gets a
+    // weight of 1 and a price of 0.
+    """CREATE VIEW bus_withdrawal AS
+      |SELECT p.bus AS bus, i.snapshot AS snapshot, SUM(GREATEST(-i.value, 0)) AS value
+      |FROM injection i
+      |JOIN port p ON p.component = i.component AND p.entity = i.entity AND p.port = i.port
+      |GROUP BY p.bus, i.snapshot""".stripMargin,
+
+    // The weight `prices` averages with, dense over every (bus, snapshot).
+    //
+    // `prices` defaults to `weighting="load"` and its weight is
+    // `withdrawal(groupby="bus", groupby_time=False)` reindexed onto the price frame's columns
+    // with `fill_value=1`. That reindex is '''per bus, not per cell''', and the difference is
+    // the whole reason this view exists rather than a `COALESCE` at the call site:
+    //
+    //   - a bus NOTHING ATTACHES TO is absent from the frame, so every one of its snapshots
+    //     gets a weight of 1 -- which makes its price a flat time average rather than a NaN
+    //   - a bus something attaches to is present even where that something never runs, so its
+    //     zeros stay zeros and its price can be a `0 / 0`
+    //
+    // A `COALESCE(w.value, 1.0)` reads like the first rule and silently applies it to the
+    // second case too, handing a quiet hour the same weight as a busy one.
+    //
+    // ==And the fixture that shows it is skipped, which is worth knowing==
+    //
+    // The per-cell reading was load-bearing when it was written: it reported `link-delay`'s
+    // `prices|bus_carrier` as 86.54 against upstream's 90, because that bus withdraws 100 MW
+    // at one snapshot and nothing at the other three, so a fill of 1 at the quiet ones drags
+    // the average down. `link-delay` is now skipped -- its nodal prices are a different vertex
+    // of the dual -- and the mutant survives. Kept because it is upstream's rule and because
+    // the reason it is untested is a property of this port's duals rather than of the rule.
+    """CREATE VIEW bus_load_weight AS
+      |SELECT b.name     AS bus,
+      |       s.snapshot AS snapshot,
+      |       CASE
+      |         WHEN NOT EXISTS (SELECT 1 FROM bus_withdrawal w WHERE w.bus = b.name) THEN 1.0
+      |         ELSE COALESCE((SELECT w.value FROM bus_withdrawal w
+      |                        WHERE w.bus = b.name AND w.snapshot = s.snapshot), 0.0)
+      |       END        AS value
+      |FROM bus b
+      |CROSS JOIN snapshot s""".stripMargin,
   )

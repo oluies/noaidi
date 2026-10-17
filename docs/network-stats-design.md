@@ -1,7 +1,7 @@
 # `network-stats`: DuckDB as a consumer of solved results
 
-Written as a sketch, and now partly built: `modules/network-stats` carries the six tables,
-six views and sixteen of the nineteen metrics. It exists to make one architectural claim
+Written as a sketch, and now built: `modules/network-stats` carries seven tables, nine views
+and all nineteen of PyPSA's `statistics` metrics. It exists to make one architectural claim
 concrete: **DuckDB belongs downstream of the solve, not underneath the network.**
 
 The sketch is kept as written, with a *What building it changed* section at the end recording
@@ -404,10 +404,10 @@ boundary a pinned list catches and a sentence about magnitudes does not.
 ### What is still not covered
 
 - **The other metrics.** Each is a query, and the corrections above are the argument for
-  adding them against measured goldens a few at a time rather than in one pass. Sixteen of
-  the nineteen are done; see *The capital metrics*, *The three metrics that needed no new
-  table* and *`Load`, and the three metrics it unlocked* below for what they cost, and
-  *The remaining three* for what is left.
+  adding them against measured goldens a few at a time rather than in one pass. All nineteen
+  are done, in five batches; see *The capital metrics*, *The capacity metrics*, *The three
+  metrics that needed no new table*, *`Load`, and the three metrics it unlocked* and *The last
+  three, which read the DUAL* below for what each cost.
 - **A third port.** `bus2` and beyond are refused rather than dropped; see *Branches in
   `supply`* below.
 - **The `HAVING` clause's rounding.** Replacing `ROUND(..., 5) <> 0` with a `1e-9` threshold
@@ -476,9 +476,9 @@ has an implementation.
 
 ### What is still not covered
 
-Three metrics: `revenue`, `market_value` and `prices`. The six named here when this section
-was written have since landed, in two batches — see *The three metrics that needed no new
-table* and *`Load`, and the three metrics it unlocked*.
+Nothing, now. The nine named here when this section was written have since landed in three
+batches — see *The three metrics that needed no new table*, *`Load`, and the three metrics it
+unlocked* and *The last three, which read the DUAL*.
 
 `overnight_cost` and `fom` are done, and `overnight_cost` is the first metric here that
 **refuses a network**. It is the inverse of `capex`: the column where it is set, and
@@ -899,7 +899,7 @@ Seventeen mutants, twelve killed. The ones that matter:
 | the operation of a store is its power, not its energy | `statistics-dimensions`, 3 cases |
 | the operation keeps its sign | 19 cases |
 | `capacity_factor` sums instead of averaging | 37 cases |
-| `capacity_factor` normalises over the horizon rather than per period | `fixed-dispatch-periods`, 10 cases |
+| `capacity_factor` normalises over the horizon, not per period | `fixed-dispatch-periods` |
 | `capacity_factor` divides by the installed capacity | `ac-dc-meshed`, 14 cases |
 | `capacity_factor` drops a no-capacity group instead of reporting NaN | 29 cases |
 | a load injects with a positive sign | 40 cases |
@@ -929,28 +929,221 @@ And one mutant was discarded as **vacuous** before it could be counted: mutating
 unreachable fall-back instead of the live branch, which is how the load's sign first read as
 untested. A mutant that does not alter the program is not evidence about the test suite.
 
-### The remaining metrics are named in the suite, not left absent
+## The last three, which read the DUAL
 
-`STATISTICS_METRICS` is PyPSA's full nineteen and every golden carries all of them, so the
-reference runs ahead of the port. `StatsSuite` carries a `pending` set naming what is left,
-with a case asserting it is *exactly* the difference between what is recorded and what is
-implemented — in both directions, so a `pending` entry cannot outlive the metric being
-implemented and quietly take it out of every comparison.
+`revenue`, `market_value` and `prices` take the module to nineteen of nineteen. They are one
+batch because they share one input that no metric before them touched: the bus marginal price.
 
-The three that remain all need the bus marginal price, which is `LopfResult.marginalPrice` and
-is in no table here. `prices` additionally is keyed by **bus** rather than by component, so
-`grouped`'s key shape does not fit it, and the generator mangles its keys today: the capture
-does `"|".join(str(part) for part in key)` unconditionally, which on a plain string index
-iterates CHARACTERS — every golden records `prices|name` for `Bremen` as `B|r|e|m|e|n`. The
-determinacy probe beside it already guards against that with an `isinstance(key, tuple)` test;
-the main capture was missed.
+### A nodal price is a dual variable, and that changes what can be compared
 
-**`market_value` will need the group floor rethought.** `GroupFloor` is absolute and in the
-units of an energy or a cost, which is what makes it comparable to upstream's round-to-five
-rule, and a price is neither: `market_value` carries 1,112 NaNs across the goldens, which the
-suite's value decoder already keeps as NaNs rather than failing on the encoding.
-`capacity_factor` has already narrowed the smallest compared group from 0.6 to 0.0161 — from
-6,000x the floor to 161x — which is the same effect one step milder.
+Every other metric here reads the primal. These three read the dual, and a dual face is far
+more common than a primal one: any bus whose marginal unit sits at a bound has an **interval**
+of valid prices, and two solvers pick different points in it while agreeing on the objective,
+the dispatch and every primal metric. `prima-core/NOTES.md` has recorded this for the LOPF
+since prices were built — "nodal prices agree wherever the dual is unique and are a different
+point of the same optimal dual face elsewhere" — and these three are the first metrics to
+inherit it.
+
+So the suite measures it rather than assuming it. `dualAgrees` compares
+`LopfResult.marginalPrice` against the golden `optimize.bus_marginal_price` cell by cell at the
+same `1e-4` relative tolerance the metrics are compared at, and skips the three on a network
+where they differ. **Measured, and the spread is three orders wide**: the worst disagreement is
+below 1e-6 on 31 of the 39 goldens — solver tolerance, nothing more — and on the rest it is a
+different vertex:
+
+```
+ramp-limits       22.31   a@4             PyPSA 40.0   this port 62.31
+link-delay-wrap   15.00   b@3             PyPSA 15.0   this port  0.0
+link-delay         5.00   a@0             PyPSA  5.0   this port  0.0
+ac-dc-dispatch     3.87   Bremen@8        PyPSA  0.11  this port  3.98
+ac-dc-txvolume     0.145  Norwich DC@8
+ac-dc-co2          0.114  Norway@5        PyPSA  0.11  this port  0.22
+annuitised-capital 0.0086 a@1
+```
+
+Those are not near misses and no tolerance makes them one. Measured per network rather than
+pinned because a list someone maintains goes stale in the direction that looks like a pass — a
+port that started getting a price wrong would keep comparing the metric over it — and the
+determinacy case pins which networks the measurement rejects so it cannot start rejecting
+everything either.
+
+### `revenue` is the `injection` view priced, and its weighting is the odd one
+
+`sign * p_port * marginal_price[bus_of_port] * w_objective`, summed, at every port. The signed
+quantity being priced is exactly what `energy_balance` sums, so a generator earns, a load pays,
+and a branch pays at the end it leaves and earns at the end it reaches.
+
+`w_objective` **alone**, where `energy_balance` takes `w_generators` and `opex` takes
+`w_objective` times the period's. Not an inconsistency: `assign_solution` divides
+`buses_t.marginal_price` by the snapshot weighting *times* the period's, so the stored price is
+already net of both and multiplying only the snapshot half back in discounts the revenue exactly
+once. `LopfResult.marginalPrice` divides by the same product, so the arithmetic matches term for
+term.
+
+### `market_value` is a ratio of two MEANS, which is a factor nobody would guess
+
+```
+rev   = revenue(groupby_time="mean", at_port="all")       # objective weighting
+denom = |get_operation| averaged, at_port=[0]             # generators weighting
+df    = rev / denom
+```
+
+`market_value`'s own `groupby_time` default is `"mean"`, and it passes that down to `revenue` as
+well — so **each half is normalised by its own weighting column's sum**. Where the two columns
+differ the result is not the ratio of the sums: `operational-limit` has `generators` at 3.0
+against `objective` at 1.0, so the totals are 12 and 4 and the sums reading is a third of the
+answer — 4.1667 against upstream's 12.5. `energy-budget` is the same mistake at a factor of two.
+
+That factor is the *only* thing wrong with the sums reading, which is what makes it worth
+naming: `revenue` on its own defaults to `"sum"` and agrees with upstream exactly, so a port
+that reads `market_value` as `revenue / operation` gets the numerator right and the metric
+wrong.
+
+**The port asymmetry is where the NaNs come from.** `revenue` counts every port and the
+denominator counts port 0 only, so under a grouping read off a bus the numerator has keys the
+denominator does not — a branch's `bus1` appears in `rev` and never in `denom` — and the
+division leaves NaN. 1,123 non-finite `market_value` groups across the goldens, against
+`capacity_factor`'s 1,291, and they are answers rather than gaps.
+
+**And some of them cannot be reproduced.** `market_value` is `0 / 0` at any group whose asset
+did not operate, and whether a solved quantity is *exactly* zero is decided by the solver:
+PyPSA's simplex returns an exact zero, a restarted PDHG at 1e-9 returns 1e-8 to 1e-13, so the
+quotient is a plausible-looking number instead of a NaN. Measured, 17 groups across the
+goldens, from 3e-5 to 6.9e12 — no threshold separates those from a real group, because `0 / 0`
+can land anywhere. So the suite skips a `market_value` key whose golden value is non-finite,
+per key, and pins the whole non-finite census by metric, component and kind so the skip cannot
+widen. `capacity_factor`'s NaNs are *not* skipped: a load has no `p_nom` at all, which is
+structural, and those are asserted.
+
+### `prices` is keyed by bus, which is a different key, a different view and a different carrier
+
+Upstream says so in its own signature: `prices` takes neither `components` nor `at_port`,
+because "prices are only defined for buses". Three consequences:
+
+- **Its own grouping view.** `prices` groups by a static column of `buses.csv`, so `bus_carrier`
+  and `carrier` are the same grouping — both the bus's own carrier — `name` is the bus's name,
+  and `bus` is **refused**: there is no `bus` column, and upstream raises
+  `ValueError: Grouping prices by 'bus' is not supported`. Every golden records it.
+- **The raw carrier, not the nice name.** `prices` ends with
+  `_apply_option_kwargs(df, nice_names=False)`, with an upstream comment saying to add it "once
+  integrated in function". `statistics-dimensions` sets `nice_name` on both its carriers and the
+  golden records `prices|carrier` as `AC` and `H2` rather than `Alternating current` and `H2`.
+- **No period level.** Every other metric reports per period on a multi-period index. `prices`
+  is a single weighted average over the whole index — `tx-cost-periods` records one number per
+  bus across both 2030 and 2040 — because upstream's aggregation is a matrix product against
+  the whole weighting column with no `groupby(level=0)` in it.
+
+**The default weighting is the LOAD**, and the fill rule is the subtle part:
+
+```
+price[bus]   = SUM_t w_objective * load[t,bus] * price[t,bus] / SUM_t w_objective * load[t,bus]
+price[group] = SUM_bus numerator / SUM_bus denominator
+```
+
+`weights.reindex(prices.columns, axis=1, fill_value=1)` fills **per bus, not per cell**. A bus
+nothing attaches to is absent from the withdrawal frame and gets a weight of 1 at every
+snapshot — a flat time average rather than a `0/0`. A bus something attaches to is present even
+where that something never runs, so its zeros stay zeros and its price *can* be a `0/0`:
+`link-delay`'s bus `a` carries a generator and a link that never run, and upstream reports NaN
+for it. A `COALESCE(w.value, 1.0)` reads like the first rule and silently applies it to the
+second case too, which is why `bus_load_weight` is a view rather than an expression.
+
+The division happens in **Scala**, not SQL, for a reason worth recording: DuckDB returns NULL
+for a division by zero where numpy returns a NaN or an infinity, and a NULL would reach
+`drop_zero` as "no value" and vanish. Rounding and the zero-drop are applied there too, in
+`_apply_option_kwargs`' own order, with `rint` rather than DuckDB's `ROUND` because it is
+numpy's half-to-even and because it passes a NaN through.
+
+### The generator was mangling every `prices` key
+
+`"|".join(str(part) for part in key)` iterates a plain string character by character, and
+`prices` is the one metric whose index holds plain strings rather than `(component, group)`
+tuples. Every golden recorded `prices|name` for `Bremen` as `B|r|e|m|e|n` and `prices|carrier`
+for `AC` as `A|C`. The determinacy probe beside it already had the `isinstance(key, tuple)`
+guard; the main capture did not, so the two are one `key_label()` now.
+
+Named `key_label` rather than `label`, which is not fussiness: `capture_network` binds a local
+`label` in a loop over sub-networks, so a module-level `label` is shadowed there and the first
+attempt recorded `TypeError: 'str' object is not callable` for every statistics block on every
+network.
+
+### The determinacy probe needed the same correction three times
+
+`DETERMINACY_ABS` is 1e-2 and **absolute**, calibrated against the worst agreement on anything
+that is a point — 7e-3, on `ac-dc-meshed`'s flows. Right shape for an energy or a cost; wrong
+for anything smaller, and each new metric found a different way to show it:
+
+1. `capacity_factor` divides a dispatch by a capacity, so `storage-cyclic-co2`'s 1.67 MWh of
+   loose charging arrives as 0.0019 and passes. Fixed by having a quotient inherit the verdict
+   of every metric over the same dispatch.
+2. A branch nets to nearly nothing in `energy_balance`, so reading one numerator was not
+   enough — `transmission`, the signed sum at one port, is where a line's movement shows.
+   Fixed by taking the union over all six dispatch metrics.
+3. `revenue|bus_carrier` on `ac-dc-txvolume-exact` is -82.36 as the net of two terms near
+   1,136,000, so the two solves differ by 0.009 — just *under* the floor — while the group is
+   1.1e-4 away from upstream in relative terms. Fixed by reading the inherited verdicts at
+   **every** grouping, since an aggregated group mixes entities and the probe sees the movement
+   where the group is largest.
+
+Each correction is narrow and each is measured. The general fix is a determinacy tolerance in
+each metric's own units, which is a generator change with its own calibration and is still not
+this one.
+
+### What the mutation run says about these three
+
+Eighteen mutants, fifteen killed:
+
+| mutant | killed by |
+|---|---|
+| `revenue` weights with `generators` | `energy-budget`, 4 cases |
+| `revenue` also applies the period weighting | `investment-periods-discounted`, 3 cases |
+| `revenue` prices every port at `bus0` | `ac-dc-meshed`, 7 cases |
+| `market_value` takes the ratio of the sums | 30 cases |
+| `market_value` normalises the operation by the objective weighting | `energy-budget`, 4 cases |
+| `market_value` counts the operation at every port | 13 cases |
+| `prices` weights by time instead of by load | 15 cases |
+| `prices` averages the per-bus averages instead of weighting them | 8 cases |
+| `prices` reads the nice carrier name | 45 cases |
+| the bus withdrawal filters instead of clipping | 19 cases |
+| the price is not divided back out by the objective weighting | `storage-cycle`, 5 cases |
+
+Three survived, and each one's reason is a fact about the fixtures rather than about the code:
+
+- **`market_value` reindexing onto the revenue instead of unioning.** Every key the union adds
+  is one the numerator lacks, so every one is a NaN, and the suite skips a non-finite
+  `market_value` group because whether its denominator is exactly zero is a fact about the
+  solver. Upstream's arithmetic is kept; the skip is a property of the suite.
+- **`prices` dropping the snapshot weighting.** It multiplies both sides of the division and
+  cancels wherever it is constant. Exactly one golden varies that column across snapshots —
+  `link-delay-wrap` at 1.0 and 3.0 — and it is one of the networks the dual-agreement
+  measurement skips.
+- **The load weight filling 1 per cell rather than per bus.** This was load-bearing when it was
+  written: it reported `link-delay`'s `prices|bus_carrier` as 86.54 against upstream's 90,
+  because that bus withdraws 100 MW at one snapshot and nothing at the other three. `link-delay`
+  is now skipped for a dual face, so the mutant survives. The rule is upstream's and the reason
+  it is untested is a property of this port's duals.
+
+### The nineteen are named in the suite, and the mechanism stays
+
+`STATISTICS_METRICS` is PyPSA's full nineteen and so is `metrics` in the suite, so the
+`pending` set is **empty** — and kept. The next upstream release is what it is for: a metric
+added to `statistics` lands in every golden on the first regeneration, and the case fails
+unless it is either implemented or listed. An empty set is the state that mechanism is supposed
+to be in, and the case asserts it is *exactly* the difference in both directions, so an entry
+cannot outlive the metric being implemented and quietly take it out of every comparison.
+
+The set carried six names for two releases and then three, and what each one was waiting for
+is the record of what the batches cost: `energy_balance`, `withdrawal`, `capacity_factor`,
+`revenue` and `market_value` all report `Load`, which `quantitiesOf` gave no rows in `fact`;
+`revenue`, `market_value` and `prices` need the bus marginal price, which was in no table; and
+`prices` is keyed by **bus** rather than by component.
+
+**The group floor is the thing that narrowed.** `GroupFloor` is absolute and in the units of an
+energy or a cost, which is what makes it comparable to upstream's round-to-five rule, and two
+of the metrics that landed are neither — `capacity_factor` is dimensionless and `market_value`
+is a price. The smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor
+to `phase-shift`'s 0.0161 at 161x to `ac-dc-dispatch`'s 0.0003846 at **3.8x**. Nineteen of
+nineteen are in, so that is the margin, measured rather than predicted.
 
 ## What this deliberately does not do
 

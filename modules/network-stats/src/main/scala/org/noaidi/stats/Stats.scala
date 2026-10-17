@@ -667,6 +667,263 @@ final class Stats private (
     // is a NaN rather than an absence.
     mean.map((key, value) => key -> value / capacity.getOrElse(key, Double.NaN))
 
+  /** Net revenue of each component, in currency, by `groupBy`.
+    *
+    * Every port's injection priced at the bus it injects into, weighted and summed:
+    *
+    * {{{
+    * revenue = SUM over ports and snapshots of
+    *           sign * p_port * marginal_price[bus_of_port] * w_objective
+    * }}}
+    *
+    * So a generator earns, a load pays, and a branch pays at the end it leaves and earns at
+    * the end it reaches -- which makes the signed quantity being priced exactly the
+    * `injection` view [[energyBalance]] sums. Upstream writes it as
+    * `sign * dynamic[f"p{port}"]` times the price frame reindexed onto that port's buses, and
+    * the two expressions are the same one.
+    *
+    * ==`w_objective` alone, where [[energyBalance]] takes `w_generators`==
+    *
+    * `_aggregate_timeseries(revenue, n.snapshot_weightings.objective)`, and the period
+    * weighting is '''not''' applied on top -- unlike [[opex]], which multiplies by
+    * `p_objective` as well. That is not an inconsistency in this port: `assign_solution`
+    * divides `buses_t.marginal_price` by the snapshot weighting '''times''' the period's, so
+    * the stored price is already net of both, and multiplying only the snapshot half back in
+    * leaves a revenue that is discounted exactly once. `LopfResult.marginalPrice` divides by
+    * the same product, so the arithmetic matches term for term.
+    *
+    * ==It is the first metric here whose input is a DUAL==
+    *
+    * A nodal price is a dual variable and a dual face is far more common than a primal one:
+    * any bus whose marginal unit sits at a bound has an interval of valid prices. The
+    * generator's determinacy probe covers it the same way it covers a degenerate dispatch --
+    * it solves twice and records the groups that moved -- so a price two solvers disagree
+    * about is skipped rather than compared.
+    */
+  def revenue(groupBy: String = "carrier"): Map[String, Double] =
+    revenueOver(groupBy, mean = false)
+
+  /** [[revenue]], summed over the horizon or averaged over it.
+    *
+    * `mean` is `groupby_time`, and the two callers want different values of it: `revenue`
+    * defaults to `"sum"` and [[marketValue]] passes its own default of `"mean"` down. The
+    * averaging is `_aggregate_timeseries`' own -- divide the weighting column by its sum and
+    * then sum, per period on a multi-period index -- and is the same shape
+    * [[capacityFactor]] needs, over `w_objective` rather than `w_generators`.
+    */
+  private def revenueOver(groupBy: String, mean: Boolean): Map[String, Double] =
+    val term =
+      if mean then "i.value * pr.value * s.w_objective / span.total"
+      else "i.value * pr.value * s.w_objective"
+    grouped(s"""
+      |WITH span AS (
+      |  SELECT COALESCE(period, '') AS period_key, SUM(w_objective) AS total
+      |  FROM snapshot
+      |  GROUP BY COALESCE(period, '')
+      |)
+      |SELECT i.component                      AS component,
+      |       d.${dimension(groupBy)}           AS grp$periodSelect,
+      |       ROUND(SUM($term), 5)              AS value
+      |FROM injection i
+      |JOIN port po
+      |  ON po.component = i.component AND po.entity = i.entity AND po.port = i.port
+      |JOIN price pr ON pr.bus = po.bus AND pr.snapshot = i.snapshot
+      |JOIN dimensions d
+      |  ON d.component = i.component AND d.entity = i.entity AND d.port = i.port
+      |JOIN snapshot s ON s.snapshot = i.snapshot
+      |JOIN span ON span.period_key = COALESCE(s.period, '')
+      |GROUP BY i.component, grp$periodGroup
+      |HAVING ROUND(SUM($term), 5) <> 0
+      |""".stripMargin)
+
+  /** Revenue per unit operated, in currency per MWh, by `groupBy`.
+    *
+    * A ratio of two '''means''', not of two sums, and that is `market_value`'s own
+    * `groupby_time` default of `"mean"` -- which it passes down to `revenue` as well:
+    *
+    * {{{
+    * rev   = revenue(groupby_time="mean", at_port="all")       # objective weighting
+    * denom = |get_operation| averaged, at_port=[0],
+    *         drop_zero=False, round=None                       # generators weighting
+    * df    = rev / denom
+    * }}}
+    *
+    * ==Two weighting columns, each normalised by its own sum==
+    *
+    * The numerator divides by the period's total `w_objective` and the denominator by its
+    * total `w_generators`, so where those two columns differ the ratio is '''not''' the ratio
+    * of the sums. `operational-limit` is the fixture that says so: `generators` is 3.0 against
+    * `objective` at 1.0, so the two totals are 12 and 4 and the sums-of-products ratio is a
+    * third of the answer -- 4.1667 against upstream's 12.5. `energy-budget` is the same
+    * mistake at a factor of two.
+    *
+    * That factor is the only thing wrong with the sums reading, which is why it is worth
+    * naming: `revenue` on its own defaults to `"sum"` and agrees with upstream exactly, so a
+    * port that read `market_value` as `revenue / operation` gets the numerator right and the
+    * metric wrong.
+    *
+    * ==The asymmetry is where the NaNs and the infinities come from==
+    *
+    * `revenue` counts every port and the denominator counts port 0 only, so under a grouping
+    * read off a BUS the numerator has keys the denominator does not -- a branch's `bus1`
+    * appears in `rev` and never in `denom` -- and the division leaves NaN there. Measured:
+    * 1,112 NaN groups across the goldens, more than any other metric here produces, and an
+    * answer rather than a gap.
+    *
+    * The denominator is also neither rounded nor zero-dropped, which is why it can be exactly
+    * zero: a component that never operated has a revenue of nothing over an operation of
+    * nothing. `0.0 / 0.0` is NaN in Scala as in numpy and `x / 0.0` is an infinity in both --
+    * `ac-dc-txvolume` records a `+inf` group -- so the arithmetic carries upstream's own
+    * answer without a branch for it.
+    */
+  def marketValue(groupBy: String = "carrier"): Map[String, Double] =
+    val earned = revenueOver(groupBy, mean = true)
+    // `drop_zero=False, round=None`, so no `HAVING` and no `ROUND` -- the only query here
+    // without either, and deliberately: a zero denominator is what makes a group NaN.
+    val operated = grouped(s"""
+      |WITH span AS (
+      |  SELECT COALESCE(period, '') AS period_key, SUM(w_generators) AS total
+      |  FROM snapshot
+      |  GROUP BY COALESCE(period, '')
+      |)
+      |SELECT o.component                      AS component,
+      |       d.${dimension(groupBy)}           AS grp$periodSelect,
+      |       SUM(o.value * s.w_generators / span.total) AS value
+      |FROM operation o
+      |JOIN dimensions d
+      |  ON d.component = o.component AND d.entity = o.entity AND d.port = 0
+      |JOIN snapshot s ON s.snapshot = o.snapshot
+      |JOIN span ON span.period_key = COALESCE(s.period, '')
+      |GROUP BY o.component, grp$periodGroup
+      |""".stripMargin)
+    // The UNION of the two key sets, because `rev / denom` is a pandas division and that
+    // aligns on the union: a group only one side has comes back as NaN, in either direction.
+    // Reindexing onto `rev` alone would drop a component that operated and earned exactly
+    // nothing -- its revenue rounds to zero and `drop_zero` removes it -- where upstream
+    // reports NaN for it.
+    //
+    // Upstream's `if denom.empty: rev[:] = np.nan` needs no counterpart: with an empty
+    // denominator every key divides by a missing value and is already NaN.
+    (earned.keySet ++ operated.keySet)
+      .map(key =>
+        key -> earned.getOrElse(key, Double.NaN) / operated.getOrElse(key, Double.NaN))
+      .toMap
+
+  /** The load-weighted average marginal price at each group of buses, in currency per MWh.
+    *
+    * The one metric keyed by '''bus''' rather than by component, which is why it has its own
+    * key shape and its own grouping view -- see `bus_dimensions` in [[StatsSchema]]. Upstream
+    * says so in its own signature: `prices` takes neither `components` nor `at_port`, because
+    * "prices are only defined for buses".
+    *
+    * {{{
+    * price[bus]  = SUM_t w_objective * load[t, bus] * price[t, bus]
+    *             / SUM_t w_objective * load[t, bus]
+    * price[group] = SUM_bus b[bus] * price[bus] / SUM_bus b[bus]      with b the denominator
+    * }}}
+    *
+    * ==The default weighting is the LOAD, not the time==
+    *
+    * `weighting="load"`, and the load is `withdrawal(groupby="bus", groupby_time=False)` --
+    * raw megawatts per bus per snapshot, with no snapshot weighting of its own, because the
+    * weighting enters once on each side of the division.
+    *
+    * A bus that withdraws nothing '''anywhere''' is given a weight of 1, not 0:
+    * `weights.reindex(prices.columns, axis=1, fill_value=1)`, so such a bus gets a flat time
+    * average rather than a `0/0`. The reindex is per BUS and not per cell, so a bus that
+    * withdraws SOMETIMES keeps its own zeros at the quiet snapshots -- see `bus_load_weight`
+    * in [[StatsSchema]], which exists because a `COALESCE(..., 1.0)` reads like the first rule
+    * and quietly applies it to the second case too.
+    *
+    * ==The snapshot weighting is an equivalent mutant, and the fixture that would kill it is
+    * skipped==
+    *
+    * `w_objective` multiplies both sides of the division, so it cancels wherever it is the
+    * same at every snapshot -- and dropping it fails nothing, measured. Exactly one golden
+    * varies that column across snapshots, `link-delay-wrap` at 1.0 and 3.0, and it is one of
+    * the networks `StatsSuite` skips because its nodal prices are a different vertex of the
+    * dual. So the term is upstream's and is untested here, named rather than counted.
+    *
+    * ==There is no period level, and that is not an omission==
+    *
+    * Every other metric here reports per period on a multi-period network. `prices` does not:
+    * it is a single weighted average over the whole index, so `tx-cost-periods` records one
+    * number per bus across both 2030 and 2040. Upstream's aggregation is a matrix product
+    * against the whole weighting column with no `groupby(level=0)` anywhere in it.
+    *
+    * ==`bus` is refused, by PyPSA and so by this==
+    *
+    * `prices` groups by a static BUS column, and there is no `bus` column on `buses.csv`:
+    * upstream raises `ValueError: Grouping prices by 'bus' is not supported. Use 'name',
+    * 'bus_carrier' or a static bus attribute.` Every golden records it, and `busDimension`
+    * refuses the same name rather than grouping each bus under itself -- which would be a
+    * plausible answer to a question upstream declines.
+    */
+  def prices(groupBy: String = "carrier"): Map[String, Double] =
+    val column = busDimension(groupBy)
+    query(s"""
+      |WITH weighted AS (
+      |  SELECT pr.bus                                  AS bus,
+      |         SUM(s.w_objective * w.value * pr.value) AS numerator,
+      |         SUM(s.w_objective * w.value)            AS denominator
+      |  FROM price pr
+      |  JOIN snapshot s ON s.snapshot = pr.snapshot
+      |  JOIN bus_load_weight w ON w.bus = pr.bus AND w.snapshot = pr.snapshot
+      |  GROUP BY pr.bus
+      |)
+      |SELECT bd.$column          AS grp,
+      |       SUM(numerator)      AS numerator,
+      |       SUM(denominator)    AS denominator
+      |FROM weighted
+      |JOIN bus_dimensions bd ON bd.name = weighted.bus
+      |GROUP BY bd.$column
+      |""".stripMargin)
+      .map { row =>
+        def number(column: String): Double = row(column) match
+          case null                => 0.0
+          case n: java.lang.Number => n.doubleValue
+          case other =>
+            throw new IllegalStateException(s"prices returned a non-numeric $column: $other")
+        val group = Option(row("grp")).map(_.toString).getOrElse("")
+        // Divided HERE and not in SQL, which is the one thing about this query worth a
+        // comment. DuckDB returns NULL for a division by zero and numpy returns a NaN or an
+        // infinity, and the difference is not cosmetic: a bus nothing withdraws from has a
+        // denominator of exactly zero and upstream reports NaN for it -- `link-delay`'s bus
+        // `a` is the case -- while a NULL would reach `drop_zero` as "no value" and vanish.
+        //
+        // Rounding and the zero-drop are applied here for the same reason, in the order
+        // `_apply_option_kwargs` applies them: round to five, then drop what is exactly zero.
+        // `rint` rather than DuckDB's `ROUND` because it is numpy's half-to-even and because
+        // it passes a NaN through.
+        group -> math.rint(number("numerator") / number("denominator") * 1e5) / 1e5
+      }
+      .filter((_, value) => value != 0.0)
+      .toMap
+
+  /** A grouping dimension of a BUS, validated against the `bus_dimensions` view.
+    *
+    * The same injection guard [[dimension]] is, over a different set of names: `bus` is NOT
+    * one of them, because upstream reads a static column of `buses.csv` and there is no `bus`
+    * column on it. `component` is absent for the same reason -- a bus is not a component
+    * here, and nothing is keyed by one.
+    *
+    * `country` is refused where the buses carry none, exactly as [[dimension]] refuses it and
+    * for the same reason: PyPSA's own grouper raises on such a network.
+    */
+  private def busDimension(groupBy: String): String =
+    if !Stats.BusDimensions.contains(groupBy) then
+      throw new IllegalArgumentException(
+        s"no bus grouping dimension '$groupBy'; PyPSA's `prices` groups by " +
+          s"${Stats.BusDimensions.toSeq.sorted.mkString(", ")} and raises on anything else, " +
+          "because it reads a static column of the bus table"
+      )
+    else if groupBy == "country" && !hasCountry then
+      throw new IllegalArgumentException(
+        "this network's buses carry no `country` column, and PyPSA's own grouper raises " +
+          "AttributeError on such a network rather than grouping it under one empty country"
+      )
+    else groupBy
+
   /** The shared body of the four metrics that are a single sum over `capital_share`.
     *
     * `cost` is an expression over `entity`, interpolated -- which is safe only because the
@@ -741,6 +998,15 @@ object Stats:
     */
   val Dimensions: Set[String] =
     Set("carrier", "bus_carrier", "bus", "country", "location", "unit", "name", "component")
+
+  /** Every grouping dimension `prices` accepts, which is a different set.
+    *
+    * `prices` is keyed by bus and groups by a static column of `buses.csv`, so `bus` is not
+    * among them -- upstream raises `ValueError` on it, and every golden records that. Nor is
+    * `component`: a bus is not one. See [[Stats.busDimension]].
+    */
+  val BusDimensions: Set[String] =
+    Set("carrier", "bus_carrier", "country", "location", "unit", "name")
 
   /** Load one solved result into an in-memory DuckDB.
     *
@@ -880,6 +1146,22 @@ object Stats:
           if declares(buses, "unit") then buses.string("unit", id) else null,
         )
       })
+    }
+
+    // One row per (bus, snapshot): the dual of that bus's balance.
+    //
+    // Loaded here rather than from `fact` because it is keyed by BUS and `fact` is keyed by
+    // entity, and because `prices` groups buses rather than components -- see `bus_dimensions`
+    // in [[StatsSchema]]. `marginalPrice` throws on a bus with no balance row, which is a
+    // network this module has never seen; it is left to throw rather than coalesced, because a
+    // price of zero where there is no row is a number nobody could check.
+    n.table("Bus").foreach { buses =>
+      insert("price", 3)(
+        for
+          bus <- buses.ids
+          t   <- n.snapshots.indices
+        yield Seq(bus, t, result.marginalPrice(bus, t))
+      )
     }
 
     // `carriers.csv`, for `nice_name` alone. A network with no `Carrier` table leaves this

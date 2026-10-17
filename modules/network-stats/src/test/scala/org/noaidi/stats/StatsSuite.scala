@@ -331,10 +331,32 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * annuitised-capital   0.0086 a@1          PyPSA 11.2114 here 11.2029
     * }}}
     *
-    * The two zeros are worth a second look by someone: a price of exactly 0 where upstream
-    * reports 5 and 15 is the shape of a missing dual rather than of a face, and both are
-    * delayed-link networks. Recorded here rather than investigated, because it is a question
-    * about `Lopf` and not about this module.
+    * ==Every one of them is a face, and that is measured rather than assumed==
+    *
+    * The two zeros read like a missing dual when this list was first written -- a price of
+    * exactly 0 where upstream reports 5 and 15, on the two delayed-link networks -- and that
+    * reading was wrong. What makes them faces is two facts, both checked by the case below:
+    *
+    *   - '''Strong duality holds on all seven.''' The dual gap is between 1.3e-13 and 1.8e-9
+    *     RELATIVE, and each objective matches PyPSA's to five decimals. Two objectives
+    *     agreeing is what makes a dual optimal rather than merely feasible, so this port's
+    *     prices are an optimal dual solution and not an approximate one.
+    *   - '''Every price that is forced agrees with PyPSA exactly.''' Of the differing cells,
+    *     none is at a bus with a generator strictly inside its bounds -- except on
+    *     `ac-dc-dispatch` and `ramp-limits`, where a CO2 multiplier of -2178.29 and the ramp
+    *     multipliers enter the reduced cost and an interior unit therefore does not pin its
+    *     bus price to its marginal cost. On `link-delay` and `link-delay-wrap` there is no
+    *     global constraint and no ramp limit, so `price <= marginal_cost` IS the whole
+    *     condition at an idle generator, and it holds at all fourteen differing cells.
+    *
+    * So the zeros are the bottom of an interval and PyPSA's 5 and 15 are the top. These two
+    * networks are about as degenerate as an LP gets: the load exists at one snapshot, the
+    * delay puts it out of the cheap generator's reach, and every column except one sits at
+    * zero -- so most prices are bounded above and determined by nothing.
+    *
+    * `LopfSuite` already makes this argument for `ac-dc-dispatch`, in almost these words. The
+    * case below is the same argument over the other six, driven by this list, because the
+    * skip is only honest if the dual it skips comparing is optimal.
     */
   private val dualFace: Set[String] =
     Set("ac-dc-co2", "ac-dc-dispatch", "ac-dc-txvolume", "annuitised-capital", "link-delay",
@@ -717,6 +739,40 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // undetermined groups were in `prices`, and `prices` is compared by its own block rather
     // than through `comparedMetrics`. The dual-agreement measurement is what skips it.
     assertEquals(faces.get("ac-dc-txvolume"), None)
+  }
+
+  test("every network this skips reaches an optimal dual, not an approximate one") {
+    assume(available, "goldens missing")
+    // What licenses [[dualFace]]. Skipping a comparison because "the dual is a different
+    // vertex" is only honest if this port's dual is a vertex of the same optimal face -- and
+    // the alternative, that it is simply wrong, looks identical from the metric's side.
+    //
+    // Strong duality is what separates them: two objectives agreeing makes both the primal
+    // and the dual optimal rather than merely feasible. `LopfSuite` asserts exactly this for
+    // `ac-dc-dispatch` and explains why comparing the prices themselves would be asserting a
+    // choice neither solver is obliged to make. This is the same assertion over the rest of
+    // the list, plus the objective, so a dual that stopped being optimal fails here rather
+    // than disappearing into a skip.
+    dualFace.toList.sorted.foreach { name =>
+      // Read once. `network` re-parses the fixture on every call, and this case was three
+      // times slower than the rest of the suite put together before it was hoisted.
+      val n      = network(name)
+      val result = Lopf.solve(n, params)
+      assertEquals(result.status, SolveStatus.Optimal, name)
+      val primal = result.solution.objectiveValue
+      assertEqualsDouble(primal, result.solution.dualObjectiveValue,
+        1e-6 * math.max(1.0, math.abs(primal)),
+        s"$name: strong duality violated, so the dual is not a face: ${result.solution.kkt}")
+      assertEqualsDouble(primal, results(name)("optimize")("objective").num,
+        1e-6 * math.max(1.0, math.abs(primal)),
+        s"$name: the primal does not match PyPSA's, so the prices differ for a worse reason")
+      // And finite, so the dual path cannot be silently NaN behind the tolerance.
+      n.require("Bus").ids.foreach { bus =>
+        n.snapshots.indices.foreach { t =>
+          assert(result.marginalPrice(bus, t).isFinite, s"$name: $bus at snapshot $t")
+        }
+      }
+    }
   }
 
   test("the three dual metrics are compared against the goldens, not merely gated") {

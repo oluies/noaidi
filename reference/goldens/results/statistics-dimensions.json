@@ -33,7 +33,11 @@
     "determined": true
    }
   },
-  "statistics": {}
+  "statistics": {
+   "prices|bus": {
+    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+   }
+  }
  },
  "lpf": {
   "bus_v_ang": {
@@ -342,6 +346,93 @@
   "error": "KeyError: None"
  },
  "statistics": {
+  "capacity_factor|bus": {
+   "Generator|a": 0.6428571333333333,
+   "Generator|b": 0.175,
+   "Link|a": 0.6266233636363636,
+   "Load|a": {
+    "$nan": true
+   },
+   "Load|b": {
+    "$nan": true
+   },
+   "Load|h": {
+    "$nan": true
+   },
+   "Store|h": 0.3
+  },
+  "capacity_factor|bus_carrier": {
+   "Generator|Alternating current": 0.45571427999999997,
+   "Link|Alternating current": 0.6266233636363636,
+   "Load|Alternating current": {
+    "$nan": true
+   },
+   "Load|H2": {
+    "$nan": true
+   },
+   "Store|H2": 0.3
+  },
+  "capacity_factor|carrier": {
+   "Generator|Fossil gas": 0.175,
+   "Generator|Wind power": 0.6428571333333333,
+   "Link|Alternating current": 1.0,
+   "Link|H2": 0.17857140000000002,
+   "Load|-": {
+    "$nan": true
+   },
+   "Store|H2": 0.3
+  },
+  "capacity_factor|country": {
+   "Generator|NO": 0.175,
+   "Generator|SE": 0.6428571333333333,
+   "Link|SE": 0.6266233636363636,
+   "Load|NO": {
+    "$nan": true
+   },
+   "Load|SE": {
+    "$nan": true
+   },
+   "Store|NO": 0.3
+  },
+  "capacity_factor|location": {
+   "Generator|north": 0.6428571333333333,
+   "Generator|south": 0.175,
+   "Link|north": 0.6266233636363636,
+   "Load|north": {
+    "$nan": true
+   },
+   "Load|south": {
+    "$nan": true
+   },
+   "Store|south": 0.3
+  },
+  "capacity_factor|name": {
+   "Generator|gas": 0.175,
+   "Generator|wind": 0.6428571333333333,
+   "Link|elec": 0.17857140000000002,
+   "Link|tie": 1.0,
+   "Load|da": {
+    "$nan": true
+   },
+   "Load|db": {
+    "$nan": true
+   },
+   "Load|dh": {
+    "$nan": true
+   },
+   "Store|tank": 0.3
+  },
+  "capacity_factor|unit": {
+   "Generator|MW": 0.45571427999999997,
+   "Link|MW": 0.6266233636363636,
+   "Load|MW": {
+    "$nan": true
+   },
+   "Load|t/h": {
+    "$nan": true
+   },
+   "Store|t/h": 0.3
+  },
   "capex|bus": {},
   "capex|bus_carrier": {},
   "capex|carrier": {},
@@ -349,6 +440,100 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "curtailment|bus": {
+   "Generator|a": 214.28571,
+   "Generator|b": 330.0,
+   "Link|a": 164.28571
+  },
+  "curtailment|bus_carrier": {
+   "Generator|Alternating current": 544.28571,
+   "Link|Alternating current": 164.28571
+  },
+  "curtailment|carrier": {
+   "Generator|Fossil gas": 330.0,
+   "Generator|Wind power": 214.28571,
+   "Link|H2": 164.28571
+  },
+  "curtailment|country": {
+   "Generator|NO": 330.0,
+   "Generator|SE": 214.28571,
+   "Link|SE": 164.28571
+  },
+  "curtailment|location": {
+   "Generator|north": 214.28571,
+   "Generator|south": 330.0,
+   "Link|north": 164.28571
+  },
+  "curtailment|name": {
+   "Generator|gas": 330.0,
+   "Generator|wind": 214.28571,
+   "Link|elec": 164.28571
+  },
+  "curtailment|unit": {
+   "Generator|MW": 544.28571,
+   "Link|MW": 164.28571
+  },
+  "energy_balance|bus": {
+   "Generator|a": 385.71429,
+   "Generator|b": 70.0,
+   "Link|a": -275.71429,
+   "Link|b": 240.0,
+   "Link|h": 25.0,
+   "Load|a": -110.0,
+   "Load|b": -310.0,
+   "Load|h": -50.0,
+   "Store|h": 25.0
+  },
+  "energy_balance|bus_carrier": {
+   "Generator|Alternating current": 455.71429,
+   "Link|Alternating current": -35.71429,
+   "Link|H2": 25.0,
+   "Load|Alternating current": -420.0,
+   "Load|H2": -50.0,
+   "Store|H2": 25.0
+  },
+  "energy_balance|carrier": {
+   "Generator|Fossil gas": 70.0,
+   "Generator|Wind power": 385.71429,
+   "Link|H2": -10.71429,
+   "Load|-": -470.0,
+   "Store|H2": 25.0
+  },
+  "energy_balance|country": {
+   "Generator|NO": 70.0,
+   "Generator|SE": 385.71429,
+   "Link|NO": 265.0,
+   "Link|SE": -275.71429,
+   "Load|NO": -360.0,
+   "Load|SE": -110.0,
+   "Store|NO": 25.0
+  },
+  "energy_balance|location": {
+   "Generator|north": 385.71429,
+   "Generator|south": 70.0,
+   "Link|north": -275.71429,
+   "Link|south": 265.0,
+   "Load|north": -110.0,
+   "Load|south": -360.0,
+   "Store|south": 25.0
+  },
+  "energy_balance|name": {
+   "Generator|gas": 70.0,
+   "Generator|wind": 385.71429,
+   "Link|elec": -10.71429,
+   "Load|da": -110.0,
+   "Load|db": -310.0,
+   "Load|dh": -50.0,
+   "Store|tank": 25.0
+  },
+  "energy_balance|unit": {
+   "Generator|MW": 455.71429,
+   "Link|MW": -35.71429,
+   "Link|t/h": 25.0,
+   "Load|MW": -420.0,
+   "Load|t/h": -50.0,
+   "Store|t/h": 25.0
+  },
   "expanded_capacity|bus": {
    "Generator|a": 0.0,
    "Generator|b": 0.0,
@@ -454,6 +639,81 @@
   "installed_capex|location": {},
   "installed_capex|name": {},
   "installed_capex|unit": {},
+  "market_value|bus": {
+   "Generator|a": 5.000000051851853,
+   "Generator|b": 60.0,
+   "Link|a": -5.000000072538862,
+   "Link|b": {
+    "$nan": true
+   },
+   "Link|h": {
+    "$nan": true
+   },
+   "Load|a": -5.0,
+   "Load|b": -60.0,
+   "Load|h": -8.5714284,
+   "Store|h": 7.142857333333334
+  },
+  "market_value|bus_carrier": {
+   "Generator|Alternating current": 13.44827601189061,
+   "Link|Alternating current": 47.22798028451773,
+   "Link|H2": {
+    "$nan": true
+   },
+   "Load|Alternating current": -45.595238095238095,
+   "Load|H2": -8.5714284,
+   "Store|H2": 7.142857333333334
+  },
+  "market_value|carrier": {
+   "Generator|Fossil gas": 60.0,
+   "Generator|Wind power": 5.000000051851853,
+   "Link|Alternating current": 55.0,
+   "Link|H2": 1.0,
+   "Load|-": -41.65653493617021,
+   "Store|H2": 7.142857333333334
+  },
+  "market_value|country": {
+   "Generator|NO": 60.0,
+   "Generator|SE": 5.000000051851853,
+   "Link|NO": {
+    "$nan": true
+   },
+   "Link|SE": -5.000000072538862,
+   "Load|NO": -52.857142833333334,
+   "Load|SE": -5.0,
+   "Store|NO": 7.142857333333334
+  },
+  "market_value|location": {
+   "Generator|north": 5.000000051851853,
+   "Generator|south": 60.0,
+   "Link|north": -5.000000072538862,
+   "Link|south": {
+    "$nan": true
+   },
+   "Load|north": -5.0,
+   "Load|south": -52.857142833333334,
+   "Store|south": 7.142857333333334
+  },
+  "market_value|name": {
+   "Generator|gas": 60.0,
+   "Generator|wind": 5.000000051851853,
+   "Link|elec": 1.0,
+   "Link|tie": 55.0,
+   "Load|da": -5.0,
+   "Load|db": -60.0,
+   "Load|dh": -8.5714284,
+   "Store|tank": 7.142857333333334
+  },
+  "market_value|unit": {
+   "Generator|MW": 13.44827601189061,
+   "Link|MW": 47.22798028451773,
+   "Link|t/h": {
+    "$nan": true
+   },
+   "Load|MW": -45.595238095238095,
+   "Load|t/h": -8.5714284,
+   "Store|t/h": 7.142857333333334
+  },
   "opex|bus": {
    "Generator|a": 1928.57143,
    "Generator|b": 4200.0,
@@ -545,6 +805,97 @@
   "overnight_cost|location": {},
   "overnight_cost|name": {},
   "overnight_cost|unit": {},
+  "prices|bus": {
+   "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+  },
+  "prices|bus_carrier": {
+   "A|C": 29.50719,
+   "H|2": 8.57143
+  },
+  "prices|carrier": {
+   "A|C": 29.50719,
+   "H|2": 8.57143
+  },
+  "prices|country": {
+   "N|O": 52.25049,
+   "S|E": 5.0
+  },
+  "prices|location": {
+   "n|o|r|t|h": 5.0,
+   "s|o|u|t|h": 52.25049
+  },
+  "prices|name": {
+   "a": 5.0,
+   "b": 60.0,
+   "h": 8.57143
+  },
+  "prices|unit": {
+   "M|W": 29.50719,
+   "t|/|h": 8.57143
+  },
+  "revenue|bus": {
+   "Generator|a": 1928.57143,
+   "Generator|b": 4200.0,
+   "Link|a": -1378.57143,
+   "Link|b": 14400.0,
+   "Link|h": 214.28571,
+   "Load|a": -550.0,
+   "Load|b": -18600.0,
+   "Load|h": -428.57143,
+   "Store|h": 214.28571
+  },
+  "revenue|bus_carrier": {
+   "Generator|Alternating current": 6128.57143,
+   "Link|Alternating current": 13021.42857,
+   "Link|H2": 214.28571,
+   "Load|Alternating current": -19150.0,
+   "Load|H2": -428.57143,
+   "Store|H2": 214.28571
+  },
+  "revenue|carrier": {
+   "Generator|Fossil gas": 4200.0,
+   "Generator|Wind power": 1928.57143,
+   "Link|Alternating current": 13200.0,
+   "Link|H2": 35.71429,
+   "Load|-": -19578.57143,
+   "Store|H2": 214.28571
+  },
+  "revenue|country": {
+   "Generator|NO": 4200.0,
+   "Generator|SE": 1928.57143,
+   "Link|NO": 14614.28571,
+   "Link|SE": -1378.57143,
+   "Load|NO": -19028.57143,
+   "Load|SE": -550.0,
+   "Store|NO": 214.28571
+  },
+  "revenue|location": {
+   "Generator|north": 1928.57143,
+   "Generator|south": 4200.0,
+   "Link|north": -1378.57143,
+   "Link|south": 14614.28571,
+   "Load|north": -550.0,
+   "Load|south": -19028.57143,
+   "Store|south": 214.28571
+  },
+  "revenue|name": {
+   "Generator|gas": 4200.0,
+   "Generator|wind": 1928.57143,
+   "Link|elec": 35.71429,
+   "Link|tie": 13200.0,
+   "Load|da": -550.0,
+   "Load|db": -18600.0,
+   "Load|dh": -428.57143,
+   "Store|tank": 214.28571
+  },
+  "revenue|unit": {
+   "Generator|MW": 6128.57143,
+   "Link|MW": 13021.42857,
+   "Link|t/h": 214.28571,
+   "Load|MW": -19150.0,
+   "Load|t/h": -428.57143,
+   "Store|t/h": 214.28571
+  },
   "supply|bus": {
    "Generator|a": 385.71429,
    "Generator|b": 70.0,
@@ -589,6 +940,114 @@
    "Link|MW": 240.0,
    "Link|t/h": 25.0,
    "Store|t/h": 30.0
+  },
+  "system_cost|bus": {
+   "Generator|a": 1928.57143,
+   "Generator|b": 4200.0,
+   "Link|a": 155.71429,
+   "Store|h": 5.0
+  },
+  "system_cost|bus_carrier": {
+   "Generator|Alternating current": 6128.57143,
+   "Link|Alternating current": 155.71429,
+   "Store|H2": 5.0
+  },
+  "system_cost|carrier": {
+   "Generator|Fossil gas": 4200.0,
+   "Generator|Wind power": 1928.57143,
+   "Link|Alternating current": 120.0,
+   "Link|H2": 35.71429,
+   "Store|H2": 5.0
+  },
+  "system_cost|country": {
+   "Generator|NO": 4200.0,
+   "Generator|SE": 1928.57143,
+   "Link|SE": 155.71429,
+   "Store|NO": 5.0
+  },
+  "system_cost|location": {
+   "Generator|north": 1928.57143,
+   "Generator|south": 4200.0,
+   "Link|north": 155.71429,
+   "Store|south": 5.0
+  },
+  "system_cost|name": {
+   "Generator|gas": 4200.0,
+   "Generator|wind": 1928.57143,
+   "Link|elec": 35.71429,
+   "Link|tie": 120.0,
+   "Store|tank": 5.0
+  },
+  "system_cost|unit": {
+   "Generator|MW": 6128.57143,
+   "Link|MW": 155.71429,
+   "Store|t/h": 5.0
+  },
+  "transmission|bus": {
+   "Link|a": 240.0
+  },
+  "transmission|bus_carrier": {
+   "Link|Alternating current": 240.0
+  },
+  "transmission|carrier": {
+   "Link|Alternating current": 240.0
+  },
+  "transmission|country": {
+   "Link|SE": 240.0
+  },
+  "transmission|location": {
+   "Link|north": 240.0
+  },
+  "transmission|name": {
+   "Link|tie": 240.0
+  },
+  "transmission|unit": {
+   "Link|MW": 240.0
+  },
+  "withdrawal|bus": {
+   "Link|a": 275.71429,
+   "Load|a": 110.0,
+   "Load|b": 310.0,
+   "Load|h": 50.0,
+   "Store|h": 5.0
+  },
+  "withdrawal|bus_carrier": {
+   "Link|Alternating current": 275.71429,
+   "Load|Alternating current": 420.0,
+   "Load|H2": 50.0,
+   "Store|H2": 5.0
+  },
+  "withdrawal|carrier": {
+   "Link|Alternating current": 240.0,
+   "Link|H2": 35.71429,
+   "Load|-": 470.0,
+   "Store|H2": 5.0
+  },
+  "withdrawal|country": {
+   "Link|SE": 275.71429,
+   "Load|NO": 360.0,
+   "Load|SE": 110.0,
+   "Store|NO": 5.0
+  },
+  "withdrawal|location": {
+   "Link|north": 275.71429,
+   "Load|north": 110.0,
+   "Load|south": 360.0,
+   "Store|south": 5.0
+  },
+  "withdrawal|name": {
+   "Link|elec": 35.71429,
+   "Link|tie": 240.0,
+   "Load|da": 110.0,
+   "Load|db": 310.0,
+   "Load|dh": 50.0,
+   "Store|tank": 5.0
+  },
+  "withdrawal|unit": {
+   "Link|MW": 275.71429,
+   "Load|MW": 420.0,
+   "Load|t/h": 50.0,
+   "Store|t/h": 5.0
   }
  }
 }

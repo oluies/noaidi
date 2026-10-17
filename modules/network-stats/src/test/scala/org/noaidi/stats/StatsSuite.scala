@@ -4,7 +4,7 @@ import java.nio.file.Files
 import org.noaidi.lopf.{CsvFixtures, Lopf}
 import org.noaidi.prima.{PdhgParams, SolveStatus}
 
-/** The two metrics against PyPSA's own `statistics`, never against arithmetic.
+/** Every implemented metric against PyPSA's own `statistics`, never against arithmetic.
   *
   * The discipline is this repository's existing one, and this module needed it twice before
   * a single assertion ran:
@@ -93,7 +93,58 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     "expanded_capacity"  -> ((s, g) => s.expandedCapacity(g)),
     "overnight_cost"     -> ((s, g) => s.overnightCost(g)),
     "fom"                -> ((s, g) => s.fom(g)),
+    "system_cost"        -> ((s, g) => s.systemCost(g)),
+    "curtailment"        -> ((s, g) => s.curtailment(g)),
+    "transmission"       -> ((s, g) => s.transmission(g)),
   )
+
+  /** Metrics the goldens record and this module does not answer yet, named rather than absent.
+    *
+    * `STATISTICS_METRICS` in the generator is PyPSA's full nineteen and every golden carries
+    * all of them, which is deliberate -- the reference runs ahead of the port. The case below
+    * asserts this set is EXACTLY the difference between what is recorded and what [[metrics]]
+    * implements, in both directions, so the hole cannot grow by accident and cannot outlive
+    * what it describes.
+    *
+    * Each of the six needs something the schema does not carry:
+    *
+    *   - `energy_balance`, `withdrawal`, `capacity_factor`, `revenue` and `market_value` all
+    *     report `Load`, which `quantitiesOf` deliberately gives no rows in `fact`
+    *   - `revenue`, `market_value` and `prices` need the bus marginal price, which is
+    *     `LopfResult.marginalPrice` and is in no table here
+    *   - `prices` is keyed by BUS rather than by component, so `grouped`'s key shape does not
+    *     fit it either
+    *
+    * ==Two of them will need the floor rethought, which is worth knowing in advance==
+    *
+    * [[GroupFloor]] is absolute and in the units of an energy or a cost, which is what makes
+    * it comparable to upstream's round-to-five rule. `capacity_factor` is '''dimensionless'''
+    * and `market_value` is a price, so their groups live near 1 rather than near 1,000:
+    * measured on the goldens, `scigrid-de` reports thirteen `capacity_factor` groups at or
+    * below 1e-4 and `market_value` carries 1,112 NaNs. A floor that reads as negligible for
+    * MWh is a floor that suppresses real groups for a ratio.
+    */
+  private val pending: Set[String] =
+    Set("energy_balance", "withdrawal", "capacity_factor", "revenue", "market_value", "prices")
+
+  /** The metrics this suite actually compares: everything recorded, less [[pending]].
+    *
+    * Every case here reads this rather than [[recordedMetrics]], including the ones that only
+    * read the goldens. A floor or a determinacy pin measured over a metric nobody compares is
+    * a statement about the reference rather than about this module, and it would move with
+    * each batch for no reason a reader could act on.
+    */
+  private lazy val comparedMetrics: List[String] = recordedMetrics.filterNot(pending)
+
+  /** One golden number, keeping a tagged NaN as a NaN rather than throwing on it.
+    *
+    * `generate_goldens.py` writes `{"$nan": true}` because JSON has no NaN literal, and
+    * `market_value` produces 1,112 of them -- it divides a revenue by a supply and several
+    * assets supply nothing. `ujson`'s `.num` raises `InvalidData` on the tag, which is a
+    * failure that names the encoding rather than the metric.
+    */
+  private def number(v: ujson.Value): Double =
+    if v.objOpt.exists(_.contains("$nan")) then Double.NaN else v.num
 
   /** The floor below which a group is a solver's zero rather than a group.
     *
@@ -157,7 +208,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     val block = results(name).obj.get("statistics").flatMap(_.obj.get(s"$metric|$groupBy"))
     block.flatMap { frame =>
       if frame.obj.contains("error") then None
-      else Some(frame.obj.map((k, v) => k -> v.num).toMap)
+      else Some(frame.obj.map((k, v) => k -> number(v)).toMap)
     }
 
   /** The groups of one metric this network's optimum does not pin, measured by the generator.
@@ -189,6 +240,29 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       .map(_.obj.keys.toSet)
       .getOrElse(Set.empty)
 
+  /** Whether this network's buses carry no `country` column, read off PyPSA's own complaint.
+    *
+    * The grouper raises `AttributeError: 'DataFrame' object has no attribute 'country'` on
+    * such a network -- 37 of the 39 -- but only for a metric that has rows to group, so the
+    * same network records that error for one metric and an EMPTY FRAME for another. Reading
+    * "the column is missing" off any one of its error blocks is what lets the comparison treat
+    * both as the declination they are.
+    *
+    * The `AttributeError` is matched specifically, and the first version was not: it took any
+    * `error` on a `|country` block as evidence, and `overnight_cost` records a `ValueError`
+    * about `discount_rate` on the six ac-dc networks -- which DO have the column. Those six
+    * then expected a refusal for every metric whose country frame was empty, and the suite
+    * failed on `fom|country` answering correctly.
+    */
+  private def countryRaises(name: String): Boolean =
+    results(name).obj
+      .get("statistics")
+      .exists(_.obj.exists { (block, frame) =>
+        block.endsWith("|country") &&
+          frame.obj.get("error")
+            .exists(e => e.str.startsWith("AttributeError") && e.str.contains("country"))
+      })
+
   /** Whether this golden is worth comparing at all, with the reason read from the golden. */
   private def comparable(name: String): Option[String] =
     val optimize = results(name)("optimize")
@@ -199,7 +273,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     else None
 
   networks.foreach { name =>
-    test(s"$name: supply and opex match PyPSA's statistics on every grouping") {
+    test(s"$name: every implemented metric matches PyPSA's statistics on every grouping") {
       assume(available, "goldens missing")
       assume(results(name).obj.contains("statistics"), s"$name has no statistics block")
 
@@ -222,9 +296,19 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       scala.util.Using.resource(Stats.of(result)) { stats =>
         var compared = 0
         groupings.foreach { groupBy =>
-          recordedMetrics.map(m => m -> (() => metrics(m)(stats, groupBy)))
+          comparedMetrics.map(m => m -> (() => metrics(m)(stats, groupBy)))
             .foreach { (metric, run) =>
-              expected(name, metric, groupBy) match
+              // PyPSA's `country` grouper raises when it is REACHED, and a metric with no
+              // rows never reaches it: `transmission|country` on a network with no
+              // transmission branch comes back as an empty frame rather than as an error, on
+              // ten goldens. `Stats.dimension` refuses the dimension up front instead, which
+              // is the same answer arrived at earlier, so an empty golden counts as a
+              // declination wherever the network has no `country` column at all.
+              val declined =
+                expected(name, metric, groupBy).isEmpty ||
+                  (groupBy == "country" && countryRaises(name) &&
+                    expected(name, metric, groupBy).exists(_.isEmpty))
+              (if declined then None else expected(name, metric, groupBy)) match
                 case None =>
                   // PyPSA raised. The module has to raise too, or it is answering a question
                   // upstream declines -- which for `country` would be "every bus is in the
@@ -289,45 +373,101 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(missing, List.empty[String])
   }
 
-  test("the determinacy measurement finds the five networks it should") {
+  test("the determinacy measurement finds the seven networks it should") {
     assume(available, "goldens missing")
     // Pinned, for the reason the floor's own list is pinned: a measurement that silently
     // started finding nothing would restore every comparison against a face and look like a
     // pass.
+    //
+    // Seven, where it was five. `curtailment` is what added the two new ones, and it is worth
+    // saying why it is the most tie-break-sensitive metric here: it reads the DISTANCE between
+    // a dispatch and its own headroom, so a generator sitting anywhere on an optimal face
+    // moves it, where `supply` and `opex` only move when the TOTAL moves. `ac-dc-meshed` and
+    // `annuitised-capital` are both fully determinate in every other metric.
     val affected = networks.filter { n =>
-      groupings.exists(g => recordedMetrics.exists(m => undetermined(n, m, g).nonEmpty))
+      groupings.exists(g => comparedMetrics.exists(m => undetermined(n, m, g).nonEmpty))
     }
-    assertEquals(affected, List("ac-dc-co2", "ac-dc-txcost", "scigrid-de",
+    assertEquals(affected, List("ac-dc-co2", "ac-dc-meshed", "ac-dc-txcost",
+                                "annuitised-capital", "scigrid-de",
                                 "storage-cyclic-co2", "storage-hvdc"))
 
-    // Three of the five are degenerate in their BRANCHES alone, which is what let branch
-    // coverage ship: every one-port group on them is a point, so widening `covered` cost
-    // nothing on the components that were already compared.
-    Seq("ac-dc-co2", "ac-dc-txcost", "storage-cyclic-co2").foreach { n =>
-      val kinds = groupings.flatMap(g => recordedMetrics.flatMap(m => undetermined(n, m, g)))
-        .map(component).toSet
-      assertEquals(kinds -- Set("Line", "Link", "Transformer"), Set.empty[String],
-        s"$n was branch-only and now has an undetermined one-port group")
-    }
+    // Every undetermined ONE-PORT group outside `scigrid-de`, with the metric that found it.
+    //
+    // This replaces two coarser claims -- "three of the five are degenerate in their branches
+    // alone" and a separate pin on `storage-hvdc`'s two generators -- both of which stopped
+    // being true when `curtailment` and `system_cost` landed. A one-port group coming loose is
+    // the expensive kind: a loose BRANCH group costs comparisons on components this module
+    // only recently covered at all, and a loose one-port group costs the comparisons that
+    // were the whole point. So they are enumerated rather than counted.
+    //
+    // Every margin here is between 0.01 and 100 against a `DETERMINACY_ABS` of 1e-2, which is
+    // the band where interior-point tolerance and a genuine face cannot be told apart. They
+    // are treated as faces because that direction costs a skipped group and the other costs a
+    // comparison that breaks on a tie-break.
+    //
+    // `scigrid-de` is excluded because it is degenerate across four component kinds and this
+    // suite skips it whole for a degenerate dispatch -- its `dispatch_note` already says so,
+    // and enumerating ~1,500 of its groups here would pin the solver rather than the measure.
+    val onePortKinds = Set("Generator", "StorageUnit", "Store")
+    val faces = networks
+      .filterNot(_ == "scigrid-de")
+      .map { n =>
+        n -> groupings.flatMap { g =>
+          comparedMetrics.flatMap { m =>
+            undetermined(n, m, g)
+              .filter(k => onePortKinds.contains(component(k)))
+              .map(k => s"$m $k")
+          }
+        }.toSet
+      }
+      .filter((_, keys) => keys.nonEmpty)
+      .toMap
+    assertEquals(faces, Map(
+      "ac-dc-meshed" -> Set("curtailment Generator|Frankfurt Wind"),
+      "ac-dc-txcost" -> Set("curtailment Generator|Frankfurt Wind",
+                            "curtailment Generator|NO",
+                            "curtailment Generator|Norway",
+                            "system_cost Generator|Norway Gas"),
+      "annuitised-capital" -> Set("curtailment Generator|both",
+                                  "curtailment Generator|perp"),
+      "storage-cyclic-co2" -> Set("curtailment StorageUnit|1",
+                                  "curtailment StorageUnit|3",
+                                  "curtailment StorageUnit|4",
+                                  "curtailment StorageUnit|Storage 1",
+                                  "curtailment StorageUnit|Storage 3",
+                                  "curtailment StorageUnit|Storage 4"),
+      "storage-hvdc" -> Set("capex Generator|Gas 2",
+                            "expanded_capex Generator|2",
+                            "expanded_capex Generator|Gas 2",
+                            "system_cost Generator|Gas 2",
+                            "curtailment StorageUnit|4",
+                            "curtailment StorageUnit|5",
+                            "curtailment StorageUnit|Storage 4",
+                            "curtailment StorageUnit|Storage 5"),
+    ))
 
-    // `scigrid-de` is degenerate across four component kinds, which its `dispatch_note`
-    // already said. `storage-hvdc` has ONE one-port group, and it is worth naming rather
-    // than folding into the three above: `Generator|Gas 2`'s capex moves by 0.0236 between
-    // the two solves, which is 2.4x the 1e-2 floor rather than the 14-to-538 the other faces
-    // move by. It sits in the band where interior-point tolerance and a genuine face cannot
-    // be told apart, and it is treated as a face because that direction costs one skipped
-    // group while the other costs a comparison that breaks on a tie-break.
-    val hvdc = groupings.flatMap(g => recordedMetrics.flatMap(m => undetermined("storage-hvdc", m, g)))
-      .filter(k => component(k) == "Generator").toSet
-    assertEquals(hvdc, Set("Generator|Gas 2", "Generator|2"))
+    // `ac-dc-co2` is the one network that is still degenerate in its BRANCHES alone, which is
+    // what let branch coverage ship in the first place: widening `covered` cost nothing on the
+    // one-ports that were already being compared there.
+    assertEquals(faces.get("ac-dc-co2"), None)
   }
 
-  test("every metric the generator records has an implementation here") {
+  test("every metric the generator records is implemented here or named as pending") {
     assume(available, "goldens missing")
     // `STATISTICS_METRICS` in the generator and `metrics` here are two lists, and a metric in
     // the first and not the second would be recorded in every golden and read by nothing --
-    // reported as a pass. This is that failure.
-    assertEquals(recordedMetrics.toSet -- metrics.keySet, Set.empty[String])
+    // reported as a pass. This is that failure, with [[pending]] as the one allowed shape of
+    // the gap.
+    assertEquals(recordedMetrics.toSet -- metrics.keySet -- pending, Set.empty[String],
+      "the generator records a metric that is neither implemented nor named as pending")
+    // The other two directions, so the named hole cannot outlive what it names. Without
+    // these, a `pending` entry would survive the metric being implemented -- and quietly take
+    // it out of every comparison in this file, which is precisely the silent loss of coverage
+    // the list exists to prevent.
+    assertEquals(pending -- recordedMetrics.toSet, Set.empty[String],
+      "a pending metric the generator no longer records")
+    assertEquals(pending.intersect(metrics.keySet), Set.empty[String],
+      "a metric is implemented and still listed as pending, so nothing compares it")
   }
 
   test("every grouping PyPSA offers is one this module accepts") {
@@ -400,8 +540,8 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
           .map(r => r("component").toString -> r("quantity").toString)
           .groupMap(_._1)(_._2)
           .view.mapValues(_.toSet).toMap
-        assertEquals(loaded("Generator"), Set("p", "marginal_cost"))
-        assertEquals(loaded("Link"), Set("p0", "marginal_cost", "efficiency"))
+        assertEquals(loaded("Generator"), Set("p", "marginal_cost", "p_max_pu"))
+        assertEquals(loaded("Link"), Set("p0", "marginal_cost", "efficiency", "p_max_pu"))
         assertEquals(loaded("Store"), Set("e", "p", "marginal_cost", "marginal_cost_storage"))
         // `Load` is a one-port with no solved series, listed explicitly in `quantitiesOf`
         // rather than falling through, so it contributes no rows at all.
@@ -432,11 +572,13 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       val json = results(name)
       val skip = comparable(name).isDefined
       json.obj.get("statistics").toList.flatMap(_.obj.toList).flatMap { (block, frame) =>
-        if frame.obj.contains("error") then Nil
+        // `comparedMetrics` rather than every block, for the reason given there: a floor
+        // measured over a metric nobody compares describes the reference, not this module.
+        if frame.obj.contains("error") || pending.contains(block.split('|').head) then Nil
         else
           frame.obj.toList
             .filter((key, _) => covered.contains(component(key)))
-            .map((key, v) => (name, block, key, v.num, skip))
+            .map((key, v) => (name, block, key, number(v), skip))
       }
     }
 

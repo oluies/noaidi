@@ -1,8 +1,8 @@
 # `network-stats`: DuckDB as a consumer of solved results
 
-Written as a sketch, and now partly built: `modules/network-stats` carries the five tables
-and two of the nineteen metrics. It exists to make one architectural claim concrete:
-**DuckDB belongs downstream of the solve, not underneath the network.**
+Written as a sketch, and now partly built: `modules/network-stats` carries the six tables,
+five views and thirteen of the nineteen metrics. It exists to make one architectural claim
+concrete: **DuckDB belongs downstream of the solve, not underneath the network.**
 
 The sketch is kept as written, with a *What building it changed* section at the end recording
 where it was wrong. Read the two together: four of the SQL snippets below are superseded, and
@@ -404,8 +404,9 @@ boundary a pinned list catches and a sentence about magnitudes does not.
 ### What is still not covered
 
 - **The other metrics.** Each is a query, and the corrections above are the argument for
-  adding them against measured goldens a few at a time rather than in one pass. Three of the
-  seventeen are done; see *The capital metrics* below for what they cost.
+  adding them against measured goldens a few at a time rather than in one pass. Thirteen of
+  the nineteen are done; see *The capital metrics* and *The three metrics that needed no new
+  table* below for what they cost, and *The remaining six* for what the rest need.
 - **A third port.** `bus2` and beyond are refused rather than dropped; see *Branches in
   `supply`* below.
 - **The `HAVING` clause's rounding.** Replacing `ROUND(..., 5) <> 0` with a `1e-9` threshold
@@ -474,8 +475,9 @@ has an implementation.
 
 ### What is still not covered
 
-Nine metrics: `system_cost`, `withdrawal`, `transmission`, `energy_balance`,
-`curtailment`, `capacity_factor`, `revenue`, `market_value`, `prices`.
+Six metrics: `energy_balance`, `withdrawal`, `capacity_factor`, `revenue`, `market_value`
+and `prices`. `system_cost`, `curtailment` and `transmission` have since landed — see *The
+three metrics that needed no new table*, which also says what the six still need.
 
 `overnight_cost` and `fom` are done, and `overnight_cost` is the first metric here that
 **refuses a network**. It is the inverse of `capex`: the column where it is set, and
@@ -641,6 +643,158 @@ investment-periods-expansion  constant 0.0 -> 3,900.0  upstream now appends it u
                                                        unchanged at 20,175
 ramp-limits                   50,240.00 -> 48,640.00   a genuinely cheaper answer
 ```
+
+## The three metrics that needed no new table
+
+`system_cost`, `curtailment` and `transmission` are the batch that fits the schema as it
+already stands, which is why they came before the six that do not. One is a composition of
+metrics already here, one needed a single new input series, and one needed a single new view.
+
+### `system_cost` is a union of three finished metrics, not a query
+
+Upstream is `reduce(lambda a, b: a.add(b, fill_value=0), (capex, fom, opex))`, and each
+operand has already been rounded to five decimals and zero-dropped by its own
+`_apply_option_kwargs` before the addition happens. So this is `expanded_capex`'s shape
+rather than `opex`'s: composed in Scala over three finished maps, because `round(a) + round(b)`
+is not `round(a + b)` in the fifth decimal, and because nothing re-drops the sum — a group
+whose terms cancel is reported as an exact zero.
+
+`annuitised-capital` pins all three terms on one asset. Its `new` generator is 4,290.52586 of
+capex, 750 of fom — the only non-zero `fom_cost` anywhere in the goldens — and 4,818,000 of
+opex, against upstream's 4,823,040.52586.
+
+**It is not the objective, and the gap is the one `capex` already has.** Three cost terms out
+of PyPSA's own three, so `system_cost` inherits every divergence those carry: `capex` reads
+the `capital_cost` *property*, which annuitises an `overnight_cost` and leaves `fom_cost`
+out, and `fom` is unweighted where `Expansion.periodizedCost` weights it. A multi-period
+network with a `fom_cost` therefore has a `system_cost` that is not its objective value.
+That is upstream's arithmetic, and worth stating because "total system cost" reads like the
+objective by name.
+
+### `curtailment` decides its own component set, and the join is what decides it
+
+`(p_max_pu × p_nom_opt − p).clip(lower=0)`, weighted by `generators` and summed.
+
+The clip is an **equivalent mutant** — dropping it fails no comparison, measured — and it is
+not a coincidence of the fixtures. The dispatch upper bound is `p <= p_max_pu × p_nom` and
+`p_nom_opt` *is* that `p_nom`, so the difference is non-negative for any feasible solution; for
+a storage unit the bound is on `p_dispatch` while `p` is `p_dispatch − p_store`, smaller still.
+A charging unit therefore reports its charging as curtailment on top of its headroom, and
+upstream does the same, since its own clip is just as inert there. It is reproduced because the
+one thing that *would* make it fire is a `p_nom_opt` disagreeing with the bound the dispatch
+was solved against — a defect this would otherwise report as a negative number rather than as a
+failure.
+
+The interesting part is **which components are in it**. Upstream wraps the body in
+`@pass_empty_series_if_keyerror` and then asks for `get_switchable_as_dense(c, "p_max_pu")`,
+so a component without that attribute contributes an empty series and no error. That is the
+entire membership rule — a passive branch has `s_max_pu`, which is not the same name, and
+`Store` and `Load` have neither.
+
+So this query reproduces the *rule* rather than restating the list it produces: `WHERE
+f.quantity IN ('p', 'p0')` admits every dispatch series, and an **inner join** to the
+`p_max_pu` rows of `fact` is what drops a component. `quantitiesOf` emits those rows for
+exactly the components that declare one, so a controllable branch added upstream is covered
+without this SQL changing, and a one-port added without a `p_max_pu` is excluded for
+upstream's own reason instead of by omission from a hardcoded `IN`. Measured: `inactive` and
+`standard-types` record no `Line` or `Transformer` group here while `transmission` reports
+both of them.
+
+**Nothing masks by investment period.** An asset that does not exist yet has `p = 0` and a
+`p_nom_opt` that is already its full capacity, so its whole potential is reported as
+curtailment in the periods before it is built. There is no `active_assets` term in upstream's
+`curtailment` either, and `investment-periods-expansion` is the golden that shows it.
+
+**It is also the most tie-break-sensitive metric here**, which was not obvious until it
+landed. It reads the *distance* between a dispatch and its own headroom, so a generator
+sitting anywhere on an optimal face moves it, where `supply` and `opex` only move when the
+total moves. The determinacy measurement went from five networks to seven on this metric
+alone: `ac-dc-meshed` and `annuitised-capital` are determinate in every other metric and have
+a generator whose curtailment moves by 0.012 between the two solves.
+
+### `transmission` is signed, and that is the whole difference from `supply`
+
+`p0 × generators`, summed at port 0 only — `at_port="bus0"` is this metric's own default, so a
+branch is counted once at the end it leaves and the receiving port's efficiency never enters.
+
+`supply` keeps the positive part of each port's injection, so a line that sends one way and
+receives the other reports the *sum*. This reports the **difference**: `ac-dc-meshed`'s
+`Line|0` is −3,795.26789, which is 25.717 − 3,820.985, and `inactive` reports `Line|AC` at
+−715 beside a `Transformer|-` at +420. A metric that took the absolute value would agree with
+upstream on every radial network and on nothing meshed.
+
+Which branches count is a new view, `transmission_branch`, and it is PyPSA's own definition:
+`get_transmission_branches` maps every `bus*` column through `buses.carrier` and keeps a
+branch where more than one end matches the same value. A line between two AC buses is
+transmission and an AC/DC converter link is not — `ac-dc-meshed` reports its seven lines and
+none of its three converters, and `statistics-dimensions` reports `tie` (AC to AC) and not
+`elec` (AC to H2).
+
+A network whose `buses.csv` has **no `carrier` column at all** is therefore entirely
+transmission, because `Bus.carrier` is declared with a default of `AC` and every bus gets it.
+`inactive` and `standard-types` report every line *and* transformer, which is in their
+goldens. The view's `COALESCE(..., '')` is not what produces that — it guards a NULL this
+loader does not currently produce, and dropping it is a measured equivalent mutant. It is kept
+because the failure it would admit is silent: comparing two NULLs in SQL yields NULL rather
+than true, so a bus carrier that ever did arrive unset would empty the view and make every
+`transmission` group disappear.
+
+### What the mutation run says about the three
+
+Seventeen mutants, fifteen killed. The ones worth naming are the ones that distinguish a
+reading of upstream from a plausible alternative:
+
+| mutant | killed by |
+|---|---|
+| `curtailment` weights with `objective` | `energy-budget`, 5 cases |
+| `curtailment` forgets `e.nominal` | 39 cases |
+| `curtailment` charges the installed capacity | `ac-dc-meshed`, 9 cases |
+| `curtailment` admits a component with no `p_max_pu`, at 1.0 | 22 cases |
+| `curtailment` drops the controllable branches | 13 cases |
+| `curtailment` drops the one-ports | 39 cases |
+| `transmission` takes the magnitude | 17 cases |
+| `transmission` counts every branch | 7 cases |
+| `transmission` weights with `objective` | `link-delay-wrap`, 1 case |
+| `transmission` reads the receiving port's dimensions | 22 cases |
+| `system_cost` drops the `fom` term | `annuitised-capital`, 1 case |
+| `system_cost` drops the `opex` term | 39 cases |
+| `system_cost` charges the installed capacity | 14 cases |
+| `system_cost` intersects the three key sets instead of unioning them | 39 cases |
+| `transmission_branch` compares `bus0` to itself | 7 cases |
+
+Two survived, and both are stated above rather than counted as coverage: `curtailment`'s
+`clip(lower=0)`, which cannot fire for a feasible solution, and `transmission_branch`'s
+`COALESCE`, which guards a NULL this loader does not produce.
+
+Two more were discarded as **vacuous** rather than recorded as survivors, which is worth a
+line because they first read as equivalent mutants. Loosening `curtailment`'s join to a `LEFT
+JOIN` on its own changes nothing — `pu.value` is then NULL, the arithmetic is NULL, `SUM`
+skips it and the `HAVING` drops the group — and adding `COALESCE(pu.value, 1.0)` on its own
+changes nothing either, because an inner join never produces the NULL it would catch. Only
+both together admit a component with no `p_max_pu`, and that mutant is killed in 22 cases. A
+mutant that does not alter the program is not evidence about the test suite.
+
+### The remaining six are named in the suite, not left absent
+
+`STATISTICS_METRICS` is PyPSA's full nineteen and every golden carries all of them, so the
+reference runs ahead of the port. `StatsSuite` carries a `pending` set naming the six, with a
+case asserting it is *exactly* the difference between what is recorded and what is
+implemented — in both directions, so a `pending` entry cannot outlive the metric being
+implemented and quietly take it out of every comparison.
+
+Each of the six needs something the schema does not have. `energy_balance`, `withdrawal`,
+`capacity_factor`, `revenue` and `market_value` all report `Load`, which `quantitiesOf`
+deliberately gives no rows in `fact`. `revenue`, `market_value` and `prices` need the bus
+marginal price, which is `LopfResult.marginalPrice` and is in no table here. And `prices` is
+keyed by **bus** rather than by component, so `grouped`'s key shape does not fit it either.
+
+**Two of them will need the group floor rethought.** `GroupFloor` is absolute and in the units
+of an energy or a cost, which is what makes it comparable to upstream's round-to-five rule.
+`capacity_factor` is dimensionless and `market_value` is a price, so their groups live near 1
+rather than near 1,000: `scigrid-de` reports thirteen `capacity_factor` groups at or below the
+floor, and `market_value` carries 1,112 NaNs across the goldens, which the suite's value
+decoder now keeps as NaNs rather than failing on the encoding. A floor that reads as
+negligible for MWh is a floor that suppresses real groups for a ratio.
 
 ## What this deliberately does not do
 

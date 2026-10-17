@@ -112,6 +112,59 @@
    }
   },
   "statistics": {
+   "capacity_factor|bus": {
+    "undetermined": {
+     "Line|Bremen": 0.1372798496870202,
+     "Line|Bremen DC": 0.3908432320243289,
+     "Line|London": 0.45362097572119925,
+     "Line|Manchester": 0.3445676089121781,
+     "Line|Norway DC": 0.3844319263632461,
+     "Line|Norwich": 0.38644910075319183,
+     "Line|Norwich DC": 0.5408987129381868,
+     "Link|London": 0.5534591194968553
+    }
+   },
+   "capacity_factor|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 0.033712758461601065,
+     "Line|DC": 0.42650857938431846
+    }
+   },
+   "capacity_factor|carrier": {
+    "undetermined": {
+     "Line|AC": 0.0818883077987038
+    }
+   },
+   "capacity_factor|country": {
+    "undetermined": {
+     "Line|DE": 0.029282108680596837,
+     "Line|NO": 0.3844319263632461,
+     "Line|UK": 0.4582812968858828
+    }
+   },
+   "capacity_factor|location": {
+    "undetermined": {
+     "Line|": 0.0818883077987038
+    }
+   },
+   "capacity_factor|name": {
+    "undetermined": {
+     "Generator|Norway Gas": 0.16666666666666669,
+     "Line|0": 0.45362097572119925,
+     "Line|1": 0.3445676089121781,
+     "Line|2": 0.3908432320243289,
+     "Line|3": 0.5408987129381868,
+     "Line|4": 0.3844319263632461,
+     "Line|5": 0.38644910075319183,
+     "Line|6": 0.1372798496870202,
+     "Link|DC link": 0.5534591194968553
+    }
+   },
+   "capacity_factor|unit": {
+    "undetermined": {
+     "Line|": 0.0818883077987038
+    }
+   },
    "capex|bus": {
     "undetermined": {
      "Line|Bremen": 3681.49807,
@@ -145,6 +198,23 @@
      "Line|4": 646.84651,
      "Line|5": 655.57499,
      "Line|6": 3681.49807
+    }
+   },
+   "curtailment|bus": {
+    "undetermined": {
+     "Generator|Norway": 0.01024,
+     "Link|London": 0.01032
+    }
+   },
+   "curtailment|country": {
+    "undetermined": {
+     "Generator|NO": 0.01024
+    }
+   },
+   "curtailment|name": {
+    "undetermined": {
+     "Generator|Frankfurt Wind": 0.0128,
+     "Link|DC link": 0.01032
     }
    },
    "expanded_capacity|bus": {
@@ -262,6 +332,62 @@
    },
    "overnight_cost|unit": {
     "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
+   },
+   "prices|bus": {
+    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+   },
+   "revenue|bus": {
+    "undetermined": {
+     "Link|London": 0.88665
+    }
+   },
+   "revenue|country": {
+    "undetermined": {
+     "Link|DE": 0.8864800000000059,
+     "Link|UK": 0.8863600000000247
+    }
+   },
+   "revenue|name": {
+    "undetermined": {
+     "Generator|Manchester Gas": 0.01533,
+     "Generator|Norway Gas": 0.18803
+    }
+   },
+   "system_cost|bus": {
+    "undetermined": {
+     "Line|Bremen": 3681.49807,
+     "Line|Bremen DC": 654.7680600000001,
+     "Line|London": 584.14039,
+     "Line|Manchester": 504.84296,
+     "Line|Norway DC": 646.84651,
+     "Line|Norwich": 655.57499,
+     "Line|Norwich DC": 635.33051
+    }
+   },
+   "system_cost|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 1936.9397400000003,
+     "Line|DC": 1936.94507
+    }
+   },
+   "system_cost|country": {
+    "undetermined": {
+     "Line|DE": 3026.7300200000004,
+     "Line|NO": 646.84651,
+     "Line|UK": 2379.88883
+    }
+   },
+   "system_cost|name": {
+    "undetermined": {
+     "Generator|Norway Gas": 0.01048,
+     "Line|0": 584.14039,
+     "Line|1": 504.84296,
+     "Line|2": 654.7680600000001,
+     "Line|3": 635.33051,
+     "Line|4": 646.84651,
+     "Line|5": 655.57499,
+     "Line|6": 3681.49807
+    }
    }
   }
  },
@@ -1535,6 +1661,127 @@
   "error": "AttributeError: 'SubNetwork' object has no attribute 'Y'"
  },
  "statistics": {
+  "capacity_factor|bus": {
+   "Generator|Frankfurt": 0.324727955437757,
+   "Generator|Manchester": 0.39644975132527427,
+   "Generator|Norway": 0.5037242895940275,
+   "Line|Bremen": 0.026657904778108168,
+   "Line|Bremen DC": 0.3954531493610604,
+   "Line|London": 0.5306009582350883,
+   "Line|Manchester": 0.48098660829593365,
+   "Line|Norway DC": 0.4079346245524655,
+   "Line|Norwich": 0.3925569542470438,
+   "Line|Norwich DC": 0.5808892813821873,
+   "Link|Bremen": 0.3507743180372365,
+   "Link|Norway": 0.40623387973049563,
+   "Link|Norwich": 0.26834170883976577,
+   "Load|Bremen": {
+    "$nan": true
+   },
+   "Load|Frankfurt": {
+    "$nan": true
+   },
+   "Load|London": {
+    "$nan": true
+   },
+   "Load|Manchester": {
+    "$nan": true
+   },
+   "Load|Norway": {
+    "$nan": true
+   },
+   "Load|Norwich": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|bus_carrier": {
+   "Generator|AC": 0.3933643355541317,
+   "Line|AC": 0.07605901440025169,
+   "Line|DC": 0.4353778213449134,
+   "Link|AC": 0.33787008125650253,
+   "Load|AC": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|carrier": {
+   "Generator|gas": 0.14920804002727073,
+   "Generator|wind": 0.42624495715867294,
+   "Line|AC": 0.10158995880971348,
+   "Link|DC": 0.33787008125650253,
+   "Load|load": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|country": {
+   "Generator|DE": 0.324727955437757,
+   "Generator|NO": 0.5037242895940275,
+   "Generator|UK": 0.39644975132527427,
+   "Line|DE": 0.041014860023376926,
+   "Line|NO": 0.4079346245524655,
+   "Line|UK": 0.4909159523824337,
+   "Link|DE": 0.3507743180372365,
+   "Link|NO": 0.40623387973049563,
+   "Link|UK": 0.26834170883976577,
+   "Load|DE": {
+    "$nan": true
+   },
+   "Load|NO": {
+    "$nan": true
+   },
+   "Load|UK": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|location": {
+   "Generator|": 0.3933643355541317,
+   "Line|": 0.10158995880971348,
+   "Link|": 0.33787008125650253,
+   "Load|": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|name": {
+   "Generator|Frankfurt Gas": 0.14920804002727073,
+   "Generator|Frankfurt Wind": 0.42808232669519825,
+   "Generator|Manchester Wind": 0.39644975132527427,
+   "Generator|Norway Wind": 0.5037242895940275,
+   "Line|0": 0.5306009582350883,
+   "Line|1": 0.48098660829593365,
+   "Line|2": 0.3954531493610604,
+   "Line|3": 0.5808892813821873,
+   "Line|4": 0.4079346245524655,
+   "Line|5": 0.3925569542470438,
+   "Line|6": 0.026657904778108168,
+   "Link|Bremen Converter": 0.3507743180372365,
+   "Link|Norway Converter": 0.40623387973049563,
+   "Link|Norwich Converter": 0.26834170883976577,
+   "Load|Bremen": {
+    "$nan": true
+   },
+   "Load|Frankfurt": {
+    "$nan": true
+   },
+   "Load|London": {
+    "$nan": true
+   },
+   "Load|Manchester": {
+    "$nan": true
+   },
+   "Load|Norway": {
+    "$nan": true
+   },
+   "Load|Norwich": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|unit": {
+   "Generator|": 0.3933643355541317,
+   "Line|": 0.10158995880971348,
+   "Link|": 0.33787008125650253,
+   "Load|": {
+    "$nan": true
+   }
+  },
   "capex|bus": {
    "Generator|Frankfurt": 3652178.28465,
    "Generator|Manchester": 11428297.29458,
@@ -1598,6 +1845,109 @@
    "Generator|": 18430432.45602,
    "Line|": 4800.0,
    "Link|": 798.60693
+  },
+  "curtailment|bus": {
+   "Generator|Frankfurt": 8355.07044,
+   "Generator|Manchester": 5548.78443,
+   "Link|Bremen": 18132.01888,
+   "Link|Norway": 7402.32273,
+   "Link|Norwich": 10500.7683
+  },
+  "curtailment|bus_carrier": {
+   "Generator|AC": 13903.85487,
+   "Link|AC": 36035.10991
+  },
+  "curtailment|carrier": {
+   "Generator|gas": 8355.07044,
+   "Generator|wind": 5548.78443,
+   "Link|DC": 36035.10991
+  },
+  "curtailment|country": {
+   "Generator|DE": 8355.07044,
+   "Generator|UK": 5548.78443,
+   "Link|DE": 18132.01888,
+   "Link|NO": 7402.32273,
+   "Link|UK": 10500.7683
+  },
+  "curtailment|location": {
+   "Generator|": 13903.85487,
+   "Link|": 36035.10991
+  },
+  "curtailment|name": {
+   "Generator|Frankfurt Gas": 8355.07044,
+   "Generator|Manchester Wind": 5548.78443,
+   "Link|Bremen Converter": 18132.01888,
+   "Link|Norway Converter": 7402.32273,
+   "Link|Norwich Converter": 10500.7683
+  },
+  "curtailment|unit": {
+   "Generator|": 13903.85487,
+   "Link|": 36035.10991
+  },
+  "energy_balance|bus": {
+   "Generator|Frankfurt": 8604.50788,
+   "Generator|Manchester": 16218.00522,
+   "Generator|Norway": 7725.11499,
+   "Line|Bremen": 2669.21329,
+   "Line|Bremen DC": 3996.07733,
+   "Line|Frankfurt": -2669.21329,
+   "Line|London": 4948.56634,
+   "Line|Manchester": -10813.78672,
+   "Line|Norway DC": -2316.86573,
+   "Line|Norwich": 5865.22038,
+   "Line|Norwich DC": -1679.2116,
+   "Link|Bremen": 3996.07733,
+   "Link|Bremen DC": -3996.07733,
+   "Link|Norway": -2316.86573,
+   "Link|Norway DC": 2316.86573,
+   "Link|Norwich": -1679.2116,
+   "Link|Norwich DC": 1679.2116,
+   "Load|Bremen": -6665.29061,
+   "Load|Frankfurt": -5935.29459,
+   "Load|London": -4948.56634,
+   "Load|Manchester": -5404.2185,
+   "Load|Norway": -5408.24927,
+   "Load|Norwich": -4186.00878
+  },
+  "energy_balance|bus_carrier": {
+   "Generator|AC": 32547.62808,
+   "Load|AC": -32547.62808
+  },
+  "energy_balance|carrier": {
+   "Generator|gas": 1465.27439,
+   "Generator|wind": 31082.3537,
+   "Load|load": -32547.62808
+  },
+  "energy_balance|country": {
+   "Generator|DE": 8604.50788,
+   "Generator|NO": 7725.11499,
+   "Generator|UK": 16218.00522,
+   "Line|DE": 3996.07733,
+   "Line|NO": -2316.86573,
+   "Line|UK": -1679.2116,
+   "Load|DE": -12600.5852,
+   "Load|NO": -5408.24927,
+   "Load|UK": -14538.79362
+  },
+  "energy_balance|location": {
+   "Generator|": 32547.62808,
+   "Load|": -32547.62808
+  },
+  "energy_balance|name": {
+   "Generator|Frankfurt Gas": 1465.27439,
+   "Generator|Frankfurt Wind": 7139.23349,
+   "Generator|Manchester Wind": 16218.00522,
+   "Generator|Norway Wind": 7725.11499,
+   "Load|Bremen": -6665.29061,
+   "Load|Frankfurt": -5935.29459,
+   "Load|London": -4948.56634,
+   "Load|Manchester": -5404.2185,
+   "Load|Norway": -5408.24927,
+   "Load|Norwich": -4186.00878
+  },
+  "energy_balance|unit": {
+   "Generator|": 32547.62808,
+   "Load|": -32547.62808
   },
   "expanded_capacity|bus": {
    "Generator|Frankfurt": 0.0,
@@ -1874,6 +2224,137 @@
    "Line|": 27691.56936,
    "Link|": 1476.5342
   },
+  "market_value|bus": {
+   "Generator|Frankfurt": 678.4125569458772,
+   "Generator|Manchester": 704.7772604734398,
+   "Generator|Norway": 433.73492007562345,
+   "Line|Bremen": 440.06017377159657,
+   "Line|Bremen DC": 322.78935337183736,
+   "Line|Frankfurt": {
+    "$nan": true
+   },
+   "Line|London": 1216.5871741168478,
+   "Line|Manchester": -1052.763018134135,
+   "Line|Norway DC": 40.259655830126874,
+   "Line|Norwich": 1558.6519300008554,
+   "Line|Norwich DC": -587.1062834359358,
+   "Link|Bremen": 206.3510225706726,
+   "Link|Bremen DC": {
+    "$nan": true
+   },
+   "Link|London": {
+    "$nan": true
+   },
+   "Link|Norway": 23.763206071011002,
+   "Link|Norway DC": {
+    "$nan": true
+   },
+   "Link|Norwich": -341.54404797420216,
+   "Link|Norwich DC": {
+    "$nan": true
+   },
+   "Load|Bremen": -557.4563603423384,
+   "Load|Frankfurt": -549.034727172599,
+   "Load|London": -945.8333211985056,
+   "Load|Manchester": -712.1110365171209,
+   "Load|Norway": -638.8204704431802,
+   "Load|Norwich": -396.75593527180354
+  },
+  "market_value|bus_carrier": {
+   "Generator|AC": 633.475949603836,
+   "Line|AC": {
+    "$nan": true
+   },
+   "Line|DC": {
+    "$nan": true
+   },
+   "Link|AC": 0.05903369680976632,
+   "Load|AC": -633.500486165995
+  },
+  "market_value|carrier": {
+   "Generator|gas": 1559.67121659943,
+   "Generator|wind": 589.8135478684808,
+   "Line|AC": {
+    "$nan": true
+   },
+   "Link|DC": 0.05903369680976632,
+   "Load|load": -633.500486165995
+  },
+  "market_value|country": {
+   "Generator|DE": 678.4125569458772,
+   "Generator|NO": 433.73492007562345,
+   "Generator|UK": 704.7772604734398,
+   "Line|DE": 121.15742676217499,
+   "Line|NO": 40.259655830126874,
+   "Line|UK": -82.57921838701893,
+   "Link|DE": 0.054165875226711804,
+   "Link|NO": 0.04923273056811373,
+   "Link|UK": 0.07825841834336496,
+   "Load|DE": -553.4894910991911,
+   "Load|NO": -638.8204704431802,
+   "Load|UK": -700.8660177210302
+  },
+  "market_value|location": {
+   "Generator|": 633.475949603836,
+   "Line|": {
+    "$nan": true
+   },
+   "Link|": 0.05903369680976632,
+   "Load|": -633.500486165995
+  },
+  "market_value|name": {
+   "Generator|Frankfurt Gas": 1559.67121659943,
+   "Generator|Frankfurt Wind": 497.5407933638814,
+   "Generator|Manchester Gas": {
+    "$nan": true
+   },
+   "Generator|Manchester Wind": 704.7772604734398,
+   "Generator|Norway Gas": {
+    "$nan": true
+   },
+   "Generator|Norway Wind": 433.73492007562345,
+   "Line|0": {
+    "$nan": true
+   },
+   "Line|1": {
+    "$nan": true
+   },
+   "Line|2": {
+    "$nan": true
+   },
+   "Line|3": {
+    "$nan": true
+   },
+   "Line|4": {
+    "$nan": true
+   },
+   "Line|5": {
+    "$nan": true
+   },
+   "Line|6": {
+    "$nan": true
+   },
+   "Link|Bremen Converter": 0.054165875226711804,
+   "Link|DC link": {
+    "$nan": true
+   },
+   "Link|Norway Converter": 0.04923273056811373,
+   "Link|Norwich Converter": 0.07825841834336496,
+   "Load|Bremen": -557.4563603423384,
+   "Load|Frankfurt": -549.034727172599,
+   "Load|London": -945.8333211985056,
+   "Load|Manchester": -712.1110365171209,
+   "Load|Norway": -638.8204704431802,
+   "Load|Norwich": -396.75593527180354
+  },
+  "market_value|unit": {
+   "Generator|": 633.475949603836,
+   "Line|": {
+    "$nan": true
+   },
+   "Link|": 0.05903369680976632,
+   "Load|": -633.500486165995
+  },
   "opex|bus": {
    "Generator|Frankfurt": 6701.5063,
    "Generator|Manchester": 1783.98057,
@@ -1988,6 +2469,114 @@
   "overnight_cost|unit": {
    "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
   },
+  "prices|bus": {
+   "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+  },
+  "prices|bus_carrier": {
+   "A|C": 634.94693,
+   "D|C": 461.14636
+  },
+  "prices|carrier": {
+   "A|C": 634.94693,
+   "D|C": 461.14636
+  },
+  "prices|country": {
+   "D|E": 577.21383,
+   "N|O": 497.85718,
+   "U|K": 654.0737
+  },
+  "prices|location": {
+   "": 599.30798
+  },
+  "prices|name": {
+   "B|r|e|m|e|n": 573.22681,
+   "B|r|e|m|e|n| |D|C": 487.80861,
+   "F|r|a|n|k|f|u|r|t": 631.64173,
+   "L|o|n|d|o|n": 878.38922,
+   "M|a|n|c|h|e|s|t|e|r": 699.7052,
+   "N|o|r|w|a|y": 506.12314,
+   "N|o|r|w|a|y| |D|C": 481.91479,
+   "N|o|r|w|i|c|h": 559.56061,
+   "N|o|r|w|i|c|h| |D|C": 407.36419
+  },
+  "prices|unit": {
+   "": 599.30798
+  },
+  "revenue|bus": {
+   "Generator|Frankfurt": 5837406.20571,
+   "Generator|Manchester": 11430081.27515,
+   "Generator|Norway": 3350652.13714,
+   "Line|Bremen": 2578723.35427,
+   "Line|Bremen DC": 1136586.85878,
+   "Line|Frankfurt": -2578723.35427,
+   "Line|London": 4680518.89874,
+   "Line|Manchester": -7581677.63751,
+   "Line|Norway DC": 104032.24299,
+   "Line|Norwich": 2901158.73877,
+   "Line|Norwich DC": -1240619.10177,
+   "Link|Bremen": 1136885.28421,
+   "Link|Bremen DC": -1136586.85878,
+   "Link|Norway": 104248.22496,
+   "Link|Norway DC": -104032.24299,
+   "Link|Norwich": -1240334.90224,
+   "Link|Norwich DC": 1240619.10177,
+   "Load|Bremen": -3715608.63848,
+   "Load|Frankfurt": -3258682.85145,
+   "Load|London": -4680518.89874,
+   "Load|Manchester": -3848403.63765,
+   "Load|Norway": -3454900.36209,
+   "Load|Norwich": -1660823.83653
+  },
+  "revenue|bus_carrier": {
+   "Generator|AC": 20618139.618,
+   "Link|AC": 798.60693,
+   "Load|AC": -20618938.22493
+  },
+  "revenue|carrier": {
+   "Generator|gas": 2285346.30615,
+   "Generator|wind": 18332793.31186,
+   "Link|DC": 798.60693,
+   "Load|load": -20618938.22493
+  },
+  "revenue|country": {
+   "Generator|DE": 5837406.20571,
+   "Generator|NO": 3350652.13714,
+   "Generator|UK": 11430081.27515,
+   "Line|DE": 1136586.85878,
+   "Line|NO": 104032.24299,
+   "Line|UK": -1240619.10177,
+   "Link|DE": 298.42543,
+   "Link|NO": 215.98197,
+   "Link|UK": 284.19953,
+   "Load|DE": -6974291.48993,
+   "Load|NO": -3454900.36209,
+   "Load|UK": -10189746.37291
+  },
+  "revenue|location": {
+   "Generator|": 20618139.618,
+   "Link|": 798.60693,
+   "Load|": -20618938.22493
+  },
+  "revenue|name": {
+   "Generator|Frankfurt Gas": 2285346.30615,
+   "Generator|Frankfurt Wind": 3552059.89957,
+   "Generator|Manchester Wind": 11430081.27515,
+   "Generator|Norway Wind": 3350652.13714,
+   "Link|Bremen Converter": 298.42543,
+   "Link|Norway Converter": 215.98197,
+   "Link|Norwich Converter": 284.19953,
+   "Load|Bremen": -3715608.63848,
+   "Load|Frankfurt": -3258682.85145,
+   "Load|London": -4680518.89874,
+   "Load|Manchester": -3848403.63765,
+   "Load|Norway": -3454900.36209,
+   "Load|Norwich": -1660823.83653
+  },
+  "revenue|unit": {
+   "Generator|": 20618139.618,
+   "Link|": 798.60693,
+   "Load|": -20618938.22493
+  },
   "supply|bus": {
    "Generator|Frankfurt": 8604.50788,
    "Generator|Manchester": 16218.00522,
@@ -2056,6 +2645,179 @@
    "Generator|": 32547.62808,
    "Line|": 26988.48826,
    "Link|": 13527.98388
+  },
+  "system_cost|bus": {
+   "Generator|Frankfurt": 3658879.79095,
+   "Generator|Manchester": 11430081.27515,
+   "Generator|Norway": 3350652.1371400002,
+   "Line|Bremen": 4396.39465,
+   "Line|Bremen DC": 7.72287,
+   "Line|London": 99.12913,
+   "Line|Manchester": 199.87381,
+   "Line|Norway DC": 39.54575,
+   "Line|Norwich": 10.36143,
+   "Line|Norwich DC": 46.97234,
+   "Link|Bremen": 298.42543,
+   "Link|Norway": 215.98197,
+   "Link|Norwich": 284.19953
+  },
+  "system_cost|bus_carrier": {
+   "Generator|AC": 18439613.20324,
+   "Line|AC": 4705.75903,
+   "Line|DC": 94.24097,
+   "Link|AC": 798.60693
+  },
+  "system_cost|carrier": {
+   "Generator|gas": 106819.89138,
+   "Generator|wind": 18332793.31185,
+   "Line|AC": 4800.0,
+   "Link|DC": 798.60693
+  },
+  "system_cost|country": {
+   "Generator|DE": 3658879.79095,
+   "Generator|NO": 3350652.1371400002,
+   "Generator|UK": 11430081.27515,
+   "Line|DE": 4404.11753,
+   "Line|NO": 39.54575,
+   "Line|UK": 356.33673,
+   "Link|DE": 298.42543,
+   "Link|NO": 215.98197,
+   "Link|UK": 284.19953
+  },
+  "system_cost|location": {
+   "Generator|": 18439613.20324,
+   "Line|": 4800.0,
+   "Link|": 798.60693
+  },
+  "system_cost|name": {
+   "Generator|Frankfurt Gas": 106819.89138,
+   "Generator|Frankfurt Wind": 3552059.89957,
+   "Generator|Manchester Wind": 11430081.27515,
+   "Generator|Norway Wind": 3350652.1371400002,
+   "Line|0": 99.12913,
+   "Line|1": 199.87381,
+   "Line|2": 7.72287,
+   "Line|3": 46.97234,
+   "Line|4": 39.54575,
+   "Line|5": 10.36143,
+   "Line|6": 4396.39465,
+   "Link|Bremen Converter": 298.42543,
+   "Link|Norway Converter": 215.98197,
+   "Link|Norwich Converter": 284.19953
+  },
+  "system_cost|unit": {
+   "Generator|": 18439613.20324,
+   "Line|": 4800.0,
+   "Link|": 798.60693
+  },
+  "transmission|bus": {
+   "Line|Bremen": -2669.21329,
+   "Line|Bremen DC": -2243.55546,
+   "Line|London": -3794.71589,
+   "Line|Manchester": 7019.07083,
+   "Line|Norway DC": 1752.52186,
+   "Line|Norwich": 1153.85045,
+   "Line|Norwich DC": -564.34386
+  },
+  "transmission|bus_carrier": {
+   "Line|AC": 1708.9921,
+   "Line|DC": -1055.37746
+  },
+  "transmission|carrier": {
+   "Line|AC": 653.61463
+  },
+  "transmission|country": {
+   "Line|DE": -4912.76875,
+   "Line|NO": 1752.52186,
+   "Line|UK": 3813.86152
+  },
+  "transmission|location": {
+   "Line|": 653.61463
+  },
+  "transmission|name": {
+   "Line|0": -3794.71589,
+   "Line|1": 7019.07083,
+   "Line|2": -2243.55546,
+   "Line|3": -564.34386,
+   "Line|4": 1752.52186,
+   "Line|5": 1153.85045,
+   "Line|6": -2669.21329
+  },
+  "transmission|unit": {
+   "Line|": 653.61463
+  },
+  "withdrawal|bus": {
+   "Line|Bremen": 1595.36013,
+   "Line|Bremen DC": 1054.54795,
+   "Line|Frankfurt": 4264.57341,
+   "Line|London": 380.00625,
+   "Line|Manchester": 10931.36722,
+   "Line|Norway DC": 3507.00302,
+   "Line|Norwich": 1598.89986,
+   "Line|Norwich DC": 3656.73042,
+   "Link|Bremen": 756.6976,
+   "Link|Bremen DC": 4752.77493,
+   "Link|Norway": 3351.91264,
+   "Link|Norway DC": 1035.04692,
+   "Link|Norwich": 2655.3817,
+   "Link|Norwich DC": 976.1701,
+   "Load|Bremen": 6665.29061,
+   "Load|Frankfurt": 5935.29459,
+   "Load|London": 4948.56634,
+   "Load|Manchester": 5404.2185,
+   "Load|Norway": 5408.24927,
+   "Load|Norwich": 4186.00878
+  },
+  "withdrawal|bus_carrier": {
+   "Line|AC": 18770.20686,
+   "Line|DC": 8218.28139,
+   "Link|AC": 6763.99194,
+   "Link|DC": 6763.99194,
+   "Load|AC": 32547.62808
+  },
+  "withdrawal|carrier": {
+   "Line|AC": 26988.48826,
+   "Link|DC": 13527.98388,
+   "Load|load": 32547.62808
+  },
+  "withdrawal|country": {
+   "Line|DE": 6914.48149,
+   "Line|NO": 3507.00302,
+   "Line|UK": 16567.00375,
+   "Link|DE": 5509.47252,
+   "Link|NO": 4386.95956,
+   "Link|UK": 3631.55179,
+   "Load|DE": 12600.5852,
+   "Load|NO": 5408.24927,
+   "Load|UK": 14538.79362
+  },
+  "withdrawal|location": {
+   "Line|": 26988.48826,
+   "Link|": 13527.98388,
+   "Load|": 32547.62808
+  },
+  "withdrawal|name": {
+   "Line|0": 3847.25323,
+   "Line|1": 7201.69449,
+   "Line|2": 3521.14108,
+   "Line|3": 2113.10816,
+   "Line|4": 2584.03215,
+   "Line|5": 1861.32561,
+   "Line|6": 5859.93354,
+   "Link|Bremen Converter": 5509.47252,
+   "Link|Norway Converter": 4386.95956,
+   "Link|Norwich Converter": 3631.55179,
+   "Load|Bremen": 6665.29061,
+   "Load|Frankfurt": 5935.29459,
+   "Load|London": 4948.56634,
+   "Load|Manchester": 5404.2185,
+   "Load|Norway": 5408.24927,
+   "Load|Norwich": 4186.00878
+  },
+  "withdrawal|unit": {
+   "Line|": 26988.48826,
+   "Link|": 13527.98388,
+   "Load|": 32547.62808
   }
  }
 }

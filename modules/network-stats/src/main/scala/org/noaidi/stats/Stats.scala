@@ -425,6 +425,138 @@ final class Stats private (
       )
     else capital(groupBy, "e.nominal * COALESCE(e.overnight_cost, 0)", weighted = false)
 
+  /** Capital, fixed O&M and operating cost together, by `groupBy`.
+    *
+    * `capex + fom + opex`, and like [[expandedCapex]] it is a '''union of finished metrics'''
+    * rather than a query of its own. Upstream is
+    * `reduce(lambda a, b: a.add(b, fill_value=0), (capex, fom, opex))`, where each operand has
+    * already been rounded and zero-dropped inside its own metric and nothing is dropped from
+    * the sum. So a group whose capital and operating terms cancel reports an exact zero, the
+    * same way `expanded_capex` does -- and `round(a) + round(b)` is not `round(a + b)` in the
+    * fifth decimal, which is the reason the composition has to happen here and not in SQL.
+    *
+    * `annuitised-capital` pins all three terms on one asset: its `new` generator is
+    * 4,290.52586 of capex, 750 of fom -- the only `fom_cost` anywhere in the goldens -- and
+    * 4,818,000 of opex, and upstream reports 4,823,040.52586.
+    *
+    * ==It is NOT the objective, and the gap is `overnight_cost`-shaped==
+    *
+    * Three cost terms out of PyPSA's own `capex`, `fom` and `opex`, so this inherits every
+    * divergence from the objective that those three have: `capex` reads the `capital_cost`
+    * property, which leaves `fom_cost` out and annuitises an `overnight_cost`, and `fom` is
+    * unweighted where `Expansion.periodizedCost` weights it. A network solved with
+    * `fom_cost` on a multi-period index therefore has a `system_cost` that is not its
+    * objective value, and that is upstream's arithmetic rather than a port's error.
+    *
+    * [[overnightCost]] is not a term here, so this works on the networks that one refuses.
+    */
+  def systemCost(groupBy: String = "carrier"): Map[String, Double] =
+    val parts = Seq(capex(groupBy), fom(groupBy), opex(groupBy))
+    parts
+      .flatMap(_.keySet)
+      .distinct
+      .map(key => key -> parts.map(_.getOrElse(key, 0.0)).sum)
+      .toMap
+
+  /** Available power that was not dispatched, in MWh, by `groupBy`.
+    *
+    * `(p_max_pu * p_nom_opt - p).clip(lower=0)`, weighted by `w_generators` and summed --
+    * upstream's `curtailment` to the letter, including the clip, which matters because a
+    * storage unit that is CHARGING has a negative `p` and would otherwise count its charging
+    * as curtailment on top of its headroom.
+    *
+    * `w_generators` rather than `w_objective`, for the same reason [[supply]] uses it: this
+    * is an energy and `_aggregate_timeseries` reads `snapshot_weightings.generators`.
+    *
+    * ==Which components it covers is decided by `p_max_pu`, not by a list==
+    *
+    * Upstream wraps the body in `@pass_empty_series_if_keyerror` and then asks for
+    * `get_switchable_as_dense(c, "p_max_pu")`, so a component without that attribute
+    * contributes an empty series and no error. That is the whole membership rule: `Generator`,
+    * `StorageUnit` and the controllable branches have a `p_max_pu`; `Store`, `Load`, `Line`
+    * and `Transformer` do not. A passive branch has `s_max_pu` instead, which is not the same
+    * name, so `inactive` and `standard-types` record no `Line` or `Transformer` group here
+    * while [[transmission]] reports both of them.
+    *
+    * This query reproduces that rule rather than restating the list: the `INNER JOIN` to the
+    * `p_max_pu` rows of `fact` is what drops a component, and `quantitiesOf` emits those rows
+    * for exactly the components that declare one. A controllable branch added upstream is
+    * covered without this SQL changing, and a one-port added without a `p_max_pu` is excluded
+    * for upstream's own reason instead of by omission from a hardcoded `IN`.
+    *
+    * ==Inactive capacity counts as curtailed==
+    *
+    * Nothing masks by investment period. An asset that does not exist yet has `p = 0` and a
+    * `p_nom_opt` that is already its full capacity, so its whole potential is reported as
+    * curtailment in the periods before it is built. Upstream does the same -- there is no
+    * `active_assets` term in `curtailment` -- and `investment-periods-expansion` is the
+    * fixture that shows it rather than a judgement about what the number ought to mean.
+    */
+  def curtailment(groupBy: String = "carrier"): Map[String, Double] =
+    // `GREATEST(..., 0)` is `clip(lower=0)`. DuckDB has no `clip`, and `CASE WHEN` would say
+    // the same thing in three more lines.
+    val term =
+      "GREATEST(pu.value * e.nominal - f.value, 0) * s.w_generators"
+    grouped(s"""
+      |SELECT f.component            AS component,
+      |       d.${dimension(groupBy)} AS grp$periodSelect,
+      |       ROUND(SUM($term), 5)    AS value
+      |FROM fact f
+      |-- The membership rule, as a join: a component with no `p_max_pu` has no such rows and
+      |-- drops out, which is what `@pass_empty_series_if_keyerror` does upstream.
+      |JOIN fact pu
+      |  ON  pu.component = f.component AND pu.entity = f.entity
+      |  AND pu.snapshot  = f.snapshot  AND pu.quantity = 'p_max_pu'
+      |JOIN entity e ON e.component = f.component AND e.entity = f.entity
+      |JOIN dimensions d
+      |  ON d.component = f.component AND d.entity = f.entity AND d.port = 0
+      |JOIN snapshot s ON s.snapshot = f.snapshot
+      |-- The dispatch series, under both its names: `p` for a one-port and `p0` for a
+      |-- controllable branch, which is the same variable PyPSA stores twice -- `assign_solution`
+      |-- writes a link's `p` and its `p0` from one solution array.
+      |WHERE f.quantity IN ('p', 'p0')
+      |GROUP BY f.component, grp$periodGroup
+      |HAVING ROUND(SUM($term), 5) <> 0
+      |""".stripMargin)
+
+  /** Signed flow through the branches that carry power between buses of one carrier.
+    *
+    * `p0 * w_generators`, summed, at port 0 only -- `at_port="bus0"` is this metric's own
+    * default and not the usual `None`, so a branch is counted once at the end it leaves and
+    * the receiving port's efficiency never enters. Which branches count is the
+    * `transmission_branch` view; see [[StatsSchema]] for why same-carrier is PyPSA's own
+    * definition of transmission.
+    *
+    * ==Signed, and that is the whole difference from [[supply]]==
+    *
+    * `supply` keeps the positive part of each port's injection, so a line that sends 25.7 MWh
+    * one way and 3,821 MWh the other reports their sum. This reports their '''difference''':
+    * `ac-dc-meshed`'s `Line|0` comes out at -3,795.26789, which is 25.717 - 3,820.985, and
+    * `inactive` reports `Line|AC` at -715 beside a `Transformer|-` at +420. A metric that
+    * took the absolute value would agree with upstream on every radial network and on nothing
+    * meshed.
+    *
+    * So the sign is the direction the flow took on balance, and a group of several lines can
+    * cancel to a zero that `drop_zero` then removes -- which is why `ac-dc-txvolume` reports
+    * `Line|AC` and `statistics-dimensions` reports its one `Link|tie` at +240 rather than a
+    * magnitude.
+    */
+  def transmission(groupBy: String = "carrier"): Map[String, Double] =
+    grouped(s"""
+      |SELECT f.component            AS component,
+      |       d.${dimension(groupBy)} AS grp$periodSelect,
+      |       ROUND(SUM(f.value * s.w_generators), 5) AS value
+      |FROM fact f
+      |JOIN transmission_branch tb
+      |  ON tb.component = f.component AND tb.entity = f.entity
+      |JOIN dimensions d
+      |  ON d.component = f.component AND d.entity = f.entity AND d.port = 0
+      |JOIN snapshot s ON s.snapshot = f.snapshot
+      |WHERE f.quantity = 'p0'
+      |GROUP BY f.component, grp$periodGroup
+      |HAVING ROUND(SUM(f.value * s.w_generators), 5) <> 0
+      |""".stripMargin)
+
   /** The shared body of the four metrics that are a single sum over `capital_share`.
     *
     * `cost` is an expression over `entity`, interpolated -- which is safe only because the
@@ -787,14 +919,18 @@ object Stats:
     */
   private def quantitiesOf(spec: ComponentSpec): Seq[String] = Role.of(spec) match
     case Role.PassiveBranch      => Seq("p0")
-    case Role.ControllableBranch => Seq("p0", "marginal_cost", "efficiency")
+    // `p_max_pu` for `curtailment`, which is the headroom above the dispatch. A passive
+    // branch has `s_max_pu` instead and no `p_max_pu` at all, so upstream's `curtailment`
+    // raises a KeyError on one and reports nothing -- `inactive` and `standard-types` record
+    // no `Line` or `Transformer` group for it, where `transmission` reports both.
+    case Role.ControllableBranch => Seq("p0", "marginal_cost", "efficiency", "p_max_pu")
     case Role.Bus | Role.None    => Seq.empty
     case Role.Attached =>
       spec.name match
-        case "Generator" => Seq("p", "marginal_cost")
+        case "Generator" => Seq("p", "marginal_cost", "p_max_pu")
         case "StorageUnit" =>
           Seq("p", "soc", "charge", "discharge", "spill",
-              "marginal_cost", "marginal_cost_storage", "spill_cost")
+              "marginal_cost", "marginal_cost_storage", "spill_cost", "p_max_pu")
         case "Store" => Seq("e", "p", "marginal_cost", "marginal_cost_storage")
         // Consumption, which enters the bus balance as a constant. It has no solved series
         // and so no row in `fact`; `withdrawal` will read it off the network when it exists.
@@ -833,7 +969,8 @@ object Stats:
       // `efficiency` scales what a branch's receiving port injects, and it is `static or
       // series` upstream, so it belongs beside the other input series rather than on
       // `entity`. A passive branch has no such attribute and `injection` coalesces to 1.0.
-      case "marginal_cost" | "marginal_cost_storage" | "spill_cost" | "efficiency" =>
+      case "marginal_cost" | "marginal_cost_storage" | "spill_cost" | "efficiency" |
+          "p_max_pu" =>
         if declares(table, quantity) then table.valueAt(quantity, id, t) else 0.0
       case other =>
         throw new IllegalStateException(s"no accessor for quantity '$other' on $component")

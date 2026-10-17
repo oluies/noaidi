@@ -25,7 +25,16 @@
    }
   },
   "statistics": {
+   "capacity_factor|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "capex|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "curtailment|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "energy_balance|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
    "expanded_capacity|country": {
@@ -43,6 +52,9 @@
    "installed_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "market_value|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "opex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
@@ -52,7 +64,25 @@
    "overnight_cost|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "prices|bus": {
+    "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+   },
+   "prices|country": {
+    "error": "ValueError: Grouping prices by 'country' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+   },
+   "revenue|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
    "supply|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "system_cost|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "transmission|country": {
+    "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "withdrawal|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    }
   }
@@ -658,6 +688,60 @@
   }
  },
  "statistics": {
+  "capacity_factor|bus": {
+   "Generator|a": 0.55,
+   "Generator|b": 0.13333333333333333,
+   "Link|a": 0.6,
+   "Load|a": {
+    "$nan": true
+   },
+   "Load|b": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|bus_carrier": {
+   "Generator|AC": 0.3,
+   "Link|AC": 0.6,
+   "Load|AC": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|carrier": {
+   "Generator|-": 0.3,
+   "Link|AC": 0.6,
+   "Load|-": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "capacity_factor|location": {
+   "Generator|": 0.3,
+   "Link|": 0.6,
+   "Load|": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|name": {
+   "Generator|cheap": 0.5777777666666666,
+   "Generator|local": 0.26666666666666666,
+   "Generator|pinned": 0.46666670000000005,
+   "Link|tie": 0.6,
+   "Load|da": {
+    "$nan": true
+   },
+   "Load|db": {
+    "$nan": true
+   }
+  },
+  "capacity_factor|unit": {
+   "Generator|": 0.3,
+   "Link|": 0.6,
+   "Load|": {
+    "$nan": true
+   }
+  },
   "capex|bus": {},
   "capex|bus_carrier": {},
   "capex|carrier": {},
@@ -667,6 +751,71 @@
   "capex|location": {},
   "capex|name": {},
   "capex|unit": {},
+  "curtailment|bus": {
+   "Generator|a": 540.0,
+   "Generator|b": 1560.0,
+   "Link|a": 240.0
+  },
+  "curtailment|bus_carrier": {
+   "Generator|AC": 2100.0,
+   "Link|AC": 240.0
+  },
+  "curtailment|carrier": {
+   "Generator|-": 2100.0,
+   "Link|AC": 240.0
+  },
+  "curtailment|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "curtailment|location": {
+   "Generator|": 2100.0,
+   "Link|": 240.0
+  },
+  "curtailment|name": {
+   "Generator|cheap": 380.0,
+   "Generator|local": 660.0,
+   "Generator|pinned": 160.0,
+   "Generator|spare": 900.0,
+   "Link|tie": 240.0
+  },
+  "curtailment|unit": {
+   "Generator|": 2100.0,
+   "Link|": 240.0
+  },
+  "energy_balance|bus": {
+   "Generator|a": 660.0,
+   "Generator|b": 240.0,
+   "Link|a": -360.0,
+   "Link|b": 360.0,
+   "Load|a": -300.0,
+   "Load|b": -600.0
+  },
+  "energy_balance|bus_carrier": {
+   "Generator|AC": 900.0,
+   "Load|AC": -900.0
+  },
+  "energy_balance|carrier": {
+   "Generator|-": 900.0,
+   "Load|-": -900.0
+  },
+  "energy_balance|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "energy_balance|location": {
+   "Generator|": 900.0,
+   "Load|": -900.0
+  },
+  "energy_balance|name": {
+   "Generator|cheap": 520.0,
+   "Generator|local": 240.0,
+   "Generator|pinned": 140.0,
+   "Load|da": -300.0,
+   "Load|db": -600.0
+  },
+  "energy_balance|unit": {
+   "Generator|": 900.0,
+   "Load|": -900.0
+  },
   "expanded_capacity|bus": {
    "Generator|a": 0.0,
    "Generator|b": 0.0,
@@ -756,6 +905,50 @@
   "installed_capex|location": {},
   "installed_capex|name": {},
   "installed_capex|unit": {},
+  "market_value|bus": {
+   "Generator|a": 10.0,
+   "Generator|b": 50.0,
+   "Link|a": -10.0,
+   "Link|b": {
+    "$nan": true
+   },
+   "Load|a": -10.0,
+   "Load|b": -50.0
+  },
+  "market_value|bus_carrier": {
+   "Generator|AC": 20.666666666666668,
+   "Link|AC": 40.0,
+   "Load|AC": -36.666666666666664
+  },
+  "market_value|carrier": {
+   "Generator|-": 20.666666666666668,
+   "Link|AC": 40.0,
+   "Load|-": -36.666666666666664
+  },
+  "market_value|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "market_value|location": {
+   "Generator|": 20.666666666666668,
+   "Link|": 40.0,
+   "Load|": -36.666666666666664
+  },
+  "market_value|name": {
+   "Generator|cheap": 10.000000173076927,
+   "Generator|local": 50.0,
+   "Generator|pinned": 9.999999357142903,
+   "Generator|spare": {
+    "$nan": true
+   },
+   "Link|tie": 40.0,
+   "Load|da": -10.0,
+   "Load|db": -50.0
+  },
+  "market_value|unit": {
+   "Generator|": 20.666666666666668,
+   "Link|": 40.0,
+   "Load|": -36.666666666666664
+  },
   "opex|bus": {
    "Generator|a": 16400.0,
    "Generator|b": 12000.0
@@ -820,6 +1013,67 @@
   "overnight_cost|location": {},
   "overnight_cost|name": {},
   "overnight_cost|unit": {},
+  "prices|bus": {
+   "error": "ValueError: Grouping prices by 'bus' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+  },
+  "prices|bus_carrier": {
+   "A|C": 29.04762
+  },
+  "prices|carrier": {
+   "A|C": 29.04762
+  },
+  "prices|country": {
+   "error": "ValueError: Grouping prices by 'country' is not supported. Use 'name', 'bus_carrier' or a static bus attribute."
+  },
+  "prices|location": {
+   "": 29.04762
+  },
+  "prices|name": {
+   "a": 10.0,
+   "b": 50.0
+  },
+  "prices|unit": {
+   "": 29.04762
+  },
+  "revenue|bus": {
+   "Generator|a": 6600.0,
+   "Generator|b": 12000.0,
+   "Link|a": -3600.0,
+   "Link|b": 18000.0,
+   "Load|a": -3000.0,
+   "Load|b": -30000.0
+  },
+  "revenue|bus_carrier": {
+   "Generator|AC": 18600.0,
+   "Link|AC": 14400.0,
+   "Load|AC": -33000.0
+  },
+  "revenue|carrier": {
+   "Generator|-": 18600.0,
+   "Link|AC": 14400.0,
+   "Load|-": -33000.0
+  },
+  "revenue|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "revenue|location": {
+   "Generator|": 18600.0,
+   "Link|": 14400.0,
+   "Load|": -33000.0
+  },
+  "revenue|name": {
+   "Generator|cheap": 5200.0,
+   "Generator|local": 12000.0,
+   "Generator|pinned": 1400.0,
+   "Link|tie": 14400.0,
+   "Load|da": -3000.0,
+   "Load|db": -30000.0
+  },
+  "revenue|unit": {
+   "Generator|": 18600.0,
+   "Link|": 14400.0,
+   "Load|": -33000.0
+  },
   "supply|bus": {
    "Generator|a": 660.0,
    "Generator|b": 240.0,
@@ -849,6 +1103,80 @@
   "supply|unit": {
    "Generator|": 900.0,
    "Link|": 360.0
+  },
+  "system_cost|bus": {
+   "Generator|a": 16400.0,
+   "Generator|b": 12000.0
+  },
+  "system_cost|bus_carrier": {
+   "Generator|AC": 28400.0
+  },
+  "system_cost|carrier": {
+   "Generator|-": 28400.0
+  },
+  "system_cost|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "system_cost|location": {
+   "Generator|": 28400.0
+  },
+  "system_cost|name": {
+   "Generator|cheap": 5200.0,
+   "Generator|local": 12000.0,
+   "Generator|pinned": 11200.0
+  },
+  "system_cost|unit": {
+   "Generator|": 28400.0
+  },
+  "transmission|bus": {
+   "Link|a": 360.0
+  },
+  "transmission|bus_carrier": {
+   "Link|AC": 360.0
+  },
+  "transmission|carrier": {
+   "Link|AC": 360.0
+  },
+  "transmission|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "transmission|location": {
+   "Link|": 360.0
+  },
+  "transmission|name": {
+   "Link|tie": 360.0
+  },
+  "transmission|unit": {
+   "Link|": 360.0
+  },
+  "withdrawal|bus": {
+   "Link|a": 360.0,
+   "Load|a": 300.0,
+   "Load|b": 600.0
+  },
+  "withdrawal|bus_carrier": {
+   "Link|AC": 360.0,
+   "Load|AC": 900.0
+  },
+  "withdrawal|carrier": {
+   "Link|AC": 360.0,
+   "Load|-": 900.0
+  },
+  "withdrawal|country": {
+   "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+  },
+  "withdrawal|location": {
+   "Link|": 360.0,
+   "Load|": 900.0
+  },
+  "withdrawal|name": {
+   "Link|tie": 360.0,
+   "Load|da": 300.0,
+   "Load|db": 600.0
+  },
+  "withdrawal|unit": {
+   "Link|": 360.0,
+   "Load|": 900.0
   }
  }
 }

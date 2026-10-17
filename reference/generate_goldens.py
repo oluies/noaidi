@@ -2423,11 +2423,17 @@ NETWORKS = {
 
 # The statistics metrics recorded per network.
 #
-# Two, not nineteen, and that is the skeleton's scope rather than a judgement about the rest:
-# `supply` and `opex` weight DIFFERENTLY -- `supply` delegates to `energy_balance` and uses
-# `snapshot_weightings.generators`, `opex` uses `snapshot_weightings.objective` times the
-# period's `objective` -- so a port that confused the two columns passes one and fails the
-# other. Recording a metric nothing compares against would be a golden with no reader.
+# All nineteen, in `statistics`' own order, and the reference deliberately runs AHEAD of the
+# port: `StatsSuite` implements thirteen of them and names the rest in a `pending` set, with a
+# case asserting that set is exactly the difference in both directions. The alternative --
+# recording only what is implemented -- means regenerating every golden to add a metric, and
+# it hides what the next batch costs until someone pays it.
+#
+# This started at two, `supply` and `opex`, on the argument that those two weight DIFFERENTLY
+# -- `supply` delegates to `energy_balance` and reads `snapshot_weightings.generators`, `opex`
+# reads `snapshot_weightings.objective` times the period's `objective` -- so a port that
+# confused the two columns passes one and fails the other. That is still the sharpest pair
+# here; it was the claim that a golden with no reader is worthless that did not survive.
 STATISTICS_METRICS = (
     "supply",
     "opex",
@@ -2439,6 +2445,15 @@ STATISTICS_METRICS = (
     "expanded_capacity",
     "overnight_cost",
     "fom",
+    "system_cost",
+    "capacity_factor",
+    "curtailment",
+    "transmission",
+    "energy_balance",
+    "withdrawal",
+    "revenue",
+    "market_value",
+    "prices",
 )
 
 # Every grouping dimension `statistics` offers, in the order its own container lists them.

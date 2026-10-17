@@ -221,6 +221,36 @@ private[stats] object StatsSchema:
       |  AND eff.snapshot  = f.snapshot  AND eff.quantity = 'efficiency'
       |WHERE f.quantity = 'p0'""".stripMargin,
 
+    // Branches that carry power between two buses of the SAME carrier, which is PyPSA's own
+    // definition of transmission -- `get_transmission_branches` maps every `bus*` column
+    // through `buses.carrier` and keeps a branch where more than one end matches the same
+    // carrier value.
+    //
+    // So a line between two AC buses is transmission and an AC/DC converter link is not.
+    // Measured: `ac-dc-meshed` reports its seven lines and none of its three converters, and
+    // `statistics-dimensions` reports `tie` (AC to AC) and not `elec` (AC to H2).
+    //
+    // ==A network with no `carrier` column is all transmission, and that is not the coalesce==
+    //
+    // PyPSA declares `Bus.carrier` with a default of `AC`, so a `buses.csv` without the column
+    // gives every bus the same carrier and upstream then matches them all to each other:
+    // `inactive` and `standard-types` report every line AND transformer as transmission, which
+    // is in their goldens. `ComponentTable.string` falls back to the declared default too, so
+    // this view reaches the same answer by the same route.
+    //
+    // The `COALESCE(..., '')` therefore guards a NULL this loader does not currently produce,
+    // and dropping it is an EQUIVALENT MUTANT -- measured, not assumed. It is kept because the
+    // failure it prevents is silent rather than loud: comparing two NULLs in SQL yields NULL
+    // rather than true, so a bus carrier that ever did arrive unset would make the whole view
+    // empty and every `transmission` group simply disappear.
+    """CREATE VIEW transmission_branch AS
+      |SELECT e.component, e.entity
+      |FROM entity e
+      |JOIN bus b0 ON b0.name = e.bus
+      |JOIN bus b1 ON b1.name = e.bus1
+      |WHERE e.bus1 IS NOT NULL
+      |  AND COALESCE(b0.carrier, '') = COALESCE(b1.carrier, '')""".stripMargin,
+
     // Every grouping dimension, resolved once per entity AND PORT.
     //
     // A view rather than seven expressions repeated in nineteen queries, which is the shape

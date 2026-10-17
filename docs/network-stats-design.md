@@ -967,6 +967,31 @@ port that started getting a price wrong would keep comparing the metric over it 
 determinacy case pins which networks the measurement rejects so it cannot start rejecting
 everything either.
 
+#### They are faces, and that had to be measured rather than assumed
+
+The two zeros read like a *missing* dual when the list was first written, and that reading was
+wrong. Two facts make them faces, and a case now asserts both:
+
+- **Strong duality holds on all seven.** The dual gap is between 1.3e-13 and 1.8e-9 relative,
+  and each objective matches PyPSA's to five decimals. Two objectives agreeing is what makes a
+  dual optimal rather than merely feasible.
+- **Every price that is *forced* agrees with PyPSA exactly.** None of the differing cells is at
+  a bus with a generator strictly inside its bounds — except on `ac-dc-dispatch` and
+  `ramp-limits`, where a CO2 multiplier of −2178.29 and the ramp multipliers enter the reduced
+  cost, so an interior unit does not pin its bus price to its marginal cost there. On the two
+  delay networks there is no global constraint and no ramp limit, so `price <= marginal_cost`
+  is the whole condition at an idle generator and it holds at all fourteen differing cells.
+
+So the zeros are the bottom of an interval and PyPSA's 5 and 15 are the top. `link-delay` is
+about as degenerate as an LP gets: the load is 100 MW at one snapshot, `delay = 1` puts it out
+of the cheap generator's reach entirely, and the answer is "run the expensive local unit once
+and nothing else ever" — every other column sits at zero, so most prices are bounded above and
+determined by nothing.
+
+`LopfSuite` already made this argument for `ac-dc-dispatch`, in almost these words and for the
+same reason. What was missing was the argument over the other six, which is now a case driven
+by the pinned list: the skip is only honest if the dual it declines to compare is optimal.
+
 ### `revenue` is the `injection` view priced, and its weighting is the odd one
 
 `sign * p_port * marginal_price[bus_of_port] * w_objective`, summed, at every port. The signed

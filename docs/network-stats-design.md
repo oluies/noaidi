@@ -1089,9 +1089,35 @@ Each correction is narrow and each is measured. The general fix is a determinacy
 each metric's own units, which is a generator change with its own calibration and is still not
 this one.
 
+### The first version of the guard was behind the flag it guarded
+
+Worth recording because it survived a full mutation run and looked like coverage. `prices` is
+gated on two measurements — the dual agreement and the determinacy of its weights — so the
+per-network case asserts that a network which passes both compared at least one `prices`
+grouping. Correct for the half read from the golden: forcing `pricesComparable` false fails 30
+cases.
+
+Useless for the other half. The assertion itself sits behind `duals`, so forcing `duals` to
+false removes the three dual metrics from **every** comparison in the file *and* the assertion
+that would have noticed — measured, that mutant survived the whole suite while `compared > 0`
+stayed true on the strength of the other sixteen metrics.
+
+The second attempt was no better and is worth the same line: a case that called `dualAgrees`
+directly and pinned its verdict on a sample of seven networks. It kills a broken *measurement*
+and not a broken *gate* — forcing the loop's flag false still left the three metrics uncompared
+on forty networks while the case passed, because the case never goes through the loop.
+
+What works is pinning the list and asserting the measurement against it **inside the
+per-network case**, on every network rather than a sample. `dualFace` names the seven, the
+comparison still gates on the measurement, and `assertEquals(duals, !dualFace(name))` runs
+before anything else: forcing the flag false fails on the thirty-two networks whose prices
+agree, forcing it true fails on the seven, emptying the list fails, and making the measurement
+itself always agree fails. An assertion behind the flag it guards is not a guard, and an
+assertion that bypasses the flag is not one either.
+
 ### What the mutation run says about these three
 
-Eighteen mutants, fifteen killed:
+Twenty-three mutants, nineteen killed:
 
 | mutant | killed by |
 |---|---|
@@ -1106,6 +1132,11 @@ Eighteen mutants, fifteen killed:
 | `prices` reads the nice carrier name | 45 cases |
 | the bus withdrawal filters instead of clipping | 19 cases |
 | the price is not divided back out by the objective weighting | `storage-cycle`, 5 cases |
+| the dual-agreement gate is always true | the seven pinned networks |
+| the dual-agreement gate is always false | the thirty-two that agree |
+| the dual-agreement measurement always agrees | the seven pinned networks |
+| the pinned dual-face list is empty | the seven pinned networks |
+| the prices weight gate is always false | 30 cases |
 
 Three survived, and each one's reason is a fact about the fixtures rather than about the code:
 

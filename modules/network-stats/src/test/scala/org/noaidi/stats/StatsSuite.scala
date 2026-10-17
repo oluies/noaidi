@@ -304,6 +304,42 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     */
   private val dualMetrics: Set[String] = Set("revenue", "market_value", "prices")
 
+  /** The networks whose nodal prices are a different vertex of the same optimal dual face.
+    *
+    * Pinned, and [[dualAgrees]] is asserted against it on EVERY network -- which is what makes
+    * the gate load-bearing in both directions. Forcing the measurement false fails on the
+    * thirty-two networks whose prices agree; forcing it true fails on these seven.
+    *
+    * That matters more than it sounds. The first guard was an assertion that a network whose
+    * duals agreed had compared at least one `prices` grouping -- and it sat BEHIND the same
+    * flag, so forcing the flag false removed the three dual metrics from every comparison and
+    * the assertion that would have noticed. Measured: that mutant survived the whole suite.
+    *
+    * The measurement is still what gates the comparison; this list only has to agree with it.
+    * A port that fixed one of these keeps the metric skipped until the name is removed, and
+    * the assertion is what says so rather than a silent widening.
+    *
+    * ==The evidence, as the worst disagreement per network==
+    *
+    * {{{
+    * ramp-limits         22.31   a@4          PyPSA 40.0   here 62.31
+    * link-delay-wrap     15.00   b@3          PyPSA 15.0   here  0.0
+    * link-delay           5.00   a@0          PyPSA  5.0   here  0.0
+    * ac-dc-dispatch       3.87   Bremen@8     PyPSA  0.11  here  3.98
+    * ac-dc-txvolume       0.145  Norwich DC@8
+    * ac-dc-co2            0.114  Norway@5     PyPSA  0.11  here  0.22
+    * annuitised-capital   0.0086 a@1          PyPSA 11.2114 here 11.2029
+    * }}}
+    *
+    * The two zeros are worth a second look by someone: a price of exactly 0 where upstream
+    * reports 5 and 15 is the shape of a missing dual rather than of a face, and both are
+    * delayed-link networks. Recorded here rather than investigated, because it is a question
+    * about `Lopf` and not about this module.
+    */
+  private val dualFace: Set[String] =
+    Set("ac-dc-co2", "ac-dc-dispatch", "ac-dc-txvolume", "annuitised-capital", "link-delay",
+        "link-delay-wrap", "ramp-limits")
+
   /** Whether this network's nodal prices agree with PyPSA's, cell by cell.
     *
     * Measured against `optimize.bus_marginal_price` at the same `1e-4` relative tolerance the
@@ -434,6 +470,12 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       // Measured once per network, because it decides three of the nineteen metrics and
       // reads every bus at every snapshot.
       val duals = dualAgrees(name, result)
+      // And checked against [[dualFace]] here rather than in a case of its own, so that it is
+      // asserted on every network rather than on a sample. This is the guard: an assertion
+      // that the three dual metrics WERE compared would sit behind this same flag and vanish
+      // with them.
+      assertEquals(duals, !dualFace.contains(name),
+        s"$name: the dual-agreement measurement disagrees with the pinned list")
 
       scala.util.Using.resource(Stats.of(result)) { stats =>
         var compared = 0
@@ -548,6 +590,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         // comparison above reads a component kind off the front of every key and skips by
         // kind; `prices` is keyed by the bus grouper alone, so there is no kind to read --
         // which also makes its determinacy skip finer, per KEY rather than per kind.
+        var pricesCompared = 0
         groupings.foreach { groupBy =>
           if !duals || !pricesComparable(name) then ()
           else expected(name, "prices", groupBy) match
@@ -563,6 +606,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
               val shared = wanted.filterNot((key, _) => loose.contains(key))
               if shared.values.exists(v => math.abs(v) > 1e-9) then
                 compared += 1
+                pricesCompared += 1
                 assertEquals(
                   significant(mine).keySet.filterNot(loose.contains),
                   significant(shared).keySet,
@@ -575,6 +619,16 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         // Reaching the end having compared nothing is the failure every `assume` above can
         // produce by accident, and it looks identical to a pass.
         assert(compared > 0, s"$name compared no metric at all")
+        // And the same failure one metric down, for the HALF of `prices`' gate that is read
+        // from the golden. A `pricesComparable` that became always false would take the metric
+        // out of every comparison while `compared` stayed positive on the strength of the
+        // other eighteen -- that mutant fails 30 cases here.
+        //
+        // It does NOT guard the dual half, because it is gated on it: forcing `duals` false
+        // removes both the comparison and this assertion. The case above is what guards that,
+        // by pinning the measurement rather than its consequence.
+        if duals && pricesComparable(name) then
+          assert(pricesCompared > 0, s"$name compared no prices grouping at all")
       }
     }
   }
@@ -663,6 +717,42 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // undetermined groups were in `prices`, and `prices` is compared by its own block rather
     // than through `comparedMetrics`. The dual-agreement measurement is what skips it.
     assertEquals(faces.get("ac-dc-txvolume"), None)
+  }
+
+  test("the three dual metrics are compared against the goldens, not merely gated") {
+    assume(available, "goldens missing")
+    // The gate itself is asserted per network against [[dualFace]]. This is the other half:
+    // that the metrics behind it produce the golden's own numbers rather than an empty map
+    // nobody notices.
+    //
+    // `statistics-dimensions` is the network because it sets `nice_name` on both its carriers,
+    // so it is the one that distinguishes `prices`' RAW carrier from every other metric's
+    // `nice_name` chain -- the mutant that reads the nice name fails 45 cases, and this is
+    // where the distinction is visible in two lines rather than in a diff of 45.
+    scala.util.Using.resource(Stats.of(Lopf.solve(network("statistics-dimensions"), params))) {
+      stats =>
+        val prices = stats.prices("carrier")
+        assertEquals(prices.keySet, Set("AC", "H2"))
+        expected("statistics-dimensions", "prices", "carrier").get.foreach { (key, want) =>
+          assertEqualsDouble(prices(key), want, 1e-4 * math.max(1.0, want), key)
+        }
+        assert(stats.revenue("name").nonEmpty, "revenue compared nothing")
+        assert(stats.marketValue("name").nonEmpty, "market_value compared nothing")
+    }
+    // And that the pinned list names networks that exist, so a renamed fixture fails here
+    // rather than quietly un-skipping itself.
+    assertEquals(dualFace -- networks.toSet, Set.empty[String])
+  }
+
+  test("prices is skipped on exactly the networks whose weights or prices are a face") {
+    assume(available, "goldens missing")
+    // The determinacy half of `prices`' gate, pinned -- the dual half needs a solve and the
+    // per-network case asserts it there. Six networks, and the two reasons are both in the
+    // goldens: `prices|name` is undetermined on five of them and `withdrawal|bus` on three,
+    // because a load-weighted average of prices reads the dispatch as well as the dual.
+    assertEquals(networks.filterNot(pricesComparable),
+      List("ac-dc-co2", "ac-dc-dispatch", "ramp-limits", "scigrid-de", "storage-cyclic-co2",
+           "storage-hvdc"))
   }
 
   test("every metric the generator records is implemented here or named as pending") {

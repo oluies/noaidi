@@ -398,7 +398,7 @@ suite skips for a degenerate dispatch, against a smallest *compared* group of 0.
 thousand times the floor. A future golden with a genuinely tiny group in a compared network
 fails a test instead of being quietly dropped. The fifth of those five sits exactly on the
 floor, and the first version of that pinned list said four: it was enumerated with a strict
-`<` in a throwaway script while `significant` keeps `> GroupFloor`, which is the kind of
+`<` in a throwaway script while `significant` keeps `> floor`, which is the kind of
 boundary a pinned list catches and a sentence about magnitudes does not.
 
 ### What is still not covered
@@ -1194,8 +1194,8 @@ is the record of what the batches cost: `energy_balance`, `withdrawal`, `capacit
 `revenue`, `market_value` and `prices` need the bus marginal price, which was in no table; and
 `prices` is keyed by **bus** rather than by component.
 
-**The group floor is the thing that narrowed.** `GroupFloor` is absolute and in the units of an
-energy or a cost, which is what makes it comparable to upstream's round-to-five rule, and two
+**The group floor is the thing that narrowed.** It was a single absolute value in the units of
+an energy or a cost, which is what made it comparable to upstream's round-to-five rule, and two
 of the metrics that landed are neither — `capacity_factor` is dimensionless and `market_value`
 is a price. The smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor
 to `phase-shift`'s 0.0161 at 161x to `ac-dc-dispatch`'s 0.0003846 at **3.8x** — at which point
@@ -1276,8 +1276,9 @@ this port happened to land near upstream's simplex vertex, not because the two a
 
 ### The floor is now bounded on both sides
 
-`GroupFloor` is 1e-4, and the natural question is why not 1e-5, which is PyPSA's own
-round-to-five resolution. Measured, by setting it there and reading the failure: at 1e-5
+The floor was 1e-4 at this point, one value for all nineteen metrics, and the natural question
+is why not 1e-5, which is PyPSA's own round-to-five resolution. Measured, by setting it there
+and reading the failure: at 1e-5
 `ac-dc-txcost`'s `revenue|bus_carrier` reports `Line|AC` at −2e-05 and `Line|DC` at 1e-05 here,
 where upstream reports neither. Those are the residue of a cancellation — the AC lines earn and
 pay nearly 20.6 million each way — so they are this solver's zero at 1e-9 and not groups.
@@ -1304,6 +1305,7 @@ Measured, by setting every floor to zero and reading what fails:
 
 | metric | largest artefact | smallest real group (all networks) | floor |
 |---|---|---|---|
+| `prices` | none, but reachable | 0.10223 | 1e-4 |
 | `revenue` | 4e-05 | 1e-05 (`scigrid-de`) | 1e-4 |
 | `supply` | 1e-05 | 1e-05 (`scigrid-de`) | 1e-4 |
 | `energy_balance` | 1e-05 | 1e-05 (`scigrid-de`) | 1e-4 |
@@ -1323,6 +1325,13 @@ in the first group:
 - **A cancellation.** `energy_balance` and `revenue` sum a signed quantity over both ports, so
   a branch's two ends nearly annihilate and what survives is the epsilon times the scale of
   the terms — `revenue` reaches 4e-05 because its terms carry a price.
+- **A dual epsilon, amplified.** `prices` averages a *dual*, and the gate that admits a network
+  at all tolerates `1e-4 · max(1, |want|)` — 1e-4 absolute at a cheap bus. A bus priced at
+  exactly zero upstream and 5e-5 here passes that gate and lands in the key-set comparison. No
+  artefact exists today, so this one is floored on a reachable mechanism rather than a measured
+  residue, and its smallest real group anywhere is 0.10223 so the floor costs nothing.
+  It is also the one metric neither census case can see, being keyed by bus — left unfloored it
+  would read as a side effect of a name's absence from a set rather than as a decision.
 
 Everything else reads a static column, sums at one port, or takes an absolute value, and
 produces no artefact at all. `market_value` is the one that cancels and still needs no floor,

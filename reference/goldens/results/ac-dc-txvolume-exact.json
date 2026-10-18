@@ -122,6 +122,69 @@
      "Link|DC link": 0.4269662921348315
     }
    },
+   "capex|bus": {
+    "undetermined": {
+     "Link|London": 0.00078
+    }
+   },
+   "capex|name": {
+    "undetermined": {
+     "Generator|Manchester Gas": 0.00054,
+     "Generator|Norway Gas": 0.00283,
+     "Link|DC link": 0.00078
+    }
+   },
+   "curtailment|bus": {
+    "undetermined": {
+     "Generator|Norway": 0.00541999999999998,
+     "Link|London": 0.00661
+    }
+   },
+   "curtailment|country": {
+    "undetermined": {
+     "Generator|NO": 0.00541999999999998
+    }
+   },
+   "curtailment|name": {
+    "undetermined": {
+     "Generator|Frankfurt Wind": 0.00969,
+     "Generator|Norway Gas": 0.00014,
+     "Generator|Norway Wind": 0.005269999999999886,
+     "Link|DC link": 0.00661
+    }
+   },
+   "energy_balance|bus": {
+    "undetermined": {
+     "Link|London": 0.00141
+    }
+   },
+   "energy_balance|country": {
+    "undetermined": {
+     "Link|DE": 0.00141,
+     "Link|UK": 0.00141
+    }
+   },
+   "market_value|country": {
+    "undetermined": {
+     "Link|DE": 0.00011154204635750731,
+     "Link|UK": 0.00016948676859875056
+    }
+   },
+   "opex|name": {
+    "undetermined": {
+     "Generator|Norway Gas": 0.00021
+    }
+   },
+   "optimal_capacity|bus": {
+    "undetermined": {
+     "Link|London": 0.00089
+    }
+   },
+   "optimal_capacity|name": {
+    "undetermined": {
+     "Link|DC link": 0.00089
+    }
+   },
    "overnight_cost|bus": {
     "error": "ValueError: Cannot back-calculate overnight_cost for ['Manchester Wind', 'Manchester Gas', 'Norway Wind', 'Norway Gas', 'Frankfurt Wind', 'Frankfurt Gas']: both 'discount_rate' and 'lifetime' must be provided when 'overnight_cost' is not set."
    },
@@ -159,7 +222,76 @@
    },
    "revenue|name": {
     "undetermined": {
-     "Generator|Norway Gas": 0.05374
+     "Generator|Manchester Gas": 0.0045,
+     "Generator|Norway Gas": 0.05374,
+     "Link|DC link": 0.00031
+    }
+   },
+   "supply|bus": {
+    "undetermined": {
+     "Link|London": 0.0012
+    }
+   },
+   "supply|name": {
+    "undetermined": {
+     "Link|DC link": 0.00381
+    }
+   },
+   "system_cost|bus": {
+    "undetermined": {
+     "Link|London": 0.00078
+    }
+   },
+   "system_cost|name": {
+    "undetermined": {
+     "Generator|Manchester Gas": 0.00055,
+     "Generator|Norway Gas": 0.00304,
+     "Link|DC link": 0.00078
+    }
+   },
+   "transmission|bus": {
+    "undetermined": {
+     "Link|London": 0.00141
+    }
+   },
+   "transmission|bus_carrier": {
+    "undetermined": {
+     "Link|AC": 0.00141
+    }
+   },
+   "transmission|carrier": {
+    "undetermined": {
+     "Link|DC": 0.00141
+    }
+   },
+   "transmission|country": {
+    "undetermined": {
+     "Link|UK": 0.00141
+    }
+   },
+   "transmission|location": {
+    "undetermined": {
+     "Link|": 0.00141
+    }
+   },
+   "transmission|name": {
+    "undetermined": {
+     "Link|DC link": 0.00141
+    }
+   },
+   "transmission|unit": {
+    "undetermined": {
+     "Link|": 0.00141
+    }
+   },
+   "withdrawal|bus": {
+    "undetermined": {
+     "Link|London": 0.00261
+    }
+   },
+   "withdrawal|name": {
+    "undetermined": {
+     "Link|DC link": 0.00381
     }
    }
   }

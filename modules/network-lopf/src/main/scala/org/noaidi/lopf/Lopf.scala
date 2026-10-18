@@ -60,6 +60,14 @@ object Lopf:
       columns: Map[(String, String, Int), Int],
       /** `(bus, snapshot) -> row index of that bus's balance constraint`. */
       balanceRows: Map[(String, Int), Int],
+      /** `(component, entity, snapshot, side) -> row index of that ramp constraint`.
+        *
+        * Empty on a network with no ramp limits, which is most of them. Recorded for the same
+        * reason `balanceRows` is: a ramp multiplier is part of a generator's reduced cost, so
+        * without it the KKT identity at a ramped bus cannot be checked and a price that looks
+        * wrong cannot be told from a price that is merely one of several.
+        */
+      rampRows: Map[(String, String, Int, Ramps.Side), Int] = Map.empty,
   ):
     def column(component: String, entity: String, snapshot: Int): Int =
       columns.getOrElse(
@@ -413,6 +421,7 @@ object Lopf:
       .toMap
 
     val balanceRows = mutable.LinkedHashMap.empty[(String, Int), Int]
+    val rampRows    = mutable.LinkedHashMap.empty[(String, String, Int, Ramps.Side), Int]
     var rowIndex    = 0
 
     snapshots.foreach { t =>
@@ -1273,6 +1282,7 @@ object Lopf:
             Some(columns((Expansion.capacityKey(component), id, Expansion.NoSnapshot)))
           else None,
         builder,
+        (id, t, side, row) => rampRows((component, id, t, side)) = row,
       )
     }
 
@@ -1297,7 +1307,7 @@ object Lopf:
     val (problem, translation) = builder.build()
     // No column count travels with the map: `Sclopf` reads it from `base.problem`, so
     // there are no two copies to diverge.
-    Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap))
+    Model(problem, translation, VariableMap(columns.toMap, balanceRows.toMap, rampRows.toMap))
 
   /** Solve, and map the answer back onto component names.
     *
@@ -1450,6 +1460,34 @@ final case class LopfResult(
   private def isInactive(component: String, entity: String): Boolean =
     inactive.get(component).exists(_.contains(entity))
   def status: SolveStatus = solution.status
+
+  /** The multiplier on one ramp constraint, in currency per MW.
+    *
+    * `mu_ramp_limit_up` and `mu_ramp_limit_down` upstream, and '''not''' divided by the
+    * snapshot weighting the way [[marginalPrice]] is. That asymmetry is PyPSA's:
+    * `post_processing` divides `buses_t.marginal_price` by the objective weighting and leaves
+    * every `mu_*` alone, so a ramp multiplier is already in the units its row was written in.
+    *
+    * It exists because a ramped generator's reduced cost is not `marginal_cost - price`. Its
+    * dispatch appears in its own ramp rows at `t` and in the next snapshot's at `t + 1`, so an
+    * interior unit does NOT pin its bus price to its marginal cost -- and without these the
+    * difference is unaccountable rather than merely unexplained. `LopfSuite` checks the
+    * identity they complete.
+    *
+    * Zero where the row does not exist, which is every component with no ramp limit and every
+    * snapshot past the last. A missing row contributes no term to the reduced cost, so zero is
+    * the value that makes the identity read the same with and without it -- and an entity the
+    * model has never heard of still throws, because that means the caller and the model
+    * disagree about what the network contains.
+    */
+  def rampPrice(component: String, entity: String, snapshot: Int, side: Ramps.Side): Double =
+    if !network.table(component).exists(_.ids.contains(entity)) then
+      throw new NoSuchElementException(s"no $component '$entity' in this network")
+    else
+      model.map.rampRows
+        .get((component, entity, snapshot, side))
+        .map(row => model.translation.originalDuals(solution.dual)(row))
+        .getOrElse(0.0)
 
   /** Total cost, which for a dispatch problem is the objective. */
   def objective: Double = solution.objectiveValue

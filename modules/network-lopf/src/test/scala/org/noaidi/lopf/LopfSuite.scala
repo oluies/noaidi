@@ -669,6 +669,76 @@ class LopfSuite extends munit.FunSuite, CsvFixtures:
     assertEqualsDouble(emitted, cap, 1e-2, s"emitted $emitted against cap $cap")
   }
 
+  test("a ramped generator's bus price is its cost plus its ramp multipliers") {
+    assume(available, "goldens missing")
+    // The case above says an interior generator pins its bus price to its marginal cost. That
+    // is only true when the generator's dispatch appears in NO other row, and a ramp limit
+    // breaks it: `p(t)` sits in its own ramp rows at `t` with a `+1` and in the next
+    // snapshot's with a `-1`, so the reduced cost carries four multipliers and the price is
+    // free to sit anywhere the identity allows.
+    //
+    // Without them a price that differs from PyPSA's is unaccountable rather than merely
+    // unexplained, which is exactly where this started: `ramp-limits` reports bus `a` at
+    // -42.3074 and 62.3074 where PyPSA reports -20 and 40, and `StatsSuite` skips the three
+    // dual-derived metrics on the network for it. The difference is +-22.3074 at consecutive
+    // snapshots, and `flex` at `t4` is interior with a cost of 40 against a price of 62.3074
+    // and `mu_up(t4) = -22.3074`. Same identity, different split between the price and the
+    // multiplier -- which is what a dual face in a ramp constraint looks like.
+    //
+    // So this asserts the identity itself, at every interior generator and snapshot:
+    //
+    //   cost * w_objective - lambda - mu_up(t) + mu_up(t+1) - mu_down(t) + mu_down(t+1) = 0
+    //
+    // `lambda` is the RAW balance dual, so `marginalPrice` is multiplied back by the weighting
+    // it divides out; `rampPrice` is raw already, which is PyPSA's own asymmetry. The signs
+    // were read off the solved model rather than derived, and they are what makes this worth
+    // asserting: a sign error in a ramp row or in the dual recovery leaves the primal and the
+    // objective untouched and shows up nowhere else.
+    val n      = network("ramp-limits")
+    val result = Lopf.solve(n, params)
+    assertEquals(result.status, SolveStatus.Optimal)
+    val gens = n.require("Generator")
+
+    var checked = 0
+    n.snapshots.indices.foreach { t =>
+      val weight = Periods.objectiveWeight(n, t)
+      gens.ids.foreach { id =>
+        val capacity =
+          if Expansion.isExtendable(gens, id) then result.capacity("Generator", id)
+          else gens.float("p_nom", id)
+        val dispatch = result.dispatch("Generator", id, t)
+        val lo       = capacity * gens.valueAt("p_min_pu", id, t)
+        val hi       = capacity * gens.valueAt("p_max_pu", id, t)
+        // A margin well above the solver tolerance, so "interior" is not a variable resting
+        // on its bound.
+        if dispatch > lo + 1e-2 && dispatch < hi - 1e-2 then
+          checked += 1
+          val cost  = gens.valueAt("marginal_cost", id, t) * weight
+          val price = result.marginalPrice(gens.string("bus", id), t) * weight
+          val up    = result.rampPrice("Generator", id, t, Ramps.Side.Up)
+          val upNext    = result.rampPrice("Generator", id, t + 1, Ramps.Side.Up)
+          val down      = result.rampPrice("Generator", id, t, Ramps.Side.Down)
+          val downNext  = result.rampPrice("Generator", id, t + 1, Ramps.Side.Down)
+          assertEqualsDouble(cost - price - up + upNext - down + downNext, 0.0, 1e-4,
+            s"KKT violated for interior $id at snapshot $t: cost=$cost price=$price " +
+              s"up=$up upNext=$upNext down=$down downNext=$downNext")
+      }
+    }
+    // Otherwise the test passes by finding nothing to check.
+    assert(checked >= 10, s"only $checked interior generator-snapshots found; too few to bite")
+
+    // And the one that started it, named rather than left to the loop: `flex` is interior at
+    // `t4` and the whole gap between its cost and its bus price is one ramp multiplier.
+    assertEqualsDouble(result.rampPrice("Generator", "flex", 4, Ramps.Side.Up), -22.3074, 1e-3,
+      "flex's up-ramp multiplier at t4 is what PyPSA puts into the price instead")
+
+    // A component with no ramp limit has no row and so no multiplier, and asking for one is a
+    // zero rather than a throw -- which is what lets the identity above be written once for
+    // every generator instead of twice.
+    assertEqualsDouble(result.rampPrice("Generator", "peak", 3, Ramps.Side.Up), 0.0, 0.0)
+    intercept[NoSuchElementException](result.rampPrice("Generator", "nope", 0, Ramps.Side.Up))
+  }
+
   test("a generator strictly inside its bounds pins its bus price") {
     assume(available, "goldens missing")
     // The part of the dual that is forced rather than chosen. Complementary

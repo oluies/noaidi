@@ -173,7 +173,8 @@
      "Line|Manchester": 504.84296,
      "Line|Norway DC": 646.84651,
      "Line|Norwich": 655.57499,
-     "Line|Norwich DC": 635.33051
+     "Line|Norwich DC": 635.33051,
+     "Link|London": 0.0014
     }
    },
    "capex|bus_carrier": {
@@ -191,13 +192,16 @@
    },
    "capex|name": {
     "undetermined": {
+     "Generator|Manchester Gas": 0.00179,
+     "Generator|Norway Gas": 0.00976,
      "Line|0": 584.14039,
      "Line|1": 504.84296,
      "Line|2": 654.7680600000001,
      "Line|3": 635.33051,
      "Line|4": 646.84651,
      "Line|5": 655.57499,
-     "Line|6": 3681.49807
+     "Line|6": 3681.49807,
+     "Link|DC link": 0.0014
     }
    },
    "curtailment|bus": {
@@ -214,7 +218,25 @@
    "curtailment|name": {
     "undetermined": {
      "Generator|Frankfurt Wind": 0.0128,
+     "Generator|Norway Gas": 0.00049,
+     "Generator|Norway Wind": 0.00975,
      "Link|DC link": 0.01032
+    }
+   },
+   "energy_balance|bus": {
+    "undetermined": {
+     "Link|London": 0.00403
+    }
+   },
+   "energy_balance|country": {
+    "undetermined": {
+     "Link|DE": 0.00403,
+     "Link|UK": 0.00403
+    }
+   },
+   "energy_balance|name": {
+    "undetermined": {
+     "Generator|Norway Gas": 0.00012
     }
    },
    "expanded_capacity|bus": {
@@ -222,9 +244,29 @@
      "Line|Bremen DC": 36381.70151
     }
    },
+   "expanded_capacity|bus_carrier": {
+    "undetermined": {
+     "Link|AC": 0.0035899999998036947
+    }
+   },
+   "expanded_capacity|carrier": {
+    "undetermined": {
+     "Link|DC": 0.0035899999998036947
+    }
+   },
+   "expanded_capacity|location": {
+    "undetermined": {
+     "Link|": 0.0035899999998036947
+    }
+   },
    "expanded_capacity|name": {
     "undetermined": {
      "Line|2": 36381.70151
+    }
+   },
+   "expanded_capacity|unit": {
+    "undetermined": {
+     "Link|": 0.0035899999998036947
     }
    },
    "expanded_capex|bus": {
@@ -262,6 +304,17 @@
      "Line|6": 3681.4980700000006
     }
    },
+   "market_value|country": {
+    "undetermined": {
+     "Link|DE": 0.00016083655455267215,
+     "Link|UK": 0.0002440851457083254
+    }
+   },
+   "opex|name": {
+    "undetermined": {
+     "Generator|Norway Gas": 0.00072
+    }
+   },
    "optimal_capacity|bus": {
     "undetermined": {
      "Line|Bremen": 18407.49036,
@@ -270,7 +323,8 @@
      "Line|Manchester": 3781.83091,
      "Line|Norway DC": 10361.16983,
      "Line|Norwich": 30000.06554,
-     "Line|Norwich DC": 4920.23491
+     "Line|Norwich DC": 4920.23491,
+     "Link|London": 0.00159
     }
    },
    "optimal_capacity|bus_carrier": {
@@ -304,7 +358,8 @@
      "Line|3": 4920.23491,
      "Line|4": 10361.16983,
      "Line|5": 30000.06554,
-     "Line|6": 18407.49036
+     "Line|6": 18407.49036,
+     "Link|DC link": 0.00159
     }
    },
    "optimal_capacity|unit": {
@@ -350,7 +405,19 @@
    "revenue|name": {
     "undetermined": {
      "Generator|Manchester Gas": 0.01533,
-     "Generator|Norway Gas": 0.18803
+     "Generator|Norway Gas": 0.18803,
+     "Link|DC link": 0.00041
+    }
+   },
+   "supply|bus": {
+    "undetermined": {
+     "Link|London": 0.0024
+    }
+   },
+   "supply|name": {
+    "undetermined": {
+     "Generator|Norway Gas": 0.00012,
+     "Link|DC link": 0.00884
     }
    },
    "system_cost|bus": {
@@ -361,7 +428,8 @@
      "Line|Manchester": 504.84296,
      "Line|Norway DC": 646.84651,
      "Line|Norwich": 655.57499,
-     "Line|Norwich DC": 635.33051
+     "Line|Norwich DC": 635.33051,
+     "Link|London": 0.0014
     }
    },
    "system_cost|bus_carrier": {
@@ -379,6 +447,7 @@
    },
    "system_cost|name": {
     "undetermined": {
+     "Generator|Manchester Gas": 0.0018399999999999998,
      "Generator|Norway Gas": 0.01048,
      "Line|0": 584.14039,
      "Line|1": 504.84296,
@@ -386,7 +455,53 @@
      "Line|3": 635.33051,
      "Line|4": 646.84651,
      "Line|5": 655.57499,
-     "Line|6": 3681.49807
+     "Line|6": 3681.49807,
+     "Link|DC link": 0.0014
+    }
+   },
+   "transmission|bus": {
+    "undetermined": {
+     "Link|London": 0.00403
+    }
+   },
+   "transmission|bus_carrier": {
+    "undetermined": {
+     "Link|AC": 0.00403
+    }
+   },
+   "transmission|carrier": {
+    "undetermined": {
+     "Link|DC": 0.00403
+    }
+   },
+   "transmission|country": {
+    "undetermined": {
+     "Link|UK": 0.00403
+    }
+   },
+   "transmission|location": {
+    "undetermined": {
+     "Link|": 0.00403
+    }
+   },
+   "transmission|name": {
+    "undetermined": {
+     "Link|DC link": 0.00403
+    }
+   },
+   "transmission|unit": {
+    "undetermined": {
+     "Link|": 0.00403
+    }
+   },
+   "withdrawal|bus": {
+    "undetermined": {
+     "Link|London": 0.00644
+    }
+   },
+   "withdrawal|name": {
+    "undetermined": {
+     "Link|DC link": 0.00884
     }
    }
   }

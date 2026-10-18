@@ -120,32 +120,79 @@
    "capacity_factor|bus": {
     "undetermined": {
      "Line|0": 0.05171841486108497,
+     "Line|1": 0.008585044670017528,
      "Line|2": 0.05167959999999994,
      "Line|3": 0.026149307081896223,
+     "Line|4": 0.002065933578656587,
+     "Line|5": 0.0019034466420093654,
      "Link|0": 0.011103607401145577,
-     "Link|1": 0.03029386666666667
+     "Link|1": 0.03029386666666667,
+     "StorageUnit|1": 0.0018188000000000093,
+     "StorageUnit|3": 0.0003972001588800622,
+     "StorageUnit|4": 0.0069455944435244665
+    }
+   },
+   "capacity_factor|bus_carrier": {
+    "undetermined": {
+     "Line|AC": 0.0016784015904628413,
+     "Link|AC": 0.003139163610187734
+    }
+   },
+   "capacity_factor|carrier": {
+    "undetermined": {
+     "Line|AC": 0.0016784015904628413,
+     "Link|AC": 0.003139163610187734
     }
    },
    "capacity_factor|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "capacity_factor|location": {
+    "undetermined": {
+     "Line|": 0.0016784015904628413,
+     "Link|": 0.003139163610187734
+    }
+   },
    "capacity_factor|name": {
     "undetermined": {
      "Generator|Gas 2": 0.2,
      "Line|0": 0.05171841486108497,
+     "Line|1": 0.008585044670017528,
      "Line|2": 0.05167959999999994,
      "Line|3": 0.026149307081896223,
+     "Line|4": 0.002065933578656587,
+     "Line|5": 0.0019034466420093654,
      "Link|TL 0": 0.011103607401145577,
-     "Link|TL 1": 0.03029386666666667
+     "Link|TL 1": 0.03029386666666667,
+     "StorageUnit|Storage 1": 0.0018188000000000093,
+     "StorageUnit|Storage 3": 0.0003972001588800622,
+     "StorageUnit|Storage 4": 0.0069455944435244665
+    }
+   },
+   "capacity_factor|unit": {
+    "undetermined": {
+     "Line|": 0.0016784015904628413,
+     "Link|": 0.003139163610187734
     }
    },
    "capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "capex|name": {
+    "undetermined": {
+     "Generator|Gas 2": 0.00784,
+     "Generator|Gas 3": 0.00054,
+     "Generator|Gas 4": 0.00044,
+     "Generator|Gas 5": 0.00052
+    }
+   },
    "curtailment|bus": {
     "undetermined": {
+     "Generator|2": 0.00126,
+     "Generator|5": 0.00011,
      "Link|0": 502.7729599999948,
      "Link|1": 503.14022000000114,
+     "StorageUnit|0": 0.00017,
      "StorageUnit|1": 1.6368999999999687,
      "StorageUnit|3": 0.11977000000001681,
      "StorageUnit|4": 1.0411599999999908
@@ -156,8 +203,10 @@
    },
    "curtailment|name": {
     "undetermined": {
+     "Generator|Gas 2": 0.00126,
      "Link|TL 0": 502.7729599999948,
      "Link|TL 1": 503.14022000000114,
+     "StorageUnit|Storage 0": 0.00017,
      "StorageUnit|Storage 1": 1.6368999999999687,
      "StorageUnit|Storage 3": 0.11977000000001681,
      "StorageUnit|Storage 4": 1.0411599999999908
@@ -185,6 +234,7 @@
    },
    "energy_balance|name": {
     "undetermined": {
+     "Generator|Gas 2": 0.00031,
      "StorageUnit|Storage 1": 1.6369000000000042,
      "StorageUnit|Storage 2": 1.6364800000001196,
      "StorageUnit|Storage 3": 0.11977999999999867,
@@ -195,8 +245,27 @@
    "expanded_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "expanded_capex|bus": {
+    "undetermined": {
+     "Generator|0": 0.0007099999929778278,
+     "Generator|2": 0.007849999994505197,
+     "Generator|3": 0.0012400000123307109,
+     "Generator|4": 0.0007800000021234155
+    }
+   },
    "expanded_capex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "expanded_capex|name": {
+    "undetermined": {
+     "Generator|Gas 2": 0.00784,
+     "Generator|Gas 3": 0.00054,
+     "Generator|Gas 4": 0.00044,
+     "Generator|Gas 5": 0.00052,
+     "Generator|Wind 0": 0.0007099999929778278,
+     "Generator|Wind 3": 0.0007000000041443855,
+     "Generator|Wind 4": 0.00033999999868683517
+    }
    },
    "fom|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -217,6 +286,7 @@
      "Link|0": 0.34280536721641397,
      "Link|1": 1.7915964566217326,
      "StorageUnit|1": 0.361314233122755,
+     "StorageUnit|2": 0.005794976295049992,
      "StorageUnit|3": 0.025016538901736496,
      "StorageUnit|4": 0.8112955917691487
     }
@@ -245,9 +315,12 @@
    "market_value|name": {
     "undetermined": {
      "Line|0": 5.725618509596288,
+     "Line|1": 0.0005117120176900761,
      "Line|2": 5.7083073293254785,
+     "Line|3": 0.00013650984118189708,
      "Link|TL 1": 3.1936637059314563,
      "StorageUnit|Storage 1": 0.361314233122755,
+     "StorageUnit|Storage 2": 0.005794976295049992,
      "StorageUnit|Storage 3": 0.025016538901736496,
      "StorageUnit|Storage 4": 0.8112955917691487
     }
@@ -258,8 +331,18 @@
      "Link|": 0.12866441222648461
     }
    },
+   "opex|bus": {
+    "undetermined": {
+     "Generator|2": 0.0017899999999999583
+    }
+   },
    "opex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "opex|name": {
+    "undetermined": {
+     "Generator|Gas 2": 0.00178
+    }
    },
    "optimal_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
@@ -316,7 +399,10 @@
    },
    "revenue|name": {
     "undetermined": {
-     "Generator|Gas 2": 0.09395
+     "Generator|Gas 2": 0.09395,
+     "Generator|Gas 3": 0.00072,
+     "Generator|Gas 4": 0.00076,
+     "Generator|Gas 5": 0.00077
     }
    },
    "supply|bus": {
@@ -352,6 +438,7 @@
    },
    "supply|name": {
     "undetermined": {
+     "Generator|Gas 2": 0.00031,
      "Line|0": 131.04734000000008,
      "Line|1": 373.75683000000026,
      "Line|2": 372.09328000000005,
@@ -370,6 +457,14 @@
    },
    "system_cost|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "system_cost|name": {
+    "undetermined": {
+     "Generator|Gas 2": 0.00962,
+     "Generator|Gas 3": 0.00057,
+     "Generator|Gas 4": 0.00048,
+     "Generator|Gas 5": 0.00054
+    }
    },
    "transmission|bus": {
     "undetermined": {

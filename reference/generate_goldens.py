@@ -2163,6 +2163,50 @@ DETERMINACY_PROBE = {"solver": "ipm", "run_crossover": "off", "presolve": "off"}
 DETERMINACY_ABS = 1e-2
 DETERMINACY_REL = 1e-4
 
+# What counts as agreement for a STATISTICS GROUP, which is not the same question.
+#
+# `|a - b| <= STATISTICS_REL * max(1, |a|, |b|)` -- which is EXACTLY what `StatsSuite` asserts
+# each group to, and that identity is the whole argument. The probe exists to answer one
+# question: could the consuming comparison fail for a reason that is not the port's fault? A
+# probe that uses the consumer's own rule answers it; a probe with any other rule answers a
+# different question and the gap between them is paid in silent skips or false failures.
+#
+# ==Why the series keep `ABS` and the statistics cannot==
+#
+# `DETERMINACY_ABS` above is 1e-2 and was calibrated honestly: across all 39 networks the worst
+# agreement on anything that is a point is 7e-3, on `ac-dc-meshed`'s flows where the LP is
+# 60,000 variables, while a face differs by 14 to 538. That is the right floor for the recorded
+# SERIES, which are all megawatts and megawatt-hours -- one unit family, one calibration.
+#
+# The statistics are nineteen metrics in four unit families, and a floor measured in MWh is
+# meaningless for three of them:
+#
+#   energies and costs   supply, opex, capex, revenue, ...   thousands to millions
+#   capacities           optimal_capacity and its two        tens to hundreds of thousands
+#   dimensionless        capacity_factor                     between 0 and 1
+#   prices               market_value, prices                single digits to hundreds
+#
+# Measured, the 1e-2 floor hid a face in each of the last two and did it three different ways:
+# `storage-cyclic-co2`'s 1.67 MWh of loose storage charging arrives in `capacity_factor` as
+# 0.0019 after the horizon's weighting and 25 MW of capacity divide it; `ac-dc-txvolume-exact`'s
+# `revenue|bus_carrier` is -82.36 as the net of two terms near 1,136,000, so two solves 0.009
+# apart are 1.1e-4 apart relatively; and `storage-cyclic-co2`'s `prices|bus_carrier` moves 0.045
+# on 128.0. `StatsSuite` carried a narrow patch for each of the three, every one of them a way
+# of borrowing a verdict from a metric whose units the floor did fit.
+#
+# ==What the old comment got right, and still does==
+#
+# Per ELEMENT and against its own magnitude. A tolerance scaled by the largest group in a frame
+# instead would call a small group determinate while the suite rejected it: measured on
+# `ac-dc-txcost`, whose `capex|bus` has a 4,396 group and a 10.36 one, the small group moves by
+# 14.48 between solves and a metric-scaled tolerance of 1,143 swallowed it. That dead end is
+# still a dead end; `max(1, ...)` is per element and scales with the element.
+#
+# The `max(1, ...)` is where the absolute floor went. It is 1e-4 for any group below unit
+# magnitude, which is PyPSA's own round-to-five resolution with one decimal of slack, and it is
+# the same floor `StatsSuite.GroupFloor` uses for the same reason.
+STATISTICS_REL = 1e-4
+
 
 def _series_deviation(a, b):
     """The largest elementwise disagreement between two recorded frames, or None if empty."""
@@ -2323,7 +2367,7 @@ def determinacy(build, multi_invest: bool) -> dict:
             for key in keys:
                 a = float(left.get(key, 0.0))
                 b = float(right.get(key, 0.0))
-                allowed = DETERMINACY_ABS + DETERMINACY_REL * max(abs(a), abs(b))
+                allowed = STATISTICS_REL * max(1.0, abs(a), abs(b))
                 if abs(a - b) > allowed:
                     moved[key_label(key)] = jsonable(abs(a - b))
             if moved:

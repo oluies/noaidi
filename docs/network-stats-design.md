@@ -1198,8 +1198,8 @@ is the record of what the batches cost: `energy_balance`, `withdrawal`, `capacit
 energy or a cost, which is what makes it comparable to upstream's round-to-five rule, and two
 of the metrics that landed are neither — `capacity_factor` is dimensionless and `market_value`
 is a price. The smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor
-to `phase-shift`'s 0.0161 at 161x to `ac-dc-dispatch`'s 0.0003846 at **3.8x**. Nineteen of
-nineteen are in, so that is the margin, measured rather than predicted.
+to `phase-shift`'s 0.0161 at 161x to `ac-dc-dispatch`'s 0.0003846 at **3.8x** — at which point
+the single floor gave way to a per-metric one. See *The floor is per metric now* below.
 
 ## Retuning the probe, and what it made unnecessary
 
@@ -1287,6 +1287,65 @@ Above it, the smallest group PyPSA reports in any compared network is `ac-dc-dis
 the bottom of it — narrow, and narrow because the metrics approaching from above are ratios
 while the artefacts approaching from below are cancellations. Both arrived with the last two
 batches. The next thing to give would be the floor's shape rather than its value.
+
+### The floor is per metric now, and the band I quoted was wrong
+
+The previous section ends by saying the usable band is about `[2e-4, 3.8e-4]` and that the
+floor sits at the bottom of it. Both halves are wrong. The cancellation residue that bounds it
+from below is **2e-05**, not 2e-4, so the band was `[2e-5, 3.8e-4]` and a floor of 1e-4 sat in
+the middle rather than at the bottom. An arithmetic slip in a sentence about arithmetic.
+
+What is right is that a single floor was the wrong shape, and fixing the shape dissolves the
+band rather than widening it.
+
+#### Only five metrics can turn a solver epsilon into a group
+
+Measured, by setting every floor to zero and reading what fails:
+
+| metric | largest artefact | smallest real group (all networks) | floor |
+|---|---|---|---|
+| `revenue` | 4e-05 | 1e-05 (`scigrid-de`) | 1e-4 |
+| `supply` | 1e-05 | 1e-05 (`scigrid-de`) | 1e-4 |
+| `energy_balance` | 1e-05 | 1e-05 (`scigrid-de`) | 1e-4 |
+| `withdrawal` | 1e-05 | 0.87578 | 1e-4 |
+| `curtailment` | none | 0.34042 | 1e-4 |
+| `market_value` | none | 4.95805e-06 | **0** |
+| `capacity_factor` | none | 2.79015e-06 | **0** |
+| `optimal_capacity`, `installed_capacity` | none | 0.00028 | **0** |
+| the other ten | none | 0.6 to 13,764.8 | **0** |
+
+Two mechanisms produce the artefacts, and between them they explain exactly which metrics are
+in the first group:
+
+- **A clip.** `supply`, `withdrawal` and `curtailment` keep one side of a quantity, so a port
+  whose injection is `-1e-11` here and exactly `0` upstream becomes a group here and none
+  there. The boundary makes it, not the magnitude.
+- **A cancellation.** `energy_balance` and `revenue` sum a signed quantity over both ports, so
+  a branch's two ends nearly annihilate and what survives is the epsilon times the scale of
+  the terms — `revenue` reaches 4e-05 because its terms carry a price.
+
+Everything else reads a static column, sums at one port, or takes an absolute value, and
+produces no artefact at all. `market_value` is the one that cancels and still needs no floor,
+because its `0/0` groups are removed by the non-finite skip instead.
+
+#### What it buys, and the one thing it cannot do
+
+The gain is on the side that was tightest. `market_value` had a 3.8× margin and now has no
+floor, so its real groups down to 4.96e-06 are checked for **presence** and not only for value
+— and the same for `capacity_factor` at 2.79e-06 and the two capacity metrics at 0.00028. The
+hidden non-zero census drops from 40 groups to 13; the 27 recovered are `capacity_factor`'s
+thirteen and `market_value`'s fourteen, which a floor placed for a residue in `revenue` had
+been suppressing for nothing.
+
+The honest part is the second column of the table. For `supply`, `energy_balance` and `revenue`
+the smallest real group upstream reports is the **same magnitude** as the artefact, so no floor
+separates them and none ever will. The only reason 1e-4 is safe for those three is that every
+one of those groups is in `scigrid-de`, the one network this suite skips for a degenerate
+dispatch. That is a weaker claim than a margin, and it is the true one.
+
+So the floor's shape is fixed and its remaining weakness is now stated rather than averaged
+away: fourteen metrics need no floor, two need one and have room, and three have a floor that
+works by accident of which network their smallest groups live in.
 
 ## The ramp multipliers, and the identity they complete
 

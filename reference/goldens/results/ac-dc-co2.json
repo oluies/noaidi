@@ -168,10 +168,16 @@
      "Link|": 0.014560462045378642
     }
    },
+   "curtailment|name": {
+    "undetermined": {
+     "Generator|Frankfurt Wind": 0.00011
+    }
+   },
    "market_value|bus": {
     "undetermined": {
      "Generator|Frankfurt": 0.16009563122670437,
      "Generator|Manchester": 0.2897527790894087,
+     "Generator|Norway": 0.003860184227248875,
      "Line|Bremen": 0.28984148365157575,
      "Line|Bremen DC": 0.2506405474647871,
      "Line|London": 0.7024272577316678,
@@ -194,6 +200,8 @@
     "undetermined": {
      "Generator|AC": 0.18180029837565947,
      "Line|AC": 0.07234868613791541,
+     "Line|DC": 0.001187180392679849,
+     "Link|AC": 0.00020602410283784064,
      "Load|AC": 0.21917447188724637
     }
    },
@@ -208,7 +216,9 @@
    "market_value|country": {
     "undetermined": {
      "Generator|DE": 0.16009563122670437,
+     "Generator|NO": 0.003860184227248875,
      "Generator|UK": 0.2897527790894087,
+     "Line|DE": 0.0020333955209473654,
      "Line|NO": 0.28461970125637504,
      "Line|UK": 0.03909411832162347,
      "Load|DE": 0.1265314090332884,
@@ -228,8 +238,12 @@
      "Generator|Frankfurt Gas": 0.2901988528565025,
      "Generator|Frankfurt Wind": 0.10669018199186339,
      "Generator|Manchester Wind": 0.2897527790894087,
+     "Generator|Norway Wind": 0.003860184227248875,
      "Line|0": 0.10801701729984933,
      "Line|1": 0.043492105699196724,
+     "Line|2": 0.0006336057685165017,
+     "Line|3": 0.002973803807610434,
+     "Line|4": 0.0016235409231365847,
      "Line|5": 0.28090183670196867,
      "Load|Bremen": 0.13094722381646798,
      "Load|Frankfurt": 0.12157249953523792,

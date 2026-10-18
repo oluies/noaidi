@@ -31,6 +31,8 @@
    "curtailment|name": {
     "undetermined": {
      "Generator|both": 0.01223,
+     "Generator|depr": 0.00496,
+     "Generator|new": 0.00081,
      "Generator|perp": 0.01865
     }
    },
@@ -58,6 +60,11 @@
    "opex|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
+   "opex|name": {
+    "undetermined": {
+     "Generator|old": 0.00046
+    }
+   },
    "optimal_capacity|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
    },
@@ -78,6 +85,11 @@
    },
    "system_cost|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"
+   },
+   "system_cost|name": {
+    "undetermined": {
+     "Generator|old": 0.00046
+    }
    },
    "withdrawal|country": {
     "error": "AttributeError: 'DataFrame' object has no attribute 'country'"

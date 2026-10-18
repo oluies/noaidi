@@ -245,6 +245,18 @@ final class LpBuilder(initialVariables: Int):
     upper(variable) = hi
     this
 
+  /** How many rows have been added, which is the index the NEXT one will get.
+    *
+    * The index is the one `RowTranslation.originalDuals` is keyed by -- the order rows were
+    * added in, before `build` reorders them into equalities-then-inequalities -- so a caller
+    * that wants a particular row's dual back records this before adding it. `Lopf` does that
+    * for the bus balances with its own counter and now for the ramp rows through here.
+    *
+    * Public because the alternative is each caller keeping a parallel count, which is the
+    * same number maintained twice and wrong the first time a row is added without it.
+    */
+  def rowCount: Int = rows.size
+
   /** `lo <= a'x <= hi`. Use infinities for one-sided rows and `lo == hi` for an
     * equality.
     */

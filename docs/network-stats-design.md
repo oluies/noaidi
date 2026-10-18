@@ -882,8 +882,8 @@ than of a metric, so "loose anywhere means loose everywhere" is true in principl
 would take `ac-dc-meshed`'s generators out of `capex` and `supply` because one `curtailment`
 group moved by 0.0122. The narrow rule costs only the metric with the measurement problem.
 
-The proper fix is a determinacy tolerance in each metric's own units, which is a generator
-change with its own calibration and is not this one.
+The proper fix — a determinacy tolerance in each metric's own units — has since landed, and
+this patch is gone with it. See *Retuning the probe* below.
 
 ### What the mutation run says about these three
 
@@ -1110,9 +1110,9 @@ for anything smaller, and each new metric found a different way to show it:
    **every** grouping, since an aggregated group mixes entities and the probe sees the movement
    where the group is largest.
 
-Each correction is narrow and each is measured. The general fix is a determinacy tolerance in
-each metric's own units, which is a generator change with its own calibration and is still not
-this one.
+Each correction was narrow and each was measured, and all three are now gone: the general fix
+— a determinacy tolerance in each metric's own units — landed, and took two of the patches with
+it while turning the third into a structural property. See *Retuning the probe* below.
 
 ### The first version of the guard was behind the flag it guarded
 
@@ -1200,6 +1200,123 @@ of the metrics that landed are neither — `capacity_factor` is dimensionless an
 is a price. The smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor
 to `phase-shift`'s 0.0161 at 161x to `ac-dc-dispatch`'s 0.0003846 at **3.8x**. Nineteen of
 nineteen are in, so that is the margin, measured rather than predicted.
+
+## Retuning the probe, and what it made unnecessary
+
+Three narrow patches had accumulated in `StatsSuite`, one per batch of metrics, and each
+borrowed a determinacy verdict from a *different* metric: a quotient from its dispatch, then
+from six dispatch metrics because a branch nets to nothing in `energy_balance`, then across
+every grouping as well. Three patches for one cause is a diagnosis, and the cause was the
+probe's tolerance.
+
+### The probe now uses the consumer's own rule
+
+`DETERMINACY_ABS` is 1e-2 and **absolute**, calibrated honestly: across all 39 networks the
+worst agreement on anything that is a point is 7e-3, on `ac-dc-meshed`'s flows where the LP is
+60,000 variables, while a face differs by 14 to 538. That is the right floor for the recorded
+**series**, which are all megawatts and megawatt-hours — one unit family, one calibration.
+
+The statistics are nineteen metrics in four unit families, and a floor measured in MWh is
+meaningless for three of them:
+
+| family | metrics | typical magnitude |
+|---|---|---|
+| energies and costs | `supply`, `opex`, `capex`, `revenue`, … | thousands to millions |
+| capacities | `optimal_capacity` and its two | tens to hundreds of thousands |
+| dimensionless | `capacity_factor` | between 0 and 1 |
+| prices | `market_value`, `prices` | single digits to hundreds |
+
+So the statistics probe now tests `|a - b| <= 1e-4 * max(1, |a|, |b|)` — **exactly** what
+`StatsSuite` asserts each group to. That identity is the whole argument: the probe exists to
+answer one question, *could the consuming comparison fail for a reason that is not the port's
+fault*, and a probe using the consumer's own rule answers it. Any other rule answers a
+different question and the gap is paid in silent skips or false failures.
+
+The series keep `DETERMINACY_ABS`, because its calibration is sound for them.
+
+What the old comment got right is still right: per **element** and against its own magnitude. A
+tolerance scaled by the largest group in a frame would call a small group determinate while the
+suite rejected it — `ac-dc-txcost`'s `capex|bus` has a 4,396 group and a 10.36 one. The
+`max(1, ...)` is where the absolute floor went, and it is 1e-4 below unit magnitude.
+
+### Three patches become one rule, and the rule is structural
+
+Two of the three are simply gone: the retuned probe sees a face in a dimensionless group and in
+a load-weighted price directly, so `capacity_factor` no longer borrows from its dispatch and
+`prices` no longer borrows from `withdrawal`.
+
+What is left is not a patch but a property. Three metrics — `energy_balance`, `revenue`,
+`market_value` — sum a **signed** quantity over **both** ports, so a branch contributes `-p0`
+at one end and `+p0 × efficiency` at the other and the group is the difference of two numbers
+orders of magnitude bigger than itself. `ac-dc-txvolume-exact`'s `revenue|bus_carrier` has
+`Link|DC` at −82.36 as the net of two terms near 1,136,000: agreement to 8e-9 on the terms is
+1.1e-4 on the net. Those three read their *own* verdict at every grouping, because a coarse
+group mixes the entities whose finer groups moved.
+
+No other metric can cancel: `supply`, `withdrawal` and `curtailment` clip to one sign, the
+capital metrics and `transmission` sum at one port, `capacity_factor` takes an absolute value.
+`energy_balance` is in the set on structure rather than on need — it costs 41 comparisons to
+include and passes without it, which is the price of saying what is true instead of what is
+minimal.
+
+### What it cost, measured
+
+Comparison breadth, counted as golden groups actually compared across every network, metric and
+grouping:
+
+```
+shipped on main  (old probe + three borrowed-verdict patches)   12,608
+this change      (retuned probe + the structural rule)          12,455   -1.2%
+```
+
+For reference, applying the all-groupings rule to *every* metric rather than the three that can
+cancel costs 11,923, or −5.4%. The 153 comparisons this does give up were comparisons against
+groups where PyPSA's own two solves differ by more than the tolerance — they passed because
+this port happened to land near upstream's simplex vertex, not because the two agreed.
+
+### The floor is now bounded on both sides
+
+`GroupFloor` is 1e-4, and the natural question is why not 1e-5, which is PyPSA's own
+round-to-five resolution. Measured, by setting it there and reading the failure: at 1e-5
+`ac-dc-txcost`'s `revenue|bus_carrier` reports `Line|AC` at −2e-05 and `Line|DC` at 1e-05 here,
+where upstream reports neither. Those are the residue of a cancellation — the AC lines earn and
+pay nearly 20.6 million each way — so they are this solver's zero at 1e-9 and not groups.
+
+Above it, the smallest group PyPSA reports in any compared network is `ac-dc-dispatch`'s
+`market_value` of 0.0003846. So the usable band is about `[2e-4, 3.8e-4]` and the floor sits at
+the bottom of it — narrow, and narrow because the metrics approaching from above are ratios
+while the artefacts approaching from below are cancellations. Both arrived with the last two
+batches. The next thing to give would be the floor's shape rather than its value.
+
+## The ramp multipliers, and the identity they complete
+
+`ramp-limits` was the one network in the dual-face list whose differing prices could not be
+accounted for, only bounded: bus `a` reads −42.3074 and 62.3074 where PyPSA reads −20 and 40,
+a difference of ∓22.3074 at consecutive snapshots.
+
+`LopfResult.rampPrice` exposes them now — `mu_ramp_limit_up` and `mu_ramp_limit_down` upstream,
+and **not** divided by the snapshot weighting the way `marginalPrice` is, which is PyPSA's own
+asymmetry: `post_processing` divides `buses_t.marginal_price` by the objective weighting and
+leaves every `mu_*` alone. `LpBuilder.rowCount` is what makes it possible, and `Ramps.constrain`
+takes a recorder rather than a defaulted one, because a default of "record nothing" is how a
+new emission site ends up unrecorded with no diagnostic.
+
+They complete the reduced cost of a ramped generator, and `LopfSuite` now asserts the identity
+at every interior generator and snapshot on that fixture:
+
+```
+cost × w_objective − λ − μ_up(t) + μ_up(t+1) − μ_down(t) + μ_down(t+1) = 0
+```
+
+It holds at all 17 of them. And it closes the account: `flex` is interior at `t4` with a cost of
+40 against a bus price of 62.3074, and `μ_up(t4)` is **−22.3074** exactly. Same identity,
+different split between the price and the multiplier — which is what a dual face in a ramp
+constraint looks like, and why the earlier case "a generator strictly inside its bounds pins its
+bus price" is true only where no ramp row touches that generator.
+
+The signs were read off the solved model rather than derived, which is the reason the assertion
+earns its place: a sign error in a ramp row or in the dual recovery leaves the primal and the
+objective untouched and would show up nowhere else.
 
 ## What this deliberately does not do
 

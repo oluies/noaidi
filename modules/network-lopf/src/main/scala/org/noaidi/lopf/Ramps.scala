@@ -172,6 +172,16 @@ object Ramps:
   // `Lopf`'s build, so that case can no longer arrive, and a second refusal
   // describing one fragment of it would only be a second place to keep in step.
 
+  /** Which half of the ramp band a row constrains.
+    *
+    * Named rather than a `Boolean`, because the two rows differ in sense as well as in
+    * direction -- the up row is a `lessThan` and the down row a `greaterThan` -- and a caller
+    * reading a dual back has to know which it got. `true` would carry the direction and lose
+    * the sense.
+    */
+  enum Side:
+    case Up, Down
+
   /** Emit the ramp rows for one table.
     *
     * `column` resolves this table's dispatch variable, `capacity` its capacity
@@ -191,6 +201,14 @@ object Ramps:
       column: (String, Int) => Int,
       capacity: String => Option[Int],
       builder: LpBuilder,
+      /** Called with the row index about to be used, so a caller can read its dual back.
+        *
+        * Not optional and not defaulted. A default of "record nothing" is how a new emission
+        * site ends up unrecorded with no diagnostic, which is the omission this whole file is
+        * careful about elsewhere -- and there are four sites below, two of them only reachable
+        * at the first snapshot.
+        */
+      record: (String, Int, Side, Int) => Unit,
   ): Unit =
     if !present(table) then return
 
@@ -239,11 +257,13 @@ object Ramps:
               // factor. With the status 1 the two spellings agree, and this is the
               // shorter one.
               if limit.hasUp then
+                record(id, t, Side.Up, builder.rowCount)
                 builder.lessThan(
                   Seq((here, 1.0)) ++ cap.map(c => (c, -limit.up)),
                   pInit + limit.up * pNom,
                 )
               if limit.hasDown then
+                record(id, t, Side.Down, builder.rowCount)
                 builder.greaterThan(
                   Seq((here, 1.0)) ++ cap.map(c => (c, limit.down)),
                   pInit - limit.down * pNom,
@@ -251,11 +271,13 @@ object Ramps:
           else
             val previous = column(id, t - 1)
             if limit.hasUp then
+              record(id, t, Side.Up, builder.rowCount)
               builder.lessThan(
                 Seq((here, 1.0), (previous, -1.0)) ++ cap.map(c => (c, -limit.up)),
                 limit.up * pNom,
               )
             if limit.hasDown then
+              record(id, t, Side.Down, builder.rowCount)
               builder.greaterThan(
                 Seq((here, 1.0), (previous, -1.0)) ++ cap.map(c => (c, limit.down)),
                 -limit.down * pNom,

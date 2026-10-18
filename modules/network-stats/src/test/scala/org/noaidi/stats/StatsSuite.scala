@@ -177,6 +177,26 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * `1e-5` **at any scale** -- the rule is five decimal places, not a fraction of anything.
     * A floor in the same shape is the only one that can be reasoned about against it.
     *
+    * ==1e-4 is bounded on BOTH sides now, and the band is half a decade wide==
+    *
+    * It cannot go lower. `1e-5` is PyPSA's own round-to-five resolution and so reads like the
+    * natural floor, and at `1e-5` the suite fails: `ac-dc-txcost`'s `revenue|bus_carrier`
+    * reports `Line|AC` at -2e-05 and `Line|DC` at 1e-05 here, where upstream reports neither.
+    * Those are the residue of a cancellation -- the AC lines earn and pay nearly 20.6 million
+    * each way -- so they are this solver's zero at 1e-9 tolerance and not groups. Measured, by
+    * setting the floor to 1e-5 and reading the failure.
+    *
+    * It cannot go much higher either: the smallest group PyPSA reports in any compared network
+    * is `ac-dc-dispatch`'s `market_value` of 0.0003846, which is 3.8x the floor. So the usable
+    * band is about `[2e-4, 3.8e-4]` and the floor sits at the bottom of it.
+    *
+    * That is a narrow band and it is narrow for a reason worth stating: the metrics that
+    * approach it from above are RATIOS -- a capacity factor between 0 and 1, a market value in
+    * currency per MWh -- while the artefacts that approach it from below are cancellations in
+    * the metrics summed over both ports. Both arrived with the last two batches of metrics. A
+    * nineteenth-metric suite has no more room here, and the next thing to give would be the
+    * floor's shape rather than its value.
+    *
     * The first version was relative, `1e-6` of the largest group in the same metric, and it
     * was the wrong shape twice over. It happened to suppress the artefact below, and it would
     * also have hidden five groups PyPSA genuinely reports -- `scigrid-de`'s five onshore wind
@@ -408,56 +428,39 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * of them contributed the movement.
     */
   private def pricesComparable(name: String): Boolean =
-    groupings.forall(g => undetermined(name, "prices", g).isEmpty) &&
-      groupings.forall(g => undetermined(name, "withdrawal", g).isEmpty)
+    groupings.forall(g => undetermined(name, "prices", g).isEmpty)
 
-  /** Metrics whose own determinacy block understates the face, with the blocks to read too.
+  /** Metrics whose group can be a near-total cancellation of much larger terms.
     *
-    * `DETERMINACY_ABS` in the generator is 1e-2 and '''absolute''', calibrated by measuring
-    * the worst agreement on anything that is a point -- 7e-3, on `ac-dc-meshed`'s flows. That
-    * is the right shape for an energy or a cost and the wrong one for a QUOTIENT:
-    * `capacity_factor` divides a weighted mean of `|operation|` by a capacity, so the same
-    * solver noise arrives divided by the horizon's weighting and by the megawatts, and the
-    * floor calibrated in MWh is three orders too loose for it.
+    * These three sum a '''signed''' quantity over '''both''' ports, so a branch contributes
+    * `-p0` at one end and `+p0 * efficiency` at the other and the group is the difference of
+    * two numbers orders of magnitude bigger than itself. Measured on `ac-dc-txvolume-exact`:
+    * `revenue|bus_carrier`'s `Link|DC` is -82.36 as the net of two terms near 1,136,000, so
+    * agreement to 8e-9 on the terms is 1.1e-4 on the net -- just past the tolerance everything
+    * here is compared at.
     *
-    * Measured on `storage-cyclic-co2`, whose `Storage 1` is flagged under both
-    * `energy_balance|name` and `withdrawal|name` at 1.64 and not under `capacity_factor|name`
-    * at all: 1.67 MWh over 36 weighted hours and 25 MW of capacity is 0.0019, which passes a
-    * 1e-2 test. The same vertex, reported in two units. `storage-hvdc` shows it again at
-    * 99.24 MWh and 0.0018.
+    * No other metric can do it. `supply`, `withdrawal` and `curtailment` clip to one sign, the
+    * capital metrics and `transmission` sum at one port, and `capacity_factor` takes an
+    * absolute value. So the set is structural rather than "the ones that happened to fail":
+    * `energy_balance` is in it on the same grounds as the other two and costs 41 comparisons
+    * to include, which is the price of saying what is true instead of what is minimal.
     *
-    * So a quotient over the dispatch inherits the verdict of '''every''' metric over that
-    * dispatch. Reading one of them is not enough, and that was the first attempt: a branch
-    * contributes `-p0` at one port and `+p0 * efficiency` at the other, so `energy_balance`
-    * nets a line to nearly nothing and says nothing about whether its flow moved, while
-    * `transmission` -- the signed sum at one port -- says so plainly. Measured: the union over
-    * the six covers every kind that disagrees on all four degenerate networks, with nothing
-    * left over, where `energy_balance` alone missed `Line` and `Link` on all four.
+    * ==What they inherit, and from themselves==
     *
-    * '''Not''' a union across every metric of any kind, which was the other candidate. A face
-    * is a property of the solution rather than of a metric, so "loose anywhere means loose
-    * everywhere" is true in principle -- and it would take `ac-dc-meshed`'s generators out of
-    * `capex` and `supply` and the rest because one `curtailment` group moved by 0.0122. This
-    * rule costs only the metric with the measurement problem.
+    * A metric in here reads its OWN determinacy verdict at every grouping rather than only at
+    * the one being compared, because a coarse group mixes the entities whose finer groups
+    * moved and the probe sees the movement where the group is finest.
+    *
+    * That replaced three patches, each of which borrowed a verdict from a DIFFERENT metric --
+    * a quotient from its dispatch, then from six dispatch metrics because a branch nets to
+    * nothing in `energy_balance`, then across every grouping as well. All three existed
+    * because `DETERMINACY_ABS` was 1e-2 and absolute, so the probe could not see a face in a
+    * dimensionless or a cancelling group at all. The generator's statistics probe now uses
+    * this suite's own tolerance and sees them directly, so borrowing from another metric is
+    * gone and what is left is this: the same metric, every grouping, for the three that can
+    * cancel.
     */
-  private val dispatchMetrics =
-    Set("supply", "withdrawal", "energy_balance", "transmission", "curtailment",
-        "capacity_factor")
-
-  private val inheritsDeterminacy: Map[String, Set[String]] =
-    Map(
-      "capacity_factor" -> dispatchMetrics,
-      // `revenue` and `market_value` are a dispatch TIMES a price, so a face in either moves
-      // them -- and they are the one place where a tiny dual difference becomes a large
-      // relative one, because a branch's two ports nearly cancel. Measured:
-      // `ac-dc-txvolume-exact`'s `revenue|bus_carrier Link|DC` is -82.36 as the net of two
-      // terms near 1,136,000, so prices agreeing to 4e-9 relative still leave the group 1.1e-4
-      // away. `storage-hvdc`'s `market_value|bus_carrier Line|AC` is the same shape at 3.4e-4.
-      // Neither is a tolerance question: the dispatch there is a face, and `transmission`
-      // says so where the price frame does not.
-      "revenue"      -> (dispatchMetrics ++ dualMetrics),
-      "market_value" -> (dispatchMetrics ++ dualMetrics),
-    )
+  private val cancelling: Set[String] = Set("energy_balance", "revenue", "market_value")
 
   /** Whether this golden is worth comparing at all, with the reason read from the golden. */
   private def comparable(name: String): Option[String] =
@@ -532,18 +535,14 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                   //
                   // Still far finer than the whole-network skip it replaces: on `ac-dc-co2`
                   // only `Line` and `Link` are loose, and every generator group is compared.
-                  // The inherited verdicts are read at EVERY grouping, not just this one,
-                  // and that is the third correction the same measurement problem forced. An
-                  // aggregated group mixes entities, so a face in any one of them moves it --
-                  // and the probe's absolute floor sees the movement at the grouping where
-                  // the group is largest. Measured on `ac-dc-txvolume-exact`:
-                  // `revenue|bus` flags `Link|London` and `revenue|bus_carrier` does not,
-                  // because `Link|DC` is 82.36 as the net of two terms near 1,136,000 and the
-                  // two solves differ by 0.009 -- just under `DETERMINACY_ABS`.
-                  val loose = (undetermined(name, metric, groupBy) ++
-                    inheritsDeterminacy.getOrElse(metric, Set.empty).flatMap(over =>
-                      groupings.flatMap(g => undetermined(name, over, g))))
-                    .map(component)
+                  // This metric's own verdict, at this grouping -- and at every grouping for
+                  // the three that can cancel. See [[cancelling]] for why those three and for
+                  // the three borrowed-verdict patches this replaced.
+                  val loose =
+                    (if cancelling.contains(metric) then
+                       groupings.flatMap(g => undetermined(name, metric, g))
+                     else undetermined(name, metric, groupBy).toSeq)
+                      .map(component).toSet
                   // Keys where upstream's answer is NaN or an infinity because its
                   // DENOMINATOR is exactly zero, which is a fact about the solver rather than
                   // about the metric. PyPSA's simplex returns an exact zero for an asset that
@@ -665,37 +664,34 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(missing, List.empty[String])
   }
 
-  test("the determinacy measurement finds the ten networks it should") {
+  test("the determinacy measurement finds the eleven networks it should") {
     assume(available, "goldens missing")
     // Pinned, for the reason the floor's own list is pinned: a measurement that silently
     // started finding nothing would restore every comparison against a face and look like a
     // pass.
     //
-    // Ten, where it was five before `curtailment`, `capacity_factor`, `revenue` and
-    // `market_value` landed. All four read a dispatch against something other than itself --
-    // its own headroom, its own capacity, a price -- where the metrics before them were plain
-    // weighted sums, and a sum only moves when the total does. `ac-dc-dispatch` and
-    // `ramp-limits` are the two that are new here and they are flagged in the DUAL metrics
-    // alone: their dispatch is a point and their prices are a face.
+    // Eleven, and both the count and the contents moved when the probe's tolerance was
+    // retuned to this suite's own -- `|a - b| <= 1e-4 * max(1, |a|, |b|)` in place of a 1e-2
+    // ABSOLUTE floor calibrated on megawatt-hours. The lists got longer because the probe can
+    // now see a face in a dimensionless group, a price and a cancelling net, which is the
+    // whole point; `ac-dc-txvolume` is the network that is new here, on one `revenue` group.
     val affected = networks.filter { n =>
       groupings.exists(g => comparedMetrics.exists(m => undetermined(n, m, g).nonEmpty))
     }
     assertEquals(affected, List("ac-dc-co2", "ac-dc-dispatch", "ac-dc-meshed", "ac-dc-txcost",
-                                "ac-dc-txvolume-exact", "annuitised-capital", "ramp-limits",
-                                "scigrid-de", "storage-cyclic-co2", "storage-hvdc"))
+                                "ac-dc-txvolume", "ac-dc-txvolume-exact", "annuitised-capital",
+                                "ramp-limits", "scigrid-de", "storage-cyclic-co2",
+                                "storage-hvdc"))
 
     // Which metric finds a ONE-PORT kind loose, per network and outside `scigrid-de`.
     //
-    // This replaces two coarser claims -- "three of the five are degenerate in their branches
-    // alone" and a separate pin on `storage-hvdc`'s two generators -- both of which stopped
-    // being true when `curtailment` landed. A one-port kind coming loose is the expensive
-    // kind: a loose BRANCH kind costs comparisons on components this module only recently
-    // covered at all, and a loose one-port kind costs the comparisons that were the whole
-    // point of the module.
+    // A one-port kind coming loose is the expensive kind: a loose BRANCH kind costs
+    // comparisons on components this module only recently covered at all, and a loose one-port
+    // kind costs the comparisons that were the whole point of the module.
     //
     // By kind rather than by key, because the comparison skips by kind: the keys are in the
-    // goldens and a list of them here would be four hundred lines of `scigrid-de`-shaped
-    // churn without saying anything the kind does not.
+    // goldens and a list of them here would be four hundred lines of `scigrid-de`-shaped churn
+    // without saying anything the kind does not.
     //
     // `scigrid-de` is excluded because it is degenerate across four component kinds and this
     // suite skips it whole for a degenerate dispatch -- its own `dispatch_note` says so.
@@ -714,31 +710,42 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       .filter((_, kinds) => kinds.nonEmpty)
       .toMap
     assertEquals(faces, Map(
-      "ac-dc-co2" -> Set("market_value Generator", "market_value Load",
-                         "revenue Generator", "revenue Load"),
-      "ac-dc-dispatch" -> Set("market_value Generator", "market_value Load",
-                              "revenue Generator", "revenue Load"),
-      "ac-dc-meshed" -> Set("curtailment Generator", "revenue Generator"),
-      "ac-dc-txcost" -> Set("capacity_factor Generator", "curtailment Generator",
-                            "revenue Generator", "system_cost Generator"),
-      "ac-dc-txvolume-exact" -> Set("revenue Generator"),
-      "annuitised-capital" -> Set("curtailment Generator"),
-      "ramp-limits" -> Set("market_value Generator", "market_value Load",
-                           "revenue Generator", "revenue Load"),
-      "storage-cyclic-co2" -> Set("capacity_factor Generator", "curtailment StorageUnit",
-                                  "energy_balance StorageUnit", "market_value StorageUnit",
-                                  "revenue Generator", "withdrawal StorageUnit"),
-      "storage-hvdc" -> Set("capacity_factor Generator", "capex Generator",
-                            "curtailment StorageUnit", "energy_balance StorageUnit",
-                            "expanded_capex Generator", "market_value StorageUnit",
-                            "revenue Generator", "system_cost Generator",
-                            "withdrawal StorageUnit"),
+      "ac-dc-co2" ->
+        Set("curtailment Generator", "market_value Generator", "market_value Load",
+            "revenue Generator", "revenue Load"),
+      "ac-dc-dispatch" ->
+        Set("curtailment Generator", "market_value Generator", "market_value Load",
+            "revenue Generator", "revenue Load"),
+      "ac-dc-meshed" ->
+        Set("capex Generator", "curtailment Generator", "opex Generator", "revenue Generator",
+            "system_cost Generator"),
+      "ac-dc-txcost" ->
+        Set("capacity_factor Generator", "capex Generator", "curtailment Generator",
+            "energy_balance Generator", "opex Generator", "revenue Generator",
+            "supply Generator", "system_cost Generator"),
+      "ac-dc-txvolume" ->
+        Set("revenue Generator"),
+      "ac-dc-txvolume-exact" ->
+        Set("capex Generator", "curtailment Generator", "opex Generator", "revenue Generator",
+            "system_cost Generator"),
+      "annuitised-capital" ->
+        Set("curtailment Generator", "opex Generator", "system_cost Generator"),
+      "ramp-limits" ->
+        Set("market_value Generator", "market_value Load", "revenue Generator", "revenue Load"),
+      "storage-cyclic-co2" ->
+        Set("capacity_factor Generator", "capacity_factor StorageUnit", "capex Generator",
+            "curtailment Generator", "curtailment StorageUnit", "energy_balance Generator",
+            "energy_balance StorageUnit", "expanded_capex Generator",
+            "market_value StorageUnit", "opex Generator", "revenue Generator",
+            "supply Generator", "system_cost Generator", "withdrawal StorageUnit"),
+      "storage-hvdc" ->
+        Set("capacity_factor Generator", "capacity_factor StorageUnit", "capex Generator",
+            "curtailment Generator", "curtailment StorageUnit", "energy_balance Generator",
+            "energy_balance StorageUnit", "expanded_capacity Generator",
+            "expanded_capex Generator", "market_value StorageUnit", "opex Generator",
+            "optimal_capacity Generator", "revenue Generator", "supply Generator",
+            "system_cost Generator", "withdrawal StorageUnit"),
     ))
-
-    // `ac-dc-txvolume` is gone from the list and that is not a regression: its only
-    // undetermined groups were in `prices`, and `prices` is compared by its own block rather
-    // than through `comparedMetrics`. The dual-agreement measurement is what skips it.
-    assertEquals(faces.get("ac-dc-txvolume"), None)
   }
 
   test("every network this skips reaches an optimal dual, not an approximate one") {
@@ -800,12 +807,16 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(dualFace -- networks.toSet, Set.empty[String])
   }
 
-  test("prices is skipped on exactly the networks whose weights or prices are a face") {
+  test("prices is skipped on exactly the networks whose own prices are a face") {
     assume(available, "goldens missing")
     // The determinacy half of `prices`' gate, pinned -- the dual half needs a solve and the
-    // per-network case asserts it there. Six networks, and the two reasons are both in the
-    // goldens: `prices|name` is undetermined on five of them and `withdrawal|bus` on three,
-    // because a load-weighted average of prices reads the dispatch as well as the dual.
+    // per-network case asserts it there. Six networks, read off `prices`' own blocks.
+    //
+    // It used to read `withdrawal`'s blocks as well, because `prices` is a load-WEIGHTED
+    // average and so moves when the dispatch behind its weights moves -- `storage-cyclic-co2`
+    // was the case, its per-cell prices agreeing to 2e-6 while `prices|bus_carrier` sat 0.045
+    // from upstream's 128.008. That borrowing is gone: the retuned probe sees the movement in
+    // `prices`' own block, which is where it belongs.
     assertEquals(networks.filterNot(pricesComparable),
       List("ac-dc-co2", "ac-dc-dispatch", "ramp-limits", "scigrid-de", "storage-cyclic-co2",
            "storage-hvdc"))
@@ -1067,7 +1078,9 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // above. `ac-dc-dispatch`'s `market_value` of 0.0003846008 is the smallest group PyPSA
     // reports in any network this suite compares, which is 3.8x the floor. Asserted as a
     // floor on the margin rather than as the exact number, because a new fixture may
-    // legitimately lower it -- but not past the floor without someone looking.
+    // legitimately lower it -- but not past the floor without someone looking. The other side
+    // of the band is measured too, in [[GroupFloor]]'s own note: at 1e-5 this suite fails on a
+    // cancellation residue, so the floor cannot simply be tightened to upstream's resolution.
     //
     // ==3.8x, down from 6,000x, and the trend is the point==
     //

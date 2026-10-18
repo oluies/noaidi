@@ -112,6 +112,11 @@
    }
   },
   "statistics": {
+   "curtailment|name": {
+    "undetermined": {
+     "Generator|Frankfurt Wind": 0.0012
+    }
+   },
    "market_value|bus": {
     "undetermined": {
      "Generator|Frankfurt": 6.670284506662789,

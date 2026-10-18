@@ -2204,7 +2204,9 @@ DETERMINACY_REL = 1e-4
 #
 # The `max(1, ...)` is where the absolute floor went. It is 1e-4 for any group below unit
 # magnitude, which is PyPSA's own round-to-five resolution with one decimal of slack, and it is
-# the same floor `StatsSuite.GroupFloor` uses for the same reason.
+# the same floor `StatsSuite.groupFloor` applies to the six metrics that can manufacture a
+# group from a solver epsilon -- `supply`, `withdrawal`, `curtailment`, `energy_balance`,
+# `revenue` and `prices` -- and which the other thirteen do not need at all.
 STATISTICS_REL = 1e-4
 
 

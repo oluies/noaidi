@@ -122,12 +122,12 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     *
     * ==The floor has narrowed twice and will not narrow again==
     *
-    * [[GroupFloor]] is absolute and in the units of an energy or a cost, which is what makes
-    * it comparable to upstream's round-to-five rule, and two of the metrics that landed are
-    * neither: `capacity_factor` is '''dimensionless''' and `market_value` is a price. The
-    * smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor to
-    * `phase-shift`'s 0.0160985 at 161x. Nineteen of nineteen are in now, so that is the
-    * margin, measured rather than predicted.
+    * The group floor was a single absolute value in the units of an energy or a cost, and two
+    * of the metrics that landed are neither: `capacity_factor` is '''dimensionless''' and
+    * `market_value` is a price. The smallest compared group went from `store-per-period`'s 0.6
+    * at 6,000x the floor to `phase-shift`'s 0.0160985 at 161x to `ac-dc-dispatch`'s 0.0003846
+    * at 3.8x -- and at that point the single floor gave way to [[groupFloor]], which is per
+    * metric and zero for the fourteen that produce no artefact.
     */
   private val pending: Set[String] = Set.empty
 
@@ -170,40 +170,79 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
         if tag("$inf").str == "-" then Double.NegativeInfinity else Double.PositiveInfinity
       case _ => v.num
 
-  /** The floor below which a group is a solver's zero rather than a group.
+  /** The floor below which a group is this solver's zero rather than a group, PER METRIC.
     *
-    * Absolute, and that is the whole point of it. PyPSA drops a zero group by rounding to
-    * five decimals and testing against exact zero, so the smallest value its rule admits is
-    * `1e-5` **at any scale** -- the rule is five decimal places, not a fraction of anything.
-    * A floor in the same shape is the only one that can be reasoned about against it.
+    * One value served all nineteen for three releases and it was in the wrong shape for most
+    * of them: the metrics differ in scale by five orders of magnitude, so a floor placed to
+    * suppress a cancellation residue in `revenue` was also hiding real groups in
+    * `market_value`. Both walls are measured now, per metric, and the table below is the whole
+    * calibration.
     *
-    * ==1e-4 is bounded on BOTH sides now, and the band is half a decade wide==
+    * ==Only five metrics can turn a solver epsilon into a group, and two mechanisms do it==
     *
-    * It cannot go lower. `1e-5` is PyPSA's own round-to-five resolution and so reads like the
-    * natural floor, and at `1e-5` the suite fails: `ac-dc-txcost`'s `revenue|bus_carrier`
-    * reports `Line|AC` at -2e-05 and `Line|DC` at 1e-05 here, where upstream reports neither.
-    * Those are the residue of a cancellation -- the AC lines earn and pay nearly 20.6 million
-    * each way -- so they are this solver's zero at 1e-9 tolerance and not groups. Measured, by
-    * setting the floor to 1e-5 and reading the failure.
+    *   - '''A clip.''' `supply`, `withdrawal` and `curtailment` keep one side of a quantity, so
+    *     a port whose injection is `-1e-11` here and exactly `0` upstream becomes a group here
+    *     and none there. The boundary, not the magnitude, is what makes it.
+    *   - '''A cancellation.''' `energy_balance` and `revenue` sum a signed quantity over both
+    *     ports, so a branch's two ends nearly annihilate and what is left is the epsilon times
+    *     the scale of the terms -- `revenue`'s residue reaches 4e-5 because the terms carry a
+    *     price.
+    *   - '''A dual epsilon, amplified.''' `prices` is a load-weighted average of a DUAL, and
+    *     the gate that admits a network at all -- [[dualAgrees]] -- tolerates
+    *     `1e-4 * max(1, |want|)`, so 1e-4 ABSOLUTE at a cheap bus. A bus priced at exactly
+    *     zero upstream and 5e-5 here passes that gate, rounds to a group here and to none
+    *     upstream, and lands in the key-set comparison. No artefact exists today; this one is
+    *     a reachable trap rather than a measured residue, and it is floored on that basis.
     *
-    * It cannot go much higher either: the smallest group PyPSA reports in any compared network
-    * is `ac-dc-dispatch`'s `market_value` of 0.0003846, which is 3.8x the floor. So the usable
-    * band is about `[2e-4, 3.8e-4]` and the floor sits at the bottom of it.
+    * Every other metric reads a static column, sums at one port, or takes an absolute value,
+    * and '''produces no artefact at all''' -- measured by setting every floor to zero and
+    * reading what fails. So they get no floor, and every group they report is checked for
+    * presence rather than only for value.
     *
-    * That is a narrow band and it is narrow for a reason worth stating: the metrics that
-    * approach it from above are RATIOS -- a capacity factor between 0 and 1, a market value in
-    * currency per MWh -- while the artefacts that approach it from below are cancellations in
-    * the metrics summed over both ports. Both arrived with the last two batches of metrics. A
-    * nineteenth-metric suite has no more room here, and the next thing to give would be the
-    * floor's shape rather than its value.
+    * `prices` is floored on a mechanism rather than on a measurement, which is the one entry
+    * here that is not evidence-led, and it is worth saying why that is the safe direction:
+    * neither case below can see it. `prices` is keyed by BUS, so it is excluded from
+    * `allGoldenGroups` and from the census and margin assertions alike -- an unfloored
+    * `prices` would read as a side effect of the name's absence from this set rather than as
+    * a decision. Its smallest real group anywhere in the goldens is 0.10223, so the floor
+    * costs nothing: a thousand times of room and a trap closed.
     *
-    * The first version was relative, `1e-6` of the largest group in the same metric, and it
-    * was the wrong shape twice over. It happened to suppress the artefact below, and it would
-    * also have hidden five groups PyPSA genuinely reports -- `scigrid-de`'s five onshore wind
-    * farms at `1e-5` to `1e-4` against a largest group of 61,728, a ratio as low as 1.6e-10.
-    * Those are real: upstream's own rule admits them.
+    * `market_value` is the one that cancels and still gets no floor, because its `0 / 0` groups
+    * are removed by the non-finite skip instead and its real groups reach 4.96e-06. A floor
+    * placed for `revenue` would hide them for nothing.
+    *
+    * ==What it buys, and the one place it cannot separate anything==
+    *
+    * {{{
+    * metric            artefact   smallest real group      floor
+    * prices                none   0.10223                   1e-4   (mechanism, not residue)
+    * supply               1e-05   1e-05  (scigrid-de)       1e-4
+    * withdrawal           1e-05   0.87578                   1e-4
+    * energy_balance       1e-05   1e-05  (scigrid-de)       1e-4
+    * revenue              4e-05   1e-05  (scigrid-de)       1e-4
+    * curtailment           none   0.34042                   1e-4
+    * market_value          none   4.95805e-06               0
+    * capacity_factor       none   2.79015e-06               0
+    * optimal_capacity      none   0.00028                   0
+    * ... and ten more        none   0.6 to 13764.8           0
+    * }}}
+    *
+    * The honest part is the second column. For `supply`, `energy_balance` and `revenue` the
+    * smallest real group upstream reports is the SAME magnitude as the artefact, so no floor
+    * separates them -- and the only reason 1e-4 works is that those groups are all in
+    * `scigrid-de`, the one network this suite skips for a degenerate dispatch. That is a
+    * weaker claim than a margin and it is the true one; the case below pins which groups it
+    * costs.
+    *
+    * The gain is on the other side: `market_value` was the tightest case at 3.8x and now has no
+    * floor at all, so its real groups down to 4.96e-06 are checked for presence rather than
+    * only for value. Same for `capacity_factor` at 2.79e-06 and for the two capacity metrics
+    * at 0.00028.
     */
-  private val GroupFloor = 1e-4
+  private val floored: Set[String] =
+    Set("supply", "withdrawal", "curtailment", "energy_balance", "revenue", "prices")
+
+  private def groupFloor(metric: String): Double = if floored.contains(metric) then 1e-4 else 0.0
 
   /** Groups big enough to be a group rather than a solver's zero.
     *
@@ -221,20 +260,20 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     * ==It cannot distinguish a real `1e-5` group from an artefact, and does not pretend to==
     *
     * Both are `1e-5`. Nothing absolute separates them, and nothing relative does either --
-    * see [[GroupFloor]]. So what makes this safe is not the threshold but the two cases
-    * below, which pin what it actually removes: exactly five groups across every golden, all
-    * five in `scigrid-de`, which this suite skips for a degenerate dispatch anyway, while
-    * the smallest group in any network it does compare is `0.6`. Nearly four orders of
-    * margin, asserted rather than asserted-to-be-obvious, so a future golden with a
-    * genuinely tiny group fails a test instead of being quietly dropped.
+    * see [[groupFloor]]. So what makes this safe is not the threshold but the two cases
+    * below, which pin what it actually removes: thirteen groups across every golden, all
+    * thirteen in `scigrid-de`, which this suite skips for a degenerate dispatch anyway, and
+    * every compared group clearing its own metric's floor by more than 3x. Asserted rather
+    * than asserted-to-be-obvious, so a future golden with a genuinely tiny group fails a test
+    * instead of being quietly dropped.
     *
     * This is a tolerance on the SOLVER, not on the metric: every surviving group's value is
     * still compared at `1e-4` relative, and the `drop_zero` defects this assertion has
     * already caught -- a missing `drop_zero` entirely, and `store-bank`'s carrier -- were
     * group sets differing by whole groups rather than by a rounding artefact.
     */
-  private def significant(groups: Map[String, Double]): Map[String, Double] =
-    groups.filter((_, v) => math.abs(v) > GroupFloor)
+  private def significant(metric: String, groups: Map[String, Double]): Map[String, Double] =
+    groups.filter((_, v) => math.abs(v) > groupFloor(metric))
 
   /** A golden metric for one grouping, or `None` where PyPSA itself did not produce one.
     *
@@ -577,11 +616,11 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                   if shared.values.exists(v => math.abs(v) > 1e-9) then
                     compared += 1
                     assertEquals(
-                      significant(mine).keySet
+                      significant(metric, mine).keySet
                         .filterNot(k => loose.contains(component(k)))
                         .filterNot(undefined.contains)
                         .filter(k => covered.contains(component(k))),
-                      significant(shared).keySet,
+                      significant(metric, shared).keySet,
                       s"$name/$metric|$groupBy: different groups from PyPSA")
                     shared.foreach { (key, want) =>
                       // A NaN is an ANSWER here, not a missing one, so it is asserted rather
@@ -629,8 +668,8 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
                 compared += 1
                 pricesCompared += 1
                 assertEquals(
-                  significant(mine).keySet.filterNot(loose.contains),
-                  significant(shared).keySet,
+                  significant("prices", mine).keySet.filterNot(loose.contains),
+                  significant("prices", shared).keySet,
                   s"$name/prices|$groupBy: different groups from PyPSA")
                 shared.foreach { (key, want) =>
                   assertEqualsDouble(mine.getOrElse(key, 0.0), want,
@@ -972,7 +1011,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // The floor is a judgement, so this pins what it actually does rather than arguing that
     // it is small. Two kinds of group fall below it, and only one of them is interesting.
     //
-    // NON-ZERO, and there are forty, every one in `scigrid-de` -- which is the claim
+    // NON-ZERO, and there are thirteen, every one in `scigrid-de` -- which is the claim
     // that matters, because that is the one network this suite skips for a degenerate
     // dispatch. The floor hides no real number from any comparison that runs.
     //
@@ -987,18 +1026,27 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     //   0.0001  supply|name  Generator|307_220kV Wind Onshore
     //
     // All five are real -- upstream's round-to-five rule admits `1e-5` at any scale -- and the
-    // last is exactly `GroupFloor`, which is in the list because `significant` keeps
-    // `> GroupFloor` rather than `>=`. The first version of this case said four, enumerated
+    // last is exactly the 1e-4 floor, which is in the list because `significant` keeps
+    // `> groupFloor(metric)` rather than `>=`. The first version of this case said four, enumerated
     // with a strict `<` in a throwaway script, and the boundary group was the difference.
     // `energy_balance` reports the same five, being the signed metric `supply` is the positive
     // half of.
-    val hidden  = allGoldenGroups.filter((_, _, _, v, _) => math.abs(v) <= GroupFloor)
+    val hidden = allGoldenGroups.filter((_, block, _, v, _) =>
+      math.abs(v) <= groupFloor(block.split('|').head))
     val nonZero = hidden.filter((_, _, _, v, _) => v != 0.0)
     assertEquals(
       nonZero.groupBy((n, b, _, _, _) => s"$n/${b.split('|').head}").view.mapValues(_.size).toMap,
       Map("scigrid-de/supply" -> 5, "scigrid-de/energy_balance" -> 5,
-          "scigrid-de/capacity_factor" -> 13, "scigrid-de/market_value" -> 14,
           "scigrid-de/revenue" -> 3))
+    // Thirteen where a single floor hid forty. The twenty-seven recovered are
+    // `capacity_factor`'s thirteen and `market_value`'s fourteen, which a floor placed for a
+    // cancellation residue in `revenue` was suppressing for no benefit -- neither metric
+    // produces an artefact, so neither has a floor now. See [[groupFloor]].
+    //
+    // And the thirteen that remain are the honest part: `supply`, `energy_balance` and
+    // `revenue` have real groups at the SAME magnitude as their artefacts, so no floor
+    // separates them. These three sets are in `scigrid-de` and the only reason the floor is
+    // safe is that this suite skips that network for a degenerate dispatch.
     assert(nonZero.forall((_, _, _, _, skipped) => skipped),
       "the floor hides a non-zero group in a network this suite actually compares")
     // EXACTLY ZERO, and there are many, all of them from the two `expanded_*` metrics. Those
@@ -1018,7 +1066,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     assertEquals(zeroBlocks.sorted, List("expanded_capacity", "expanded_capex"))
 
     // And the NaNs, which this case would otherwise drop in silence: every comparison above
-    // tests a magnitude, and `NaN <= GroupFloor` is false, so a NaN group is in neither the
+    // tests a magnitude, and `NaN <= groupFloor(metric)` is false, so a NaN group is in neither the
     // hidden set nor the kept one. There are 1,291 of them across 31 of the 41 networks and
     // every single one is `capacity_factor` for a `Load` -- upstream dividing by an
     // `optimal_capacity` a load has no `p_nom` for. The comparison asserts them directly; the
@@ -1072,49 +1120,35 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     }
   }
 
-  test("the smallest group in a compared network is far above the floor") {
+  test("every compared group clears its own metric's floor by a wide margin") {
     assume(available, "goldens missing")
-    // The other half, and the one that says the margin is not a coincidence of the groups
-    // above. `ac-dc-dispatch`'s `market_value` of 0.0003846008 is the smallest group PyPSA
-    // reports in any network this suite compares, which is 3.8x the floor. Asserted as a
-    // floor on the margin rather than as the exact number, because a new fixture may
-    // legitimately lower it -- but not past the floor without someone looking. The other side
-    // of the band is measured too, in [[GroupFloor]]'s own note: at 1e-5 this suite fails on a
-    // cancellation residue, so the floor cannot simply be tightened to upstream's resolution.
+    // The other half, and the one that says the floor is not merely small but WELL PLACED.
+    // A single absolute floor made this a race to the bottom: `store-per-period`'s 0.6 at
+    // 6,000x, then `phase-shift`'s `capacity_factor` at 161x, then `ac-dc-dispatch`'s
+    // `market_value` of 0.0003846008 at 3.8x -- because one value had to serve metrics whose
+    // scale differs by five orders of magnitude.
     //
-    // ==3.8x, down from 6,000x, and the trend is the point==
-    //
-    // It was `store-per-period`'s 0.6 until `capacity_factor` landed and then
-    // `phase-shift`'s 0.0160985 until `market_value` did. Both are RATIOS where the metrics
-    // before them were energies and costs: a capacity factor lives between 0 and 1 and a
-    // market value is a currency per MWh, while a supply lives in the thousands. The floor is
-    // absolute, which is what makes it comparable to upstream's round-to-five rule and also
-    // what makes it the wrong shape for a ratio.
-    //
-    // It is still safe, and for a reason narrower than the margin: the floor governs the
-    // GROUP SET comparison only, and every group it admits is compared by value on both
-    // sides. What the floor used to protect against for `market_value` -- a group this
-    // solver reports where upstream reports none -- is now handled by the non-finite skip
-    // instead, which removes exactly the `0 / 0` groups rather than everything small.
-    // Nineteen of nineteen metrics are in, so this is the margin, measured rather than
-    // predicted.
-    //
-    // Exact zeros are excluded here and counted as hidden by the case above, which is not an
-    // inconsistency: a zero is not a group whose margin can be measured, and PyPSA's own
-    // `drop_zero` means a recorded zero can only come from a `round(5)` that did not reach
-    // one. The case above wants every value the floor removes; this one wants the smallest
-    // value it keeps.
-    val compared = allGoldenGroups
+    // With [[groupFloor]] per metric the question changes shape. Fourteen metrics have no
+    // floor at all, so nothing of theirs can be close to one, and the five that do have a
+    // floor are measured against their OWN groups. The ratio below is per metric and the
+    // tightest of them is what is asserted.
+    val tightest = allGoldenGroups
       .filterNot((_, _, _, _, skipped) => skipped)
-      .map((_, _, _, v, _) => math.abs(v))
-      .filter(_ > 0.0)
-    // Explicit, because `.min` on an empty list throws `UnsupportedOperationException` and
-    // names nothing -- and an empty list here is exactly what a suite that stopped reading
-    // the goldens looks like.
-    assert(compared.nonEmpty, "no compared golden group to measure the floor against")
-    val smallest = compared.min
-    assert(smallest > 3.0 * GroupFloor,
-      s"the smallest compared group is $smallest, within 3x of the floor $GroupFloor")
+      .filter((_, _, _, v, _) => math.abs(v) > 0.0)
+      .map((_, block, _, v, _) =>
+        val floor = groupFloor(block.split('|').head)
+        if floor == 0.0 then Double.PositiveInfinity else math.abs(v) / floor)
+    // The FINITE ratios only, and that distinction is the case's whole guard. Mapping an
+    // unfloored metric's group to infinity makes `nonEmpty` true without any floored metric
+    // having been measured: empty `floored`, or stop recording `supply` and `revenue` groups
+    // in compared networks, and every ratio is infinite, `min > 3.0` holds, and this passes
+    // having measured nothing. That is the silent-coverage-loss mode the predecessor's own
+    // `compared.nonEmpty` guard existed to catch, and replacing it with a weaker one is the
+    // kind of regression this suite is supposed to be good at noticing.
+    val ratios = tightest.filter(_.isFinite)
+    assert(ratios.nonEmpty, "no floored metric contributed a compared group to measure")
+    assert(ratios.min > 3.0,
+      s"a compared group sits within 3x of its metric's floor: ratio ${ratios.min}")
   }
 
   test("the floor drops the solver artefact and keeps a real group") {
@@ -1126,7 +1160,15 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
       "Generator|Norway Gas"     -> 1.0e-5,
       "Generator|Frankfurt Gas"  -> 1465.27437,
     )
-    assertEquals(significant(groups).keySet, Set("Generator|Frankfurt Gas"))
+    assertEquals(significant("supply", groups).keySet, Set("Generator|Frankfurt Gas"))
+
+    // And the other branch, which is what this floor's shape exists for: `market_value` is
+    // unfloored, so the same magnitude that is an artefact in `supply` is a GROUP there --
+    // 4.96e-06 is the smallest one upstream actually reports. Pinned here rather than left to
+    // the goldens-gated comparison, so the zero-floor branch is covered where the floored one
+    // is.
+    assertEquals(significant("market_value", Map("a" -> 4.96e-6)).keySet, Set("a"))
+    assertEquals(significant("supply", Map("a" -> 4.96e-6)).keySet, Set.empty[String])
   }
 
   test("the floor keeps a real group that a relative one would hide") {
@@ -1138,7 +1180,7 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // A relative floor of 1e-6 of the largest would put the threshold at 0.0617 and hide all
     // five. Here `small` stands for them: real, and eleven orders below `huge`.
     val groups = Map("huge" -> 1.5e9, "small" -> 0.6, "artefact" -> 1.0e-5)
-    assertEquals(significant(groups).keySet, Set("huge", "small"))
+    assertEquals(significant("supply", groups).keySet, Set("huge", "small"))
     // Said as the comparison rather than left implicit, because "absolute" is the property
     // and a reader should be able to see what it buys.
     val relativeFloor = 1e-6 * groups.values.map(math.abs).max
@@ -1150,9 +1192,9 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
     // `maxOption` on an empty map was what the relative version needed a default for, and a
     // default of 0.0 there made `|v| > 0` drop every group of an all-zero metric -- which is
     // correct but by accident. Absolute has no such edge, and this says so.
-    assertEquals(significant(Map.empty), Map.empty[String, Double])
-    assertEquals(significant(Map("a" -> 0.0)), Map.empty[String, Double])
-    assertEquals(significant(Map("a" -> -5000.0)), Map("a" -> -5000.0))
+    assertEquals(significant("supply", Map.empty), Map.empty[String, Double])
+    assertEquals(significant("supply", Map("a" -> 0.0)), Map.empty[String, Double])
+    assertEquals(significant("supply", Map("a" -> -5000.0)), Map("a" -> -5000.0))
   }
 
   test("the two expanded_* metrics disagree about the same retirement, as upstream does") {

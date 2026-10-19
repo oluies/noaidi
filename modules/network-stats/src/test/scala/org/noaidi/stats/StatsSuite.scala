@@ -861,6 +861,67 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
            "storage-hvdc"))
   }
 
+  test("a link with four ports contributes at all of them, and two of them transmit") {
+    assume(available, "goldens missing")
+    // The shape this module refused by name until `multi-port-link` existed. `Lopf` has always
+    // built an arbitrary number of ports; the schema carried two and turned such a network
+    // away, which was honest while no golden had one and untestable for the same reason.
+    //
+    // Three things have to be true at once, and only the first is about SQL.
+    scala.util.Using.resource(Stats.of(Lopf.solve(network("multi-port-link"), params))) {
+      stats =>
+        // One `fact` row per receiving port, named by the port rather than by PyPSA's
+        // attribute: `efficiency1` is its plain `efficiency` and `efficiency2` its numbered
+        // one. A single `efficiency` here is the two-port assumption spelled as a name.
+        val loaded = stats
+          .query("SELECT quantity FROM fact WHERE component = 'Link' GROUP BY quantity")
+          .map(_("quantity").toString)
+          .toSet
+        assertEquals(loaded,
+          Set("p0", "marginal_cost", "p_max_pu", "efficiency1", "efficiency2", "efficiency3"))
+
+        // Four ports on the link, at the four buses the network gives it.
+        assertEquals(
+          stats
+            .query("SELECT port, bus FROM port WHERE entity = 'ely' ORDER BY port")
+            .map(r => r("port").toString -> r("bus").toString),
+          Vector("0" -> "e", "1" -> "h", "2" -> "w", "3" -> "x"))
+
+        // And the metric. 400 is 240 of hydrogen at `h`, 100 of heat at `w` and 60 of
+        // hydrogen at `x`; a schema carrying two ports reports 240, short by 40% of the group
+        // rather than by a rounding artefact. Asserted against the golden rather than against
+        // this arithmetic, with the floor below as the diagnostic a reader of a failure wants.
+        val supply = stats.supply("name")
+        assertEqualsDouble(supply("Link|ely"),
+          expected("multi-port-link", "supply", "name").get("Link|ely"), 1e-4, "Link|ely")
+        assert(supply("Link|ely") > 300.0,
+          s"a port past the second is missing: ${supply("Link|ely")} should be 400, not 240")
+
+        // `transmission` is why the fourth port is here. Upstream keeps a branch where ANY two
+        // of its `bus*` columns share a carrier, so ports 1 and 3 -- both H2 -- make this link
+        // transmission while port 0 at AC does not. A reader comparing only `bus0` against
+        // `bus1` reports nothing here and agrees with upstream on every other network, which
+        // is what left that generalisation unexercised until this fixture gained a bus.
+        val tx = stats.transmission("name")
+        assertEqualsDouble(tx("Link|ely"),
+          expected("multi-port-link", "transmission", "name").get("Link|ely"), 1e-4, "tx")
+        assert(tx.contains("Link|ely"),
+          "ports 1 and 3 share the H2 carrier, so this link is a transmission branch")
+
+        // The third port's efficiency arrives as a SERIES with no static column -- the
+        // fixture's `links.csv` has no `efficiency2` at all -- so this is also what says the
+        // loader went through `Topology.portEfficiency` rather than reading `static`. A
+        // spec-and-static read sees no efficiency, treats the port as lossless, and reports
+        // 0.25/0.25/0.30/0.20 as 1.0 each: 400 of heat instead of 100.
+        assertEquals(
+          stats
+            .query("SELECT snapshot, ROUND(value, 5) AS v FROM fact " +
+                   "WHERE entity = 'ely' AND quantity = 'efficiency2' ORDER BY snapshot")
+            .map(_("v").toString),
+          Vector("0.25", "0.25", "0.3", "0.2"))
+    }
+  }
+
   test("every metric the generator records is implemented here or named as pending") {
     assume(available, "goldens missing")
     // `STATISTICS_METRICS` in the generator and `metrics` here are two lists, and a metric in
@@ -950,7 +1011,11 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
           .groupMap(_._1)(_._2)
           .view.mapValues(_.toSet).toMap
         assertEquals(loaded("Generator"), Set("p", "marginal_cost", "p_max_pu"))
-        assertEquals(loaded("Link"), Set("p0", "marginal_cost", "efficiency", "p_max_pu"))
+        // `efficiency1` and not `efficiency`: the quantity is named by the PORT it belongs
+        // to, so `injection` can join `'efficiency' || port` and carry a branch with any
+        // number of them. `statistics-dimensions`' links have two ports, hence one receiving
+        // port and one efficiency; the case below is the one with three.
+        assertEquals(loaded("Link"), Set("p0", "marginal_cost", "efficiency1", "p_max_pu"))
         assertEquals(loaded("Store"), Set("e", "p", "marginal_cost", "marginal_cost_storage"))
         // `Load` has no solved series -- there is no load variable -- and contributes one
         // row anyway, because `assign_solution` writes `Load.p` from `p_set`. So the `p`
@@ -1085,10 +1150,10 @@ class StatsSuite extends munit.FunSuite, CsvFixtures:
           s"${b.split('|').head}/${component(k)}/${if v.isNaN then "nan" else "inf"}")
         .view.mapValues(_.size).toMap,
       Map(
-        "capacity_factor/Load/nan" -> 1291,
+        "capacity_factor/Load/nan" -> 1302,
         "market_value/Line/nan"    -> 559,
         "market_value/Line/inf"    -> 1,
-        "market_value/Link/nan"    -> 67,
+        "market_value/Link/nan"    -> 72,
         "market_value/Generator/nan" -> 329,
         "market_value/Generator/inf" -> 5,
         "market_value/Transformer/nan" -> 146,

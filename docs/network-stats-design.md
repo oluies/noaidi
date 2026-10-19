@@ -408,8 +408,8 @@ boundary a pinned list catches and a sentence about magnitudes does not.
   are done, in five batches; see *The capital metrics*, *The capacity metrics*, *The three
   metrics that needed no new table*, *`Load`, and the three metrics it unlocked* and *The last
   three, which read the DUAL* below for what each cost.
-- **A third port.** `bus2` and beyond are refused rather than dropped; see *Branches in
-  `supply`* below.
+- ~~**A third port.** `bus2` and beyond are refused rather than dropped.~~ Built; see *A
+  third port, which was refusing a shape it had never seen* below.
 - **The `HAVING` clause's rounding.** Replacing `ROUND(..., 5) <> 0` with a `1e-9` threshold
   fails no test, because the suite's solver floor hides exactly the artefacts the rounding
   removes. Measured and stated rather than counted as coverage; the rounding of the returned
@@ -550,9 +550,10 @@ line the efficiency is 1, so the positive part sums to `|p0|` — `ac-dc-meshed`
 electrolyser reports 25.0 against a 35.71429 MW flow. `efficiency` is a row in `fact` rather
 than a column on `entity`, for the same reason `marginal_cost` is: it is `static or series`.
 
-A branch with `bus2` is **refused**. `Lopf` builds one — `efficiency2` is read there — and
-this schema carries two ports, so such a network would be short by whatever the third port
-injects. No golden has one, so this refuses a shape it has never seen, deliberately.
+A branch with `bus2` was **refused** at this point. `Lopf` builds one — `efficiency2` is read
+there — and this schema carried two ports, so such a network would be short by whatever the
+third port injects. No golden had one, so it refused a shape it had never seen, deliberately.
+That refusal is lifted now; see *A third port* below for the fixture that lifted it.
 
 ### Covering branches broke four goldens, none of them because of this code
 
@@ -1200,6 +1201,111 @@ of the metrics that landed are neither — `capacity_factor` is dimensionless an
 is a price. The smallest compared group went from `store-per-period`'s 0.6 at 6,000x the floor
 to `phase-shift`'s 0.0161 at 161x to `ac-dc-dispatch`'s 0.0003846 at **3.8x** — at which point
 the single floor gave way to a per-metric one. See *The floor is per metric now* below.
+
+## Ports past the second, which were refusing a shape they had never seen
+
+`Lopf` has always built an arbitrary number of ports — `Topology.branchPorts` walks every
+`busN` column and the balance reads `efficiency2` beside `efficiency` — while this module
+carried exactly two per branch and turned such a network away by name. That refusal was the
+right call at the time and it had a defect built in: no golden had a `bus2`, so the two-port
+limit cost nothing measurable and the refusal could not be tested against anything.
+
+`multi-port-link` is the golden that ended that, and the shape is the ordinary one: an
+electrolyser delivers hydrogen at `bus1`, its waste heat at `bus2` and more hydrogen to a second
+hydrogen bus at `bus3`, which is why ports past the second exist at all. It has **four**, and
+the fourth is there for a specific reason given below.
+
+### The third port decides the answer, not just the bookkeeping
+
+Serving one MWh of hydrogen through the link costs `10 / 0.6` = 16.67 of electricity against an
+import at 15, so **on its hydrogen leg alone the link is not worth running**. Its heat
+by-product pays for it: every MWh of hydrogen carries `0.25 / 0.6` = 0.4167 MWh of heat that
+would otherwise cost 60.
+
+So the link runs flat out at 100 MW and the objective is **8,850**. Zero `efficiency2` and
+`efficiency3` and it never runs at all: **15,650**. A port dropped is not a term lost, it is the
+decision reversed.
+
+For the metrics, `supply` sums a branch at every port, so `Link|ely` is **400** — 240 of
+hydrogen at `h`, 100 of heat at `w` and 60 of hydrogen at `x`. A two-port schema reports 240,
+short by 40% of the group. `withdrawal`, `energy_balance` and `revenue` split the same way.
+
+### The fourth port is what exercises `transmission`
+
+Upstream's `get_transmission_branches` maps **every** `bus*` column through `buses.carrier` and
+keeps a branch where more than one end matches — so a multi-port link is transmission when *any
+two* of its ports share a carrier, not when its first two do. With three ports at AC, H2 and
+heat no two match, the rule is unexercised, and a reader comparing only `bus0` against `bus1`
+agrees with upstream on every network in the manifest.
+
+`bus3` is a second hydrogen bus, so ports 1 and 3 match while port 0 does not, and upstream
+reports `transmission|name Link|ely` at 400. The mutant that compares only the first two ports
+survived until this bus existed; it does not now.
+
+### `efficiency2` is a series with no static column, which is the shape that bites
+
+It varies — 0.25, 0.25, 0.30, 0.20 — and that is not decoration. `efficiency2` and beyond are
+not schema attributes, so a multi-port link carries them as custom columns, and
+`export_to_csv_folder` omits a static column sitting at its default. This network's `links.csv`
+header is `name,bus0,bus1,bus2,carrier,efficiency,p_nom` — **no `efficiency2` at all** — and
+only `links-efficiency2.csv` carries the values.
+
+A reader checking `spec` and `static` therefore sees no efficiency and treats the port as
+lossless, reporting 1.0 where the network says 0.25: 400 of heat instead of 100.
+`Topology.portEfficiency` is the one helper that checks all three places a value can live, and
+this module now goes through it rather than through `table.valueAt`. With a scalar
+`efficiency2` the mutant that bypasses it **survived**; the series form is what kills it.
+
+### Three iterations, each forced by a measurement
+
+1. **Infeasible.** One `p` variable feeds both by-product buses, so their outputs are locked in
+   the ratio `efficiency2 / efficiency` and neither can be a hard load on its own. The first
+   version set hydrogen to 30 and heat to 5, which asks the link for 50 MW of input and 12.5 of
+   heat against a load of 5. PyPSA rejected it on presolve.
+2. **Feasible, but a dual face.** With both by-product buses given a backup generator the
+   network solves — but the second version left both backups at zero at the last snapshot,
+   where the link happened to meet both loads exactly. With no marginal unit there, those two
+   bus prices are an interval and the two solvers disagreed by **37.05**, which would have put
+   the fixture in `dualFace` and skipped `revenue`, `market_value` and `prices` on it.
+3. **Both backups running at every snapshot.** Raising the last snapshot's loads to 70 and 30
+   puts both at 10 MW and pins both prices. With the fourth port and its own backup added,
+   series agree to 6.8e-14, the objective to 7e-12 and the nodal prices to **5.0e-9**, so all
+   nineteen metrics are compared here.
+
+### What the schema change was
+
+`port` became a **table** loaded from `Topology.branchPorts`, where it had been a view over
+`entity.bus` and `entity.bus1`. A view can only carry the columns it names, and the number of
+ports is a fact the network decides. `entity.bus1` is gone with it.
+
+Two views generalised as a consequence:
+
+- `injection` joins the receiving port's efficiency **by port number** —
+  `'efficiency' || i.port` against a `fact` quantity named `efficiency1`, `efficiency2`, … — so
+  one query covers a branch with any number of ports instead of one `LEFT JOIN` per port.
+  `efficiency1` is PyPSA's plain `efficiency`; a single `efficiency` was the two-port assumption
+  spelled as a quantity name.
+- `transmission_branch` compares **any two** ports for a shared bus carrier rather than `bus0`
+  against `bus1`, which is upstream's actual rule: `get_transmission_branches` maps every `bus*`
+  column and keeps a branch where more than one end matches.
+
+### What the mutation run says
+
+Six mutants, six killed, which is the whole point of having built the fixture before the
+feature:
+
+| mutant | killed by |
+|---|---|
+| the `port` table carries only two ports | 2 cases |
+| the injection reads only port 1 | 2 cases |
+| only the first receiving port gets an efficiency | 2 cases |
+| the efficiency is read off `static` rather than through `Topology` | 2 cases |
+| `transmission` compares only the first two ports | 2 cases |
+| a receiving port with no efficiency row is lossless at 0 rather than 1 | 18 cases |
+
+Two of those needed the fixture to grow to kill them, and both are recorded above because the
+first version did not: the `static` read survived a scalar `efficiency2`, and the `transmission`
+comparison survived until the link had two ports of one carrier.
 
 ## Retuning the probe, and what it made unnecessary
 

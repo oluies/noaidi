@@ -1,0 +1,5 @@
+name,bus,control,p_nom,carrier,marginal_cost
+grid,e,Slack,300.0,AC,10.0
+h2import,h,Slack,200.0,H2,15.0
+boiler,w,Slack,200.0,heat,60.0
+h2spot,x,Slack,200.0,H2,20.0

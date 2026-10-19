@@ -1345,6 +1345,132 @@ def fixed_dispatch_periods():
     return n
 
 
+def multi_port_link():
+    """A link with FOUR ports, which `network-stats` refused rather than loaded.
+
+    `Lopf` has always handled an arbitrary number of ports -- `Topology.branchPorts` walks
+    every `busN` column and the balance reads `efficiency2` beside `efficiency` -- while
+    `network-stats` carried exactly two per branch and turned such a network away by name.
+    That refusal was deliberate and it was also refusing a shape it had never seen: no golden
+    had a `bus2`, so the schema's two-port limit cost nothing and could not be measured.
+
+    This is the network that measures it. An electrolyser on the AC bus delivers hydrogen at
+    `bus1`, its waste heat at `bus2` and more hydrogen to a second hydrogen bus at `bus3`, which
+    is the ordinary shape of sector coupling and the reason ports past the second exist at all.
+
+        bus  carrier  attached
+        e    AC       grid     (300 MW at 10)
+        h    H2       h2import (200 MW at 15), load 80/70/90/70
+        w    heat     boiler   (200 MW at 60), load 40/30/50/30
+        x    H2       h2spot   (200 MW at 20), load 25 throughout
+
+        ely: bus0=e -> bus1=h at 0.6, bus2=w at 0.25/0.25/0.30/0.20, bus3=x at 0.15, 100 MW
+
+    ==Four, because the fourth is what exercises `transmission`==
+
+    Upstream's `get_transmission_branches` maps EVERY `bus*` column through `buses.carrier` and
+    keeps a branch where more than one end matches the same value -- so a multi-port link is
+    transmission when any two of its ports share a carrier, not when its first two do. With
+    three ports at AC, H2 and heat no two match and the rule is unexercised: a reader comparing
+    only `bus0` against `bus1` agrees with upstream on every network.
+
+    `bus3` is a SECOND hydrogen bus, so ports 1 and 3 match while port 0 does not, and upstream
+    reports `transmission|name Link|ely` at 400. A port that compares only the first two ports
+    reports nothing.
+
+    ==The third port decides the answer, not just the bookkeeping==
+
+    Serving one MWh of hydrogen through the link costs `10 / 0.6` = 16.67 of electricity
+    against an import at 15, so on the hydrogen leg alone the link is NOT worth running. Its
+    heat by-product is what pays for it: every MWh of hydrogen carries `0.25 / 0.6` = 0.4167
+    MWh of heat that would otherwise cost 60, a credit of 25.
+
+    So with both by-products the link runs flat out at 100 MW throughout and the objective is
+    **8,850**. With `efficiency2` and `efficiency3` zeroed it never runs at all and the
+    objective is **15,650**. A port dropped is not a term lost; it is the decision reversed.
+
+    ==`efficiency2` is a SERIES with no static column, which is the shape that bites==
+
+    It varies -- 0.25, 0.25, 0.30, 0.20 -- and that is not decoration. `efficiency2` and beyond
+    are not schema attributes, so a multi-port link carries them as custom columns, and
+    `export_to_csv_folder` omits a static column sitting at its default: this network's
+    `links.csv` has **no `efficiency2` column at all** and only `links-efficiency2.csv` carries
+    the values. A reader checking `spec` and `static` alone therefore sees no efficiency and
+    treats the port as LOSSLESS, putting heat at a bus the network never produced.
+    `Topology.portEfficiency` is the one helper that checks all three places, and this fixture
+    is what makes a consumer that bypasses it fail.
+
+    ==And it separates the two-port reading of every port-wise metric==
+
+    `supply` sums a branch's contribution at every port, so `Link|ely` is 400: 240 of hydrogen
+    at `h`, 100 of heat at `w` and 60 of hydrogen at `x`. A schema carrying two ports reports
+    240 -- short by 160, which is 40% of the group rather than a rounding artefact. `withdrawal`,
+    `energy_balance` and `revenue` split the same way, and `transmission` reports nothing here
+    because no two of the three ports share a bus carrier.
+
+    ==Feasible without a dump, which took some arranging==
+
+    One `p` variable feeds both by-product buses, so their outputs are locked in the ratio
+    `efficiency2 / efficiency` and neither can be a hard load on its own: the first version
+    set the hydrogen load to 30 and the heat load to 5, which asks the link for 50 MW of
+    input and 12.5 of heat against a load of 5, and PyPSA reported it infeasible on presolve.
+
+    Both by-product buses carry a backup generator here and the link under-supplies both at
+    EVERY snapshot, so nothing has to be dumped and the backups absorb the remainder. Every
+    snapshot matters: the second version left `h2import` and `boiler` at zero at the last one,
+    where the link happened to meet both loads exactly, and with no marginal unit there those
+    two bus prices became a dual face -- the two solvers disagreed by 37.05. Raising the last
+    snapshot's loads to 70 and 30 puts both backups at 10 MW and pins both prices.
+
+    The dispatch and the dual are both points rather than faces, checked rather than assumed:
+    HiGHS simplex and interior point with crossover and presolve off agree to 6.8e-14 on every
+    series, 7e-12 on the objective and **5.0e-9 on the nodal prices** -- so the three
+    dual-derived metrics are compared here too rather than skipped.
+    """
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+
+    n.add("Bus", "e", v_nom=110.0, carrier="AC")
+    n.add("Bus", "h", v_nom=1.0, carrier="H2")
+    n.add("Bus", "w", v_nom=1.0, carrier="heat")
+    # A SECOND hydrogen bus, so two of the link's ports share a carrier and the first does not.
+    n.add("Bus", "x", v_nom=1.0, carrier="H2")
+
+    n.add("Carrier", "AC")
+    n.add("Carrier", "H2")
+    n.add("Carrier", "heat")
+
+    # A backup on each by-product bus, so the link never has to overproduce either one.
+    n.add("Generator", "grid", bus="e", carrier="AC", p_nom=300.0, marginal_cost=10.0)
+    n.add("Generator", "h2import", bus="h", carrier="H2", p_nom=200.0, marginal_cost=15.0)
+    n.add("Generator", "boiler", bus="w", carrier="heat", p_nom=200.0, marginal_cost=60.0)
+    n.add("Generator", "h2spot", bus="x", carrier="H2", p_nom=200.0, marginal_cost=20.0)
+
+    # The third port. `efficiency2` is read by `Lopf`'s balance and was refused by
+    # `network-stats`; zeroing it moves the objective from 7,580 to 12,900.
+    n.add(
+        "Link",
+        "ely",
+        bus0="e",
+        bus1="h",
+        bus2="w",
+        bus3="x",
+        carrier="H2",
+        p_nom=100.0,
+        efficiency=0.6,
+        # A SERIES and not a scalar, so the export omits the static column entirely and a
+        # consumer reading only `spec` and `static` sees a lossless port. See the note above.
+        efficiency2=[0.25, 0.25, 0.30, 0.20],
+        efficiency3=0.15,
+    )
+
+    # Sized so both backups run at every snapshot, which is what pins both by-product prices.
+    n.add("Load", "h2load", bus="h", p_set=[80.0, 70.0, 90.0, 70.0])
+    n.add("Load", "heatload", bus="w", p_set=[40.0, 30.0, 50.0, 30.0])
+    n.add("Load", "h2bload", bus="x", p_set=25.0)
+    return n
+
+
 def statistics_dimensions():
     """All seven of `statistics`' grouping dimensions, each splitting into more than one group.
 
@@ -2442,6 +2568,7 @@ NETWORKS = {
     "fixed-dispatch": fixed_dispatch,
     "fixed-dispatch-periods": fixed_dispatch_periods,
     "statistics-dimensions": statistics_dimensions,
+    "multi-port-link": multi_port_link,
     "annuitised-capital": annuitised_capital,
     "tx-cost-annuitised": tx_cost_annuitised,
     "ac-dc-dispatch": ac_dc_dispatch,

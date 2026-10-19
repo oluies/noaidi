@@ -3,7 +3,7 @@ package org.noaidi.stats
 import java.sql.{Connection, DriverManager}
 import org.duckdb.DuckDBConnection
 import org.noaidi.lopf.{Expansion, LopfResult, Periods}
-import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role}
+import org.noaidi.network.{ComponentSpec, ComponentTable, Network, Role, Topology}
 
 /** Statistics over a solved result, answered in SQL.
   *
@@ -164,9 +164,12 @@ final class Stats private (
     * uncovered component set was exactly the branch kinds. That assertion is gone with the
     * gap, and the suite now compares every component PyPSA reports.
     *
-    * '''A third port is refused rather than dropped.''' `Lopf` builds a link with `bus2` --
-    * `efficiency2` is read there -- and this schema carries two ports, so such a network
-    * would lose a third of its branch supply silently. [[Stats.of]] turns it away by name.
+    * '''A third port counts like the second.''' `Lopf` has always built a link with `bus2` --
+    * `efficiency2` is read there -- and this module refused such a network by name, because
+    * two ports silently carrying three is a supply short by whatever the third injects. The
+    * `port` table carries as many as the network gives, and `multi-port-link` is the golden
+    * that measures it: its electrolyser's waste heat is 95 of a 323 `supply` group, so the
+    * two-port reading is short by 29% of it rather than by a rounding artefact.
     *
     * ==It is `energy_balance`'s positive half, and now says so in one line==
     *
@@ -1015,7 +1018,6 @@ object Stats:
     * size that matters and it is ~55k fact rows.
     */
   def of(result: LopfResult): Stats =
-    rejectExtraPorts(result.network)
     val conn = DriverManager.getConnection("jdbc:duckdb:")
     try
       val st = conn.createStatement()
@@ -1044,31 +1046,6 @@ object Stats:
       case e: Throwable =>
         conn.close()
         throw e
-
-  /** Refuse a branch with a third port, which this schema cannot carry.
-    *
-    * `port` and `injection` give a branch two ports, `bus0` and `bus1`. `Lopf` builds more
-    * than that -- `Topology.branchPorts` walks every `busN` and `efficiency2` is read there --
-    * so a three-port link would contribute two thirds of its `supply` here and no error.
-    * Silently short by a term nobody named is the failure this repository is arranged
-    * against, so it is refused.
-    *
-    * No golden has one: no `links.csv` in `reference/goldens` carries a `bus2` column,
-    * checked before writing this. `Stats` is therefore refusing a network it has never seen,
-    * which is deliberate -- the alternative is a wrong number the first time one appears.
-    */
-  private def rejectExtraPorts(n: Network): Unit =
-    n.tables.values.foreach { table =>
-      val extra = (2 to 9).map(i => s"bus$i").filter(table.static.contains)
-      if extra.nonEmpty then
-        val used = table.ids.filter(id => extra.exists(p => table.string(p, id).nonEmpty))
-        if used.nonEmpty then
-          throw new IllegalArgumentException(
-            s"${table.spec.name} '${used.head}' has ${extra.mkString(", ")}, and this module " +
-              "carries two ports per branch. Its supply would be short by whatever that port " +
-              "injects, so the network is refused rather than loaded."
-          )
-    }
 
   /** Everything the schema holds.
     *
@@ -1205,7 +1182,7 @@ object Stats:
 
     // Only components with a solved series. A `Carrier` or a `LineType` has no rows in
     // `fact`, and putting them in `entity` would make every unqualified count wrong.
-    val modelled = n.tables.values.filter(t => quantitiesOf(t.spec).nonEmpty).toSeq
+    val modelled = n.tables.values.filter(t => quantitiesOf(t).nonEmpty).toSeq
 
     modelled.foreach { table =>
       val component = table.spec.name
@@ -1215,13 +1192,12 @@ object Stats:
       // `bus0` for a branch, which is PyPSA's own placement and the asymmetry
       // `TechCapacityLimit` reproduces: a branch counts at the end it leaves.
       val busAttr = if branch then "bus0" else "bus"
-      insert("entity", 13)(table.ids.map { id =>
+      insert("entity", 12)(table.ids.map { id =>
         Seq(
           component,
           id,
           carrierOf(table, busAttr, id),
           if declares(table, busAttr) then table.string(busAttr, id) else null,
-          if branch && declares(table, "bus1") then table.string("bus1", id) else null,
           // NULL where the component has no capacity attribute at all, which is `Load` and
           // only `Load`. `LopfResult.capacity` reads `Expansion.nominalAttribute` unguarded
           // and threw `key not found: Load` the moment loads were loaded -- loudly, which is
@@ -1262,6 +1238,26 @@ object Stats:
         )
       })
 
+      // One row per port the network actually gives this entity. `Topology.branchPorts` is
+      // the same enumeration `Lopf`'s balance walks, which is the point: a port counted here
+      // and not there -- or there and not here -- is a metric disagreeing with the model it
+      // reports on. A one-port has `bus` and nothing else.
+      insert("port", 4)(
+        if branch then
+          Topology
+            .branchPorts(table)
+            .zipWithIndex
+            .flatMap { (column, port) =>
+              table.ids
+                .filter(id => declares(table, column) && table.string(column, id).nonEmpty)
+                .map(id => Seq(component, id, port, table.string(column, id)))
+            }
+        else
+          table.ids
+            .filter(id => declares(table, busAttr) && table.string(busAttr, id).nonEmpty)
+            .map(id => Seq(component, id, 0, table.string(busAttr, id)))
+      )
+
       insert("active", 3)(
         for
           id     <- table.ids
@@ -1276,7 +1272,7 @@ object Stats:
       modelled.foreach { table =>
         val component = table.spec.name
         table.ids.foreach { id =>
-          quantitiesOf(table.spec).foreach { quantity =>
+          quantitiesOf(table).foreach { quantity =>
             n.snapshots.indices.foreach { t =>
               facts.beginRow()
               facts.append(component)
@@ -1325,13 +1321,22 @@ object Stats:
     * unknown one-port now refuses by name. `Load` is the one exception and is listed
     * explicitly, because "data rather than a variable" is a decision and not an absence.
     */
-  private def quantitiesOf(spec: ComponentSpec): Seq[String] = Role.of(spec) match
+  private def quantitiesOf(table: ComponentTable): Seq[String] =
+    val spec = table.spec
+    Role.of(spec) match
     case Role.PassiveBranch      => Seq("p0")
     // `p_max_pu` for `curtailment`, which is the headroom above the dispatch. A passive
     // branch has `s_max_pu` instead and no `p_max_pu` at all, so upstream's `curtailment`
     // raises a KeyError on one and reports nothing -- `inactive` and `standard-types` record
     // no `Line` or `Transformer` group for it, where `transmission` reports both.
-    case Role.ControllableBranch => Seq("p0", "marginal_cost", "efficiency", "p_max_pu")
+    // One `efficiency<port>` per RECEIVING port, from the same enumeration `Lopf` walks.
+    // `efficiency1` is PyPSA's plain `efficiency` and `efficiency2` and beyond are its
+    // numbered ones, so `injection` can join `'efficiency' || port` and cover a branch with
+    // any number of them. It read a single `efficiency` before, which is the two-port
+    // assumption spelled as a quantity name.
+    case Role.ControllableBranch =>
+      Seq("p0", "marginal_cost", "p_max_pu") ++
+        Topology.branchPorts(table).indices.drop(1).map(port => s"efficiency$port")
     case Role.Bus | Role.None    => Seq.empty
     case Role.Attached =>
       spec.name match
@@ -1389,11 +1394,30 @@ object Stats:
       // `efficiency` scales what a branch's receiving port injects, and it is `static or
       // series` upstream, so it belongs beside the other input series rather than on
       // `entity`. A passive branch has no such attribute and `injection` coalesces to 1.0.
-      case "marginal_cost" | "marginal_cost_storage" | "spill_cost" | "efficiency" |
-          "p_max_pu" =>
+      // `Topology.portEfficiency`, not `table.valueAt`, and the difference is one its own
+      // comment warns about: `efficiency2` and beyond are NOT schema attributes, so a
+      // multi-port link carries them as custom columns -- and a custom column can arrive as a
+      // series with no static counterpart, which is the normal export shape when the static
+      // value sits at its 1.0 default. Reading only `spec` and `static` makes such a port
+      // LOSSLESS, putting power at the receiving bus the network never produced. One helper,
+      // shared with the balance that has to agree with it.
+      case Efficiency(port) =>
+        Topology.portEfficiency(table, id, s"bus$port", t)
+      case "marginal_cost" | "marginal_cost_storage" | "spill_cost" | "p_max_pu" =>
         if declares(table, quantity) then table.valueAt(quantity, id, t) else 0.0
       case other =>
         throw new IllegalStateException(s"no accessor for quantity '$other' on $component")
+
+  /** `efficiency3` as the port number 3, so `valueOf` can match a whole family at once.
+    *
+    * An extractor rather than a `startsWith` and a `substring`, because the thing that must
+    * not happen is `efficiency` matching with no port: port 1 is stored as `efficiency1` and a
+    * bare one would be a quantity nothing writes and nothing could resolve.
+    */
+  private object Efficiency:
+    def unapply(quantity: String): Option[Int] =
+      if quantity.startsWith("efficiency") then quantity.drop("efficiency".length).toIntOption
+      else None
 
   /** Whether a table carries an attribute at all, declared or present.
     *

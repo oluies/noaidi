@@ -1,0 +1,5 @@
+name,v_nom,carrier,control,generator,sub_network
+e,110.0,AC,Slack,grid,0
+h,1.0,H2,Slack,h2import,1
+w,1.0,heat,Slack,boiler,2
+x,1.0,H2,Slack,h2spot,3

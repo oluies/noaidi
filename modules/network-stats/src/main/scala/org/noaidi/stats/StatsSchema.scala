@@ -67,7 +67,6 @@ private[stats] object StatsSchema:
       |  entity        VARCHAR NOT NULL,
       |  carrier       VARCHAR,
       |  bus           VARCHAR,
-      |  bus1          VARCHAR,
       |  nominal       DOUBLE,
       |  nominal_in    DOUBLE,
       |  extendable    BOOLEAN,
@@ -149,6 +148,31 @@ private[stats] object StatsSchema:
       |  PRIMARY KEY (bus, snapshot)
       |)""".stripMargin,
 
+    // One row per (component, entity, port): the bus that port attaches to.
+    //
+    // A TABLE now, loaded from `Topology.branchPorts`, where it used to be a view over
+    // `entity.bus` and `entity.bus1`. That view could only ever carry two ports, and a view is
+    // the wrong shape for a fact the network decides: a link may have `bus2` and beyond, and
+    // `Lopf` has always built them -- `branchPorts` walks every `busN` column and the balance
+    // reads `efficiency2` beside `efficiency`.
+    //
+    // This module refused such a network by name instead, which was the honest thing to do
+    // while no golden had one: two ports silently carrying three is a supply short by whatever
+    // the third injects. `multi-port-link` is the golden that ended that, and it is not a
+    // marginal shape -- its electrolyser's waste heat is 95 of a 323 `supply` group, and
+    // zeroing `efficiency2` moves the objective from 7,580 to 12,900.
+    //
+    // A one-port has port 0 and nothing else. A branch has port 0 at `bus0` and a receiving
+    // port per further `busN`, which is what lets `supply` attribute a flow to every bus that
+    // RECEIVES it while `opex` and the capacity metrics stay at port 0.
+    """CREATE TABLE port (
+      |  component VARCHAR NOT NULL,
+      |  entity    VARCHAR NOT NULL,
+      |  port      INTEGER NOT NULL,
+      |  bus       VARCHAR NOT NULL,
+      |  PRIMARY KEY (component, entity, port)
+      |)""".stripMargin,
+
     // Which periods an asset exists in, for the per-period capital factor that
     // `Expansion.costWeight` computes. Empty on a flat index: there is no period to be
     // active in, and `costWeight` is 1.0 there.
@@ -197,22 +221,6 @@ private[stats] object StatsSchema:
       |SELECT e.component, e.entity, NULL AS period, 1.0 AS weight
       |FROM entity e
       |WHERE (SELECT COUNT(*) FROM active) = 0""".stripMargin,
-
-    // One row per (entity, port): the bus that port attaches to.
-    //
-    // A one-port has port 0 and nothing else. A branch has port 0 at `bus0` and port 1 at
-    // `bus1`, which is what lets `supply` attribute a flow to the bus that RECEIVES it while
-    // `opex` and the capacity metrics stay at port 0. Measured, not assumed: on
-    // `statistics-dimensions`, `supply` groups the tie line under bus `b` and the
-    // electrolyser under bus `h` -- their `bus1` -- while `opex` groups both under `a`.
-    //
-    // Two ports and no more. A link with `bus2` is a shape `Lopf` builds -- `efficiency2` is
-    // read there -- and one this module would silently drop a third of, so `Stats.of` refuses
-    // such a network by name rather than loading it. No golden has one.
-    """CREATE VIEW port AS
-      |SELECT component, entity, 0 AS port, bus AS bus FROM entity WHERE bus IS NOT NULL
-      |UNION ALL
-      |SELECT component, entity, 1 AS port, bus1 AS bus FROM entity WHERE bus1 IS NOT NULL""".stripMargin,
 
     // Signed injection into a bus, one row per (entity, port, snapshot).
     //
@@ -264,6 +272,13 @@ private[stats] object StatsSchema:
     // nothing, so no optimum here does it. `energy_balance` is not a positive part, so the
     // difference stops being invisible the moment the whole signed series is reported --
     // `clip(p, 0)` and `discharge` differ exactly when both halves run at once.
+    // ==The receiving port's efficiency is joined by PORT NUMBER==
+    //
+    // PyPSA names them `efficiency` for `bus1` and `efficiency<i>` for later ports, and this
+    // stores each under `efficiency<port>` in `fact` -- so the join is
+    // `'efficiency' || i.port` and one query covers a branch with any number of ports rather
+    // than one `LEFT JOIN` per port. A passive branch declares none and `COALESCE(..., 1.0)`
+    // makes it lossless, which is what the linear model does with it.
     """CREATE VIEW injection AS
       |SELECT f.component, f.entity, f.snapshot, 0 AS port,
       |       e.sign * f.value AS value
@@ -275,12 +290,14 @@ private[stats] object StatsSchema:
       |FROM fact f
       |WHERE f.quantity = 'p0'
       |UNION ALL
-      |SELECT f.component, f.entity, f.snapshot, 1 AS port,
+      |SELECT f.component, f.entity, f.snapshot, p.port AS port,
       |       f.value * COALESCE(eff.value, 1.0) AS value
       |FROM fact f
+      |JOIN port p ON p.component = f.component AND p.entity = f.entity AND p.port > 0
       |LEFT JOIN fact eff
       |  ON  eff.component = f.component AND eff.entity = f.entity
-      |  AND eff.snapshot  = f.snapshot  AND eff.quantity = 'efficiency'
+      |  AND eff.snapshot  = f.snapshot
+      |  AND eff.quantity  = 'efficiency' || CAST(p.port AS VARCHAR)
       |WHERE f.quantity = 'p0'""".stripMargin,
 
     // The one series PyPSA calls a component's OPERATION, unsigned.
@@ -334,13 +351,22 @@ private[stats] object StatsSchema:
     // failure it prevents is silent rather than loud: comparing two NULLs in SQL yields NULL
     // rather than true, so a bus carrier that ever did arrive unset would make the whole view
     // empty and every `transmission` group simply disappear.
+    // ==Any two ports of the same carrier, not just `bus0` and `bus1`==
+    //
+    // Driven off `port` rather than off `entity.bus`/`entity.bus1`, which is what a branch with
+    // three of them needs: upstream maps EVERY `bus*` column through `buses.carrier` and keeps
+    // a branch where more than one end matches the same value, so a three-port link whose
+    // second and third ports share a carrier is transmission even though its first does not.
+    // Measured on `multi-port-link`, whose three ports are AC, H2 and heat: no two match, and
+    // upstream reports no transmission group for it at all.
     """CREATE VIEW transmission_branch AS
-      |SELECT e.component, e.entity
-      |FROM entity e
-      |JOIN bus b0 ON b0.name = e.bus
-      |JOIN bus b1 ON b1.name = e.bus1
-      |WHERE e.bus1 IS NOT NULL
-      |  AND COALESCE(b0.carrier, '') = COALESCE(b1.carrier, '')""".stripMargin,
+      |SELECT DISTINCT a.component, a.entity
+      |FROM port a
+      |JOIN port b
+      |  ON b.component = a.component AND b.entity = a.entity AND b.port > a.port
+      |JOIN bus ba ON ba.name = a.bus
+      |JOIN bus bb ON bb.name = b.bus
+      |WHERE COALESCE(ba.carrier, '') = COALESCE(bb.carrier, '')""".stripMargin,
 
     // Every grouping dimension, resolved once per entity AND PORT.
     //

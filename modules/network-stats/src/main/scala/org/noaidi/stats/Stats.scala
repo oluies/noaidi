@@ -1057,18 +1057,20 @@ object Stats:
     *
     * The dimension tables go through a batched `PreparedStatement`. They are hundreds of rows,
     * so the appender buys nothing there, and they carry NULLs that matter: `carrier`, `bus`,
-    * `marginal_cost`, `sign` and the rest are legitimately absent on components that do not
-    * declare them. Appending a sentinel instead would make "no carrier" and "carrier named
-    * empty string" the same row, and would put a 0.0 where a component has no `capital_cost`
-    * at all, which any `SUM` would then count.
+    * `marginal_cost` and the rest are legitimately absent on components that do not declare
+    * them, and a NULL `sign` carries a meaning of its own — it says "this is a branch", not
+    * "not declared", which is why a one-port declaring no `sign` gets 1.0 rather than a NULL.
+    * Appending a sentinel instead would make "no carrier" and "carrier named empty string" the
+    * same row, and would put a 0.0 where a component has no `capital_cost` at all, which any
+    * `SUM` would then count.
     *
     * ==The driver gap this used to rest on is closed, and the split outlived it==
     *
-    * Until the pin moved to 1.3.2.1 the second paragraph gave a harder reason: `DuckDBAppender`
-    * had '''no `appendNull`''' and no boxed overload either, so a nullable column could not go
-    * through it at all. Checked with `javap` against both jars rather than assumed: 1.3.1.0 has
-    * neither, and 1.3.2.1 added `appendNull()` and seven `append(java.lang.Boolean)`-style
-    * overloads that take one.
+    * Until the pin moved to 1.3.2.1 the dimension-table paragraph gave a harder reason:
+    * `DuckDBAppender` had '''no `appendNull`''' and no boxed overload either, so a nullable
+    * column could not go through it at all. Checked with `javap` against both jars rather than
+    * assumed: 1.3.1.0 has neither, and 1.3.2.1 added `appendNull()` and seven
+    * `append(java.lang.Boolean)`-style overloads that take one.
     *
     * So the appender could carry the dimensions now. They stay on the prepared statement
     * because the size argument always did the work on its own — the gap decided which

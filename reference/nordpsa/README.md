@@ -191,6 +191,12 @@ uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python "pypsa==1.3.0" "highspy>=1.15" pandas numpy scipy pyarrow pyyaml
 uv pip install --python .venv/bin/python -e ./NordPSA
 .venv/bin/python generate.py <output-dir>
+.venv/bin/python generate_soc.py <output-dir>
+.venv/bin/python generate_terminal.py <output-dir>
+.venv/bin/python generate_ladder.py <output-dir>
+.venv/bin/python generate_stability.py <output-dir>
+.venv/bin/python generate_sclopf.py <output-dir>
+NORDPSA_ROOT=<a clone with data/processed built> .venv/bin/python generate_nordic.py <output-dir>
 ```
 
 `generate_stability.py` records, per case, which of its series both a simplex and an
@@ -203,7 +209,17 @@ determined including the control.
 
 `generate_nordic.py` is the exception to "no data tokens are needed": it drives NordPSA's
 own `build_network` over the fetched Nordic dataset, so it needs `data/processed/` built
-in the clone it imports from. The other four generators need only the repository.
+in the clone it imports from. The other six generators need only the repository and read
+nothing from its `data/`, which is why only this one takes an environment variable.
+
+Which clone that is, it now resolves rather than assumes: `NORDPSA_ROOT` when set — outright,
+so an explicit answer that is wrong gets reported instead of quietly replaced — then the
+`NordPSA/` beside the script, then `~/projects/NordPSA`. Refusing names every path it tried.
+A sibling clone whose inputs are not built is skipped rather than fatal, so the throwaway
+clone the recipe above makes does not shadow a built one elsewhere; pointing the sibling at a
+built clone with a symlink works too. Until this was fixed the path was hard-coded to one
+machine's `~/projects/NordPSA`, and the recipe above could not reproduce this fixture on any
+other.
 
 `generate.py` expects `NordPSA/` beside it, and imports
 `nordpsa.constraints.hydro_operation_constraints` — the production callback, not a

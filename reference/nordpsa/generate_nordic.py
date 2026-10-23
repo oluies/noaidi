@@ -17,17 +17,50 @@ is two orders of magnitude past the 1-bus fixtures and still small enough to com
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-# The clone with the fetched data, not the throwaway one beside this script: NordPSA
-# resolves data/ relative to its own package root, so importing from a clone with an empty
-# data/ fails on the first parquet read.
-ROOT = Path.home() / "projects" / "NordPSA"
-if not (ROOT / "data" / "processed" / "load.parquet").exists():
-    raise SystemExit(f"no built inputs under {ROOT}/data/processed -- run the fetch and build first")
+MARKER = Path("data") / "processed" / "load.parquet"
+
+
+def built_clone() -> Path:
+    """A NordPSA clone whose inputs have been fetched and built.
+
+    This script is the one generator here that needs more than NordPSA's code. The other six
+    take the clone beside this script and read nothing from its `data/`; this one drives the
+    real build, and NordPSA resolves `data/` relative to its own package root, so a clone with
+    an empty `data/` fails on the first parquet read rather than at import.
+
+    `NORDPSA_ROOT` wins outright when it is set: an explicit answer that turns out to be wrong
+    should say so rather than be quietly replaced by a different clone. Otherwise the sibling
+    clone comes first -- which is where the README's recipe puts one, and it works if its
+    inputs are built or it is a symlink to a clone whose are -- then the conventional checkout.
+    Every path tried is named on refusal, because the failure this replaces hard-coded one
+    machine's layout and reported only that.
+    """
+    env = os.environ.get("NORDPSA_ROOT")
+    candidates = (
+        [Path(env).expanduser()]
+        if env
+        else [Path(__file__).parent / "NordPSA", Path.home() / "projects" / "NordPSA"]
+    )
+    for root in candidates:
+        if (root / MARKER).exists():
+            return root
+    looked = "\n".join(f"    {c}" for c in candidates)
+    raise SystemExit(
+        f"no built inputs ({MARKER}) under any NordPSA clone this script knows about:\n"
+        f"{looked}\n"
+        "Run NordPSA's fetch and build in one of them, or point NORDPSA_ROOT at a clone that\n"
+        "already has them. The other six generators here need only the code, so they are\n"
+        "unaffected and run against the clone beside this script."
+    )
+
+
+ROOT = built_clone()
 sys.path.insert(0, str(ROOT))
 
 pd.options.future.infer_string = False  # PyPSA/xarray do not support Arrow strings

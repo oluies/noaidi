@@ -54,7 +54,7 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
   the whole hour-by-hour dispatch PyPSA reaches under four bid-ladder configurations.
 - `nordic-today/` plus `nordic.json` — the real thing: the network `nordpsa today` builds,
   at daily resolution over 2023, solved with and without the bid-ladder callback.
-- `stability-*/` plus `stability.json` — seven networks and nineteen cases for the
+- `stability-*/` plus `stability.json` — nine networks and twenty-four cases for the
   rotational-energy and grid-strength floors, plus the technology table and zone data out of
   `zones.yaml`, which no export can carry. `stability-toy` and the three `stability-exp-*`
   are NordPSA's own, from `tests/unit/test_stability.py`; `stability-tight`, `-mustrun`,
@@ -114,7 +114,7 @@ callback adds its rows, then PyPSA solves. Nothing on the generator side reimple
 outage factors, which is the point — a reimplementation could agree with itself and disagree
 with PyPSA.
 
-## The stability fixtures, and why there are seven of them
+## The stability fixtures, and why there are nine of them
 
 `stability-toy` is NordPSA's own: two zones where wind covers the load, so **nothing
 synchronous runs** unless a requirement makes it. That is the property that makes any

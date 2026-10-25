@@ -6,11 +6,13 @@ a Nordic power system model on PyPSA — to validate `HydroOps` in `network-lopf
 A side-by-side of how the same constraint looks in PyPSA/linopy and in Scala is in
 [`docs/pypsa-and-noaidi.md`](../../docs/pypsa-and-noaidi.md).
 
-A page of what the last regeneration measured — every family's reproduction verdict, the
-reference answers each one records, and what a sweep costs in wall clock — is at
-[NordPSA fixture reproduction](https://claude.ai/artifact/CWX7eSwwhFa1SsnSbTVegW). It is a
-private artifact, so the link resolves only for people it has been shared with; the numbers
-on it all come from the files in this directory, which stay the authority.
+What the last regeneration measured — every family's reproduction verdict, the reference
+answers each one records, what a sweep costs in wall clock, and which NordPSA revision the
+numbers were produced against — is in [`REPRODUCTION.md`](REPRODUCTION.md). The same report
+as a page of charts is at
+[NordPSA fixture reproduction](https://claude.ai/artifact/CWX7eSwwhFa1SsnSbTVegW), which is a
+private artifact and resolves only for people it has been shared with. Both are views of the
+files in this directory, which stay the authority.
 
 ## Why this directory is separate from `goldens`
 

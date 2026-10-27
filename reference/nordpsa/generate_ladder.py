@@ -29,7 +29,10 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-sys.path.insert(0, str(Path(__file__).parent / "NordPSA"))
+from nordpsa_clone import revision
+
+NORDPSA = Path(__file__).parent / "NordPSA"
+sys.path.insert(0, str(NORDPSA))
 from nordpsa.constraints.bid_ladder import hydro_bid_ladder  # noqa: E402
 
 RES, DAYS, P_NOM = 3, 7, 900.0
@@ -156,7 +159,8 @@ def main():
     build().export_to_csv_folder(str(nets / "ladder-week"))
     (out / "ladder.json").write_text(json.dumps({
         "source": "NordPSA nordpsa/constraints/bid_ladder.py",
-        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__},
+        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__,
+                     "nordpsa": revision(NORDPSA)},
         "shape": {"snapshots": DAYS * 24 // RES, "resolution_hours": RES,
                   "p_nom": P_NOM, "unit": UNIT, "hydro_marginal_cost": HYDRO_MC,
                   "inflow_mw": INFLOW, "load_mw": LOAD},

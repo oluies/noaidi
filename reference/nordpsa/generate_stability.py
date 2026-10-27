@@ -35,7 +35,10 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-sys.path.insert(0, str(Path(__file__).parent / "NordPSA"))
+from nordpsa_clone import revision
+
+NORDPSA = Path(__file__).parent / "NordPSA"
+sys.path.insert(0, str(NORDPSA))
 from nordpsa.analysis.stability import stability_data, unit_table       # noqa: E402
 from nordpsa.constraints.stability import (                             # noqa: E402
     scr_joint, stability_constraints, stability_results)
@@ -580,7 +583,8 @@ def main():
 
     (out / "stability.json").write_text(json.dumps({
         "source": "NordPSA nordpsa/constraints/stability.py, networks from its own tests",
-        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__},
+        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__,
+                     "nordpsa": revision(NORDPSA)},
         "is_lp": True,
         "zone_data": {"x_t": SD["x_t"], "sync_weight": SD.get("sync_weight") or {},
                       "scr_exempt": SD.get("scr_exempt") or [],

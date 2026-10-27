@@ -33,7 +33,10 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-sys.path.insert(0, str(Path(__file__).parent / "NordPSA"))
+from nordpsa_clone import revision
+
+NORDPSA = Path(__file__).parent / "NordPSA"
+sys.path.insert(0, str(NORDPSA))
 from nordpsa.analysis.stability import stability_data, stability_tech      # noqa: E402
 from nordpsa.constraints import hydro_operation_constraints                # noqa: E402
 from nordpsa.constraints.bid_ladder import hydro_bid_ladder                # noqa: E402
@@ -300,7 +303,8 @@ def main():
 
     (out / "sclopf.json").write_text(json.dumps({
         "source": "PyPSA optimize_security_constrained with NordPSA's callbacks on top",
-        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__},
+        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__,
+                     "nordpsa": revision(NORDPSA)},
         "shape": {"snapshots": STEPS, "resolution_hours": RES, "s_nom": S_NOM,
                   "unit": UNIT, "p_nom": P_NOM, "max_hours": MAX_HOURS,
                   "capacity_mwh": CAPACITY, "lines": ["AB", "BC", "AC"]},

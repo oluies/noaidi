@@ -25,7 +25,10 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-sys.path.insert(0, str(Path(__file__).parent / "NordPSA"))
+from nordpsa_clone import revision
+
+NORDPSA = Path(__file__).parent / "NordPSA"
+sys.path.insert(0, str(NORDPSA))
 from nordpsa.constraints.soc import hydro_soc_initial_constraint  # noqa: E402
 
 RES, DAYS, P_NOM, MAX_HOURS = 3, 21, 1000.0, 500.0
@@ -123,7 +126,8 @@ def main():
     (out / "soc.json").write_text(json.dumps({
         "source": "NordPSA nordpsa/constraints/soc.py",
         "question": "is hydro_soc_initial expressible as state_of_charge_set?",
-        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__},
+        "versions": {"pypsa": pypsa.__version__, "pandas": pd.__version__,
+                     "nordpsa": revision(NORDPSA)},
         "anchor": {"fraction": FRAC, "p_nom": P_NOM, "max_hours": MAX_HOURS,
                    "target_mwh": TARGET},
         "cases": {"callback": a, "attribute": b, "control": c},

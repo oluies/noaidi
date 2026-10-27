@@ -73,6 +73,9 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
   own `optimize_security_constrained`. See below for why this one is separate.
 - `generate.py`, `generate_soc.py`, `generate_terminal.py`, `generate_ladder.py`,
   `generate_nordic.py`, `generate_stability.py`, `generate_sclopf.py` — regenerate the above.
+- `nordpsa_clone.py` — reads the clone's commit, so every file above records the upstream
+  revision it was generated from under `versions.nordpsa` rather than leaving it to a
+  reader's assumption. See below.
 
 The terminal-value fixture is scarce on purpose, and its first version was not. At 200
 `max_hours` the reservoir held more water than the week could use, so every profile
@@ -233,3 +236,18 @@ other.
 `nordpsa.constraints.hydro_operation_constraints` — the production callback, not a
 copy of it. That import is the point: a reimplementation here could agree with
 itself while disagreeing with NordPSA.
+
+## The revision these answers hold for
+
+Importing the production callback is what makes these fixtures worth having, and it is also
+what ties them to one upstream revision. So each file records it, under `versions.nordpsa`:
+the commit, the date it was committed, and whether that clone's tracked files differed —
+untracked ones are ignored, since a plot left beside a clone does not change what a callback
+did. `nordpsa_clone.py` reads it from the clone the generator imported, so it cannot be
+stated wrongly by hand.
+
+What this buys is the ability to tell two kinds of difference apart. A regeneration that
+disagrees with these files is either drift in the port, which is the thing being measured, or
+a change upstream, which is not — and before the revision was recorded a reader had no way to
+ask which. [`REPRODUCTION.md`](REPRODUCTION.md) carries the last such comparison, including
+what does and does not change against a much later upstream.

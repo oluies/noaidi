@@ -25,7 +25,10 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-sys.path.insert(0, str(Path(__file__).parent / "NordPSA"))
+from nordpsa_clone import revision
+
+NORDPSA = Path(__file__).parent / "NordPSA"
+sys.path.insert(0, str(NORDPSA))
 from nordpsa.constraints import hydro_operation_constraints  # noqa: E402
 
 RES, DAYS, P_NOM = 3, 21, 1000.0
@@ -157,6 +160,7 @@ def main():
         "versions": {
             "pypsa": pypsa.__version__, "pandas": pd.__version__,
             "numpy": np.__version__, "python": sys.version.split()[0],
+            "nordpsa": revision(NORDPSA),
         },
         "shape": {
             "snapshots": DAYS * 24 // RES, "resolution_hours": RES, "days": DAYS,

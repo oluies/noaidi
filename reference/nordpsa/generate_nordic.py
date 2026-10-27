@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from nordpsa_clone import revision
+
 MARKER = Path("data") / "processed" / "load.parquet"
 
 
@@ -247,7 +249,8 @@ def main():
 
     (out / "nordic.json").write_text(json.dumps({
         "source": "NordPSA `today` world, driven through build_network",
-        "versions": {"pypsa": __import__("pypsa").__version__, "pandas": pd.__version__},
+        "versions": {"pypsa": __import__("pypsa").__version__, "pandas": pd.__version__,
+                     "nordpsa": revision(ROOT)},
         "shape": sh,
         "ladder": {"tiers": k, "width": width,
                    "offsets": [width * ((i + 0.5) / k - 0.5) for i in range(k)]},

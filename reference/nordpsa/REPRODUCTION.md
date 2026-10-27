@@ -142,22 +142,42 @@ the scarcest network has no solution, and the fixture records `status: warning` 
 
 ## Which NordPSA this was measured against
 
-NordPSA is public — [beow/NordPSA](https://github.com/beow/NordPSA), MIT. The clone these
-numbers were produced from is at `beccc3f` (2026-09-26), and **the committed fixtures record
-no NordPSA revision of their own**: each one names the upstream file it came from, such as
-`tests/unit/test_hydro_ops.py`, but not the commit.
+NordPSA is public — [beow/NordPSA](https://github.com/beow/NordPSA), MIT. Every fixture
+here records the revision it was generated from, under `versions.nordpsa`:
+`beccc3f` committed 2026-09-26, with that clone's tracked files
+clean. Before this was recorded each file named the upstream
+file it came from, such as `tests/unit/test_hydro_ops.py`, and not the commit — so a
+difference after a regeneration could not be told apart from drift in the port, which is
+the one thing this directory exists to measure.
 
-That matters for anyone rerunning this. As of 2026-10-25 upstream `main` is 24 commits and
-43 files ahead of `beccc3f`, and the changes are not incidental to this directory — they
-include `nordpsa/constraints/hydro_ops.py`, `bid_ladder.py` and `stability.py`, which are the
-callbacks all four ported families are compared against, plus `config/zones.yaml` and
-`config/worlds/today.yaml`, which the stability and nordic fixtures read.
+### Against upstream `main`
 
-So the result above says these fixtures are stable against **the clone they were generated
-from**. It does not say a fresh clone of `main` reproduces them, and the recipe in
-[`README.md`](README.md) clones `main`. Until a revision is recorded in the fixtures, a
-difference after a fresh clone cannot be told apart from drift in the port, which is the
-one thing this whole directory exists to measure.
+Checked on 2026-10-27 with the reference environment held fixed, so the only variable was
+NordPSA's own code. Upstream `main` was then `34d0b77`, 24 commits and 43 files ahead of the
+pinned revision, and the diff reaches this directory: `constraints/hydro_ops.py`,
+`bid_ladder.py`, `stability.py`, `config/zones.yaml` and `config/worlds/today.yaml`. All
+seven regenerated against it:
+
+| Family | Against upstream `main` |
+| --- | --- |
+| `hydro`, `soc`, `terminal`, `sclopf`, `nordic` | identical |
+| `ladder` | two refusal *messages* differ |
+| `stability` | one refusal changed behaviour |
+| the 194 network exports | all byte-identical |
+
+**No solved number changed anywhere.** The `ladder` differences are text: upstream added an
+optional `width_by_zone` and its validation message gained `/ {}`. With that argument left
+out the new code is arithmetically the old one.
+
+The `stability` difference is real. `refused/share-zero` went from `true` to `false`:
+upstream now *drops* a joint share of zero instead of rejecting it. This port rejects it,
+and `StabilitySuite` asserts that upstream rejects it too, so following upstream there is a
+change to the port and its suite rather than a fixture bump. It has not been made, and the
+pinned revision is the one these answers hold for.
+
+One other thing a bump would need: against upstream `main`, `generate_nordic.py` also reads
+`data/raw/inflow_nve_<zone>_<year>.parquet`, a dependency added since the pinned revision.
+At the pinned revision `data/processed/` alone is enough.
 
 ## Reproducing this
 

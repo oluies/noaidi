@@ -17,10 +17,17 @@ import scala.collection.mutable
   * '''Dispatch and capacity.''' `p_nom_extendable` makes capacity a decision
   * rather than a given — see [[Expansion]], which also documents why PyPSA's
   * reported objective is the cost of the *change* and reads negative on
-  * `ac-dc-meshed`. What remains refused there is everything that makes capital
-  * cost something other than a per-unit constant: an annuitised
-  * `overnight_cost`, modular capacity (`p_nom_mod`), and multi-investment-period
-  * build years.
+  * `ac-dc-meshed`. An annuitised `overnight_cost` and multi-investment-period
+  * build years are both built: see [[Expansion.periodizedCost]] and
+  * [[Expansion.annuity]], with `annuitised-capital`, `tx-cost-annuitised`,
+  * `investment-periods-expansion` and `investment-periods-discounted` as the
+  * fixtures. What remains refused is modular capacity — `p_nom_mod`, an integer
+  * number of blocks, which is a mixed-integer problem rather than this linear
+  * one — and three values rather than features: a missing `discount_rate`, a
+  * non-positive `lifetime`, and investment periods of unequal length, each of
+  * which makes the coefficient not a number. [[Expansion]] is the list that
+  * counts; this one said `overnight_cost` was refused for some time after it
+  * was built, which is the failure mode a second copy of a scope list has.
   *
   * '''Storage and stores''' carry state across snapshots — see [[Storage]] and
   * [[Stores]]. A `Store` is not a storage unit renamed: one signed power

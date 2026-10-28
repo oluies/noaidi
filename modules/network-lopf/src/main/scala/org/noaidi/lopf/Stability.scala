@@ -350,6 +350,12 @@ object Stability:
     * Only an exempt zone may be folded into a host — otherwise its machines are counted
     * in its own row and again in the host's — the host must have a row of its own, and one
     * zone's shares may not sum past its whole self.
+    *
+    * Upstream has since loosened one arm of this, and deliberately not followed: a share of
+    * zero there now drops its entry before the host and member checks run, so it carries
+    * those checks away with it and a host that is not a zone stops being an error. What
+    * each side accepts, and the revision that holds for, is measured in
+    * `reference/nordpsa/REPRODUCTION.md`; the fixture is the authority, not this comment.
     */
   private def checkJoint(config: Config, zones: Set[String]): Unit =
     val problems = mutable.ArrayBuffer.empty[String]

@@ -748,6 +748,9 @@ class StabilitySuite extends munit.FunSuite, NordPsaFixtures:
     assume(fixtures, "reference/nordpsa stability fixtures are not present")
     // Every arm upstream checks, and `reference("refused")` records that it checks them, so
     // the two sides reject the same configurations rather than this port inventing rules.
+    // `share-zero` is the one arm a later upstream revision dropped. If a pin bump makes
+    // this line fail, read `reference/nordpsa/REPRODUCTION.md` before loosening the port:
+    // the drop takes three other refusals with it.
     val recorded = reference("refused")
     Seq("unknown-zone", "host-exempt", "member-not-exempt", "share-zero", "share-above-1")
       .foreach { name =>

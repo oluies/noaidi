@@ -170,10 +170,31 @@ optional `width_by_zone` and its validation message gained `/ {}`. With that arg
 out the new code is arithmetically the old one.
 
 The `stability` difference is real. `refused/share-zero` went from `true` to `false`:
-upstream now *drops* a joint share of zero instead of rejecting it. This port rejects it,
-and `StabilitySuite` asserts that upstream rejects it too, so following upstream there is a
-change to the port and its suite rather than a fixture bump. It has not been made, and the
-pinned revision is the one these answers hold for.
+upstream `scr_joint` now drops a joint share of zero instead of rejecting it. This port
+rejects it, and `StabilitySuite` asserts that upstream rejects it too, so following upstream
+there is a change to the port and its suite rather than a fixture bump.
+
+That change is wider than the one fixture entry, which is why it was not made. The new
+filter runs *before* the host and member checks, so a zero share does not merely drop
+itself — it drops the whole entry, and with it every other check that entry would have
+failed. Measured against upstream `main` with `zones = [A, B]` and `B` exempt:
+
+| `scr_joint` | Upstream `main` | This port |
+| --- | --- | --- |
+| `{A: {B: 0.0}}` | accepted, returns `{}` | refused |
+| `{ZZ: {B: 0.0}}`, `ZZ` not a zone | accepted, returns `{}` | refused |
+| `{B: {B: 0.0}}`, host itself exempt | accepted, returns `{}` | refused |
+| `{A: {B: 0.0}}`, `B` not exempt | accepted, returns `{}` | refused |
+| `{A: {B: 0.0, ZZ: 0.3}}` | refused — `ZZ` still reaches the check | refused |
+| `{A: {B: -0.3}}` | refused | refused |
+
+So a host zone that does not exist, or one that could not host a share at all, stops being
+an error as soon as the share beside it is zero. The three middle rows are configuration
+typos the pinned revision catches and `main` does not. Keeping the port where it is keeps
+those three refusals, at the price of disagreeing with upstream on the first row, where the
+disagreement costs a reader nothing: a share of zero asks for no constraint either way.
+
+The pinned revision is the one these answers hold for.
 
 One other thing a bump would need: against upstream `main`, `generate_nordic.py` also reads
 `data/raw/inflow_nve_<zone>_<year>.parquet`, a dependency added since the pinned revision.

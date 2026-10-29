@@ -356,24 +356,50 @@ class SearchReproducibilitySuite extends munit.FunSuite:
     }
     (header +: (rows ++ diffs)).mkString("\n")
 
-  test("a search repeated on one backend is bit-for-bit identical") {
-    // The one place equality is the right bar. Same code, same order, same
-    // machine: any difference at all is state carried between solves or a
-    // dependence on something that is not the problem -- iteration order over a
-    // `Set`, a hash seed, a reused buffer left dirty. None of which would
-    // announce itself; it would arrive as the next unreproducible CI failure.
+  test("a search repeated on one backend reaches a bit-for-bit identical answer") {
+    // The answer is where equality is the right bar: same code, same summation
+    // order, same machine, so a difference in what comes back is state carried
+    // between solves or a dependence on something that is not the problem -- a
+    // reused buffer left dirty, a hash seed, iteration order over a `Set`. None
+    // of those would announce itself; it would arrive as the next
+    // unreproducible CI failure.
+    //
+    // The work is not held to that bar, and this test claimed it was until CI
+    // disproved it. On an 8-lane x86_64 runner two consecutive solves of the
+    // chain -- same backend, same instance -- took 25,728 and 24,704 iterations,
+    // 402 and 386 evaluation intervals, and reached byte-identical answers from
+    // both. A 2-lane machine shows none of it, which is why the claim survived
+    // being written.
+    //
+    // So the iteration count is not reproducible even inside one JVM on some
+    // hardware. That is worth stating plainly rather than asserting around: it
+    // is the same quantity whose divergence between two JDKs on one commit sent
+    // a search from 423 nodes to a budget-exhausting one. What this bounds
+    // instead is how far it may move, which is the part that separates ordinary
+    // variation from that failure.
+    val slack = 1.5
     instances.foreach { (name, inst) =>
       val (problem, integers) = inst
       backends.foreach { make =>
+        // Discarded. Including the JIT's own transition in a measurement of
+        // reproducibility measures the compiler warming up rather than the
+        // solver, and the first solve in a fresh JVM is the one run guaranteed
+        // to be unlike the others.
+        observe(problem, integers, make)
+
         val first  = observe(problem, integers, make)
         val second = observe(problem, integers, make)
         val clue   = report(s"$name, repeated", Seq(first, second))
+
         assertEquals(second.status, first.status, clue)
         assertEquals(second.nodes, first.nodes, clue)
         assertEquals(second.unproven, first.unproven, clue)
-        assertEquals(second.rootIterations, first.rootIterations, clue)
         assertEquals(bits(second.objective), bits(first.objective), clue)
         assertEquals(firstPrimalDifference(first, second), None, clue)
+        assertEquals(second.rootStatus, first.rootStatus, clue)
+
+        assert(second.rootIterations <= first.rootIterations * slack, clue)
+        assert(first.rootIterations <= second.rootIterations * slack, clue)
       }
     }
   }

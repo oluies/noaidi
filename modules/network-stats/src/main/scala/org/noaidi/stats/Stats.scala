@@ -63,6 +63,22 @@ final class Stats private (
     private val unpriceable: Seq[String],
 ) extends AutoCloseable:
 
+  /** Where every column of every view in this database comes from.
+    *
+    * Here rather than only on [[Lineage]] because the connection is private: without it a
+    * caller holding a solved result would have to rebuild the schema somewhere else to ask
+    * the question, and would then be describing a different database from the one it has.
+    *
+    * Derived on demand and sent nowhere. A [[LineageSink]] decides whether anything leaves
+    * the process, and the default is that nothing does.
+    */
+  def lineage(
+      namespace: String = "duckdb://network-stats",
+      job: String = "network-stats.schema",
+      rowCounts: Boolean = true,
+  ): LineageRun =
+    Lineage.of(conn, namespace, job, rowCounts)
+
   /** One row per result row, columns by name. For anything the named metrics do not cover.
     *
     * Deliberately untyped: this is an escape hatch for exploration, and a typed row mapper

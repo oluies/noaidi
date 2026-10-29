@@ -437,6 +437,7 @@ lazy val primaNetlib = project
 // registry (reference/goldens/schema.json), which is why upickle is here.
 val upickleVersion = "4.4.3"
 val duckdbVersion  = "1.3.2.1"
+val openlineageVersion = "1.54.0"
 val jhdfVersion    = "0.13.0"
 
 // Where the network modules find the goldens and the port's own sources.
@@ -620,7 +621,20 @@ lazy val networkStats = project
     // from the repository root, so a relative default resolves to nothing and every test
     // that needs the fixtures reports as SKIPPED rather than failed.
     Test / envVars ++= referenceEnv((ThisBuild / baseDirectory).value),
-    libraryDependencies += "org.duckdb" % "duckdb_jdbc" % duckdbVersion,
+    libraryDependencies ++= Seq(
+      "org.duckdb" % "duckdb_jdbc" % duckdbVersion,
+      // `Lineage` reads DuckDB's own serialised parse of each view. upickle arrives here
+      // transitively through network-model, and is named anyway: a module that parses JSON
+      // should say so, or the day network-model stops needing it this one breaks for a
+      // reason that is nowhere written down.
+      "com.lihaoyi" %% "upickle" % upickleVersion,
+      // `OpenLineageSink`, and nothing else in the module, needs this. It is a large tree --
+      // seven Jackson artifacts, an HTTP client, commons-logging and micrometer -- against
+      // one jar for the database itself, which is why the emission sits behind
+      // `LineageSink` rather than inside `Lineage`: the derivation and its tests never touch
+      // any of it.
+      "io.openlineage" % "openlineage-java" % openlineageVersion,
+    ),
   )
 
 lazy val root = project

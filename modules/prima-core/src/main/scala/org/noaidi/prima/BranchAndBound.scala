@@ -98,6 +98,13 @@ final case class BnbParams(
     pruningSafetyFactor: Double = 10.0,
 
     maxNodes: Int = 100_000,
+
+    /** Wall clock for the whole search, bounding each relaxation within it too.
+      *
+      * Not only the node loop: see `nodeLp` in [[BranchAndBound.solve]] for why
+      * a bound the loop alone enforces is no bound at all once one relaxation
+      * stops converging.
+      */
     timeLimitMillis: Option[Long] = None,
 
     /** Warm-start each child from its parent's solution.
@@ -180,11 +187,43 @@ object BranchAndBound:
     }
     val started = System.currentTimeMillis()
 
+    // The LP parameters for one node, carrying what is left of the search's
+    // wall clock.
+    //
+    // `outOfTime` below is checked between nodes, so by itself it bounds the
+    // search in units of whole nodes. For a healthy node that distinction does
+    // not matter -- its relaxation converges in a few hundred iterations -- but
+    // the state this limit exists for is the other one, where a relaxation stops
+    // converging and runs to `lp.maxIterations` instead. That is a thousandfold
+    // rise in the cost of one node, and one such node overruns a wall-clock
+    // bound by however long it takes, uninterrupted: a search given ten minutes
+    // held a CI runner for nearly two hours that way, with the limit set and
+    // doing nothing.
+    //
+    // So the bound goes down into the relaxation as well, where it comes back as
+    // `SolveStatus.TimeLimit`. That is not conclusive, which is exactly the
+    // handling this needs: the node is counted unproven, its objective is not
+    // treated as a bound and prunes nothing, and an integral iterate from it
+    // cannot become the incumbent. A degenerate search ends as `Feasible` with
+    // the loss recorded rather than as an opaque kill.
+    //
+    // Intersected with any limit the caller already put on `params.lp`, so
+    // folding the search's budget in can only tighten a per-LP one, never
+    // extend it. The floor of 1ms keeps `Some(0)` from meaning "no limit" by
+    // arithmetic accident once the clock has moved past `started`.
+    def nodeLp: PdhgParams =
+      params.timeLimitMillis match
+        case None => params.lp
+        case Some(limit) =>
+          val left = limit - (System.currentTimeMillis() - started)
+          val cap  = params.lp.timeLimitMillis.fold(left)(math.min(_, left))
+          params.lp.copy(timeLimitMillis = Some(math.max(1L, cap)))
+
     if integers.isEmpty then
       // No integrality to enforce, so the relaxation *is* the answer. Worth
       // short-circuiting rather than running one node, so a caller can hand this
       // a pure LP without paying for the machinery.
-      val root = Pdhg.solveWith(problem, params.lp, kernels)
+      val root = Pdhg.solveWith(problem, nodeLp, kernels)
       val status = root.status match
         case SolveStatus.Optimal          => MilpStatus.Optimal
         case SolveStatus.PrimalInfeasible => MilpStatus.Infeasible
@@ -273,8 +312,8 @@ object BranchAndBound:
         )
 
         val relaxation =
-          if params.warmStart then Pdhg.solveWith(sub, params.lp, kernels, warmStart = node.warm)
-          else Pdhg.solveWith(sub, params.lp, kernels)
+          if params.warmStart then Pdhg.solveWith(sub, nodeLp, kernels, warmStart = node.warm)
+          else Pdhg.solveWith(sub, nodeLp, kernels)
         nodes += 1
 
         relaxation.status match

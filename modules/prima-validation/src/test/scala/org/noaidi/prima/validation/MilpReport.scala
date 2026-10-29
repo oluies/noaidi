@@ -102,11 +102,14 @@ object MilpReport:
 
     val rows = MilpLadder.instances.map { instance =>
       // On stderr, so it stays out of `milp-report.txt` and the job summary
-      // while still landing in the log. `BnbParams.timeLimitMillis` should now
-      // end a degenerate search with `Feasible` and a FAIL line rather than let
-      // it reach the step's `timeout`, but this marker costs nothing and covers
-      // the case that limit cannot: it is checked between nodes, so a single
-      // node's LP running to its 200,000-iteration cap overruns it uninterrupted.
+      // while still landing in the log. `BnbParams.timeLimitMillis` ends a
+      // degenerate search with `Feasible` and a FAIL line rather than letting it
+      // reach the step's `timeout`, and it now reaches inside a node's
+      // relaxation rather than only between nodes -- which is what let a single
+      // LP running to its 200,000-iteration cap overrun it uninterrupted. This
+      // marker stays anyway: it costs nothing, and it names the instance for
+      // anything that still outlives the step, which is now a hang below the
+      // relaxation rather than a limit that could not interrupt one.
       System.err.println(s"solving ${instance.name}")
       val relaxed = Pdhg.solve(instance.problem, lp)
 

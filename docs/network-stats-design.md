@@ -1,6 +1,6 @@
 # `network-stats`: DuckDB as a consumer of solved results
 
-Written as a sketch, and now built: `modules/network-stats` carries seven tables, nine views
+Written as a sketch, and now built: `modules/network-stats` carries eight tables, eight views
 and all nineteen of PyPSA's `statistics` metrics. It exists to make one architectural claim
 concrete: **DuckDB belongs downstream of the solve, not underneath the network.**
 

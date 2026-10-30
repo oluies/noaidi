@@ -297,9 +297,10 @@ class BranchAndBoundSuite extends munit.FunSuite:
     // A chain of equalities pinning every variable to 1. The answer is trivial
     // and integral, which is the point -- a knapsack is the wrong instance here
     // because its relaxation converges in a few hundred iterations and finishes
-    // inside any floor the search could apply. This one takes tens of thousands,
-    // two orders of magnitude above the 1ms floor, so a cut-off is unmistakable
-    // rather than a race against the clock's resolution.
+    // inside the 10ms the budget below will not go under, so there would be
+    // nothing to cut off. This one takes tens of thousands of iterations, and
+    // the budget is set to a fraction of its measured time, so the cut-off is a
+    // construction rather than a race against the clock's resolution.
     val n = 400
     val b = LpProblem.builder(n)
     (0 until n).foreach { i =>

@@ -108,6 +108,42 @@ class LineageSuite extends munit.FunSuite:
     assert(r.outputs.find(_.name == "bus_withdrawal").get.reads.contains("injection"))
   }
 
+  test("a DISTINCT select does not leak the keyword into its columns' expressions") {
+    val r = run()
+    // `transmission_branch` is `SELECT DISTINCT a.component, a.entity`. DuckDB keeps DISTINCT
+    // as a modifier and renders it back between `SELECT` and the select list, which is the
+    // gap the expression text is taken from -- so both fields came back claiming to be
+    // computed by `DISTINCT a.component` and `DISTINCT a.entity`. Neither is an expression,
+    // and both were shipped as an OpenLineage `transformationDescription`.
+    assertEquals(field(r, "transmission_branch", "component").expressions, Seq("a.component"))
+    assertEquals(field(r, "transmission_branch", "entity").expressions, Seq("a.entity"))
+
+    // Nowhere else either, which is the assertion that survives a new DISTINCT view.
+    val leaked = r.outputs.flatMap(d =>
+      d.fields.filter(_.expressions.exists(_.startsWith("DISTINCT"))).map(f => s"${d.name}.${f.name}"))
+    assertEquals(leaked, Seq.empty, s"DISTINCT leaked into: ${leaked.mkString(", ")}")
+  }
+
+  test("a view selecting a star is refused rather than described wrongly") {
+    // Positional matching of output columns to select entries is only sound while the two
+    // correspond, and a star is one entry standing for several columns: every entry after it
+    // sits at the wrong index, so those columns would be handed another column's inputs and
+    // still be labelled Exact. Both of this suite's integrity checks stay green while that
+    // happens -- the misplaced edges point at real columns, and every field still has one --
+    // so the derivation refuses the view instead.
+    val conn = DriverManager.getConnection("jdbc:duckdb:")
+    try
+      val st = conn.createStatement()
+      try
+        st.execute("CREATE TABLE base (a INTEGER, b INTEGER)")
+        st.execute("CREATE VIEW starry AS SELECT b.a, * FROM base b")
+      finally st.close()
+      val failure = intercept[IllegalStateException](Lineage.of(conn))
+      assert(failure.getMessage.contains("starry"), failure.getMessage)
+      assert(failure.getMessage.contains("star"), failure.getMessage)
+    finally conn.close()
+  }
+
   test("every view column has an input and every edge points at something real") {
     val r = run()
     val known = (r.inputs ++ r.outputs).map(d => d.name -> d.fields.map(_.name).toSet).toMap
@@ -152,10 +188,15 @@ class LineageSuite extends munit.FunSuite:
     assert(r.edges.length >= 40, s"${r.edges.length} edges")
   }
 
-  test("the row count facet is populated, and skipped when not asked for") {
+  test("the row count facet is populated only when asked for") {
     val counted = withSchema(Lineage.of(_, rowCounts = true))
     assert((counted.inputs ++ counted.outputs).forall(_.rows.contains(0L)))
-    val skipped = withSchema(Lineage.of(_, rowCounts = false))
+
+    // The default, because counting is the one part of this that touches the data: a
+    // `count(*)` over these views evaluates them, and `bus_load_weight` runs a correlated
+    // subquery per bus and snapshot to answer it. Describing a schema should not be the
+    // expensive call.
+    val skipped = withSchema(Lineage.of(_))
     assert((skipped.inputs ++ skipped.outputs).forall(_.rows.isEmpty))
   }
 

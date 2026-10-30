@@ -71,11 +71,15 @@ final class Stats private (
     *
     * Derived on demand and sent nowhere. A [[LineageSink]] decides whether anything leaves
     * the process, and the default is that nothing does.
+    *
+    * `rowCounts` is off for the reason [[Lineage.of]] gives: counting is the one part of
+    * this that touches the data rather than the definitions, and on a loaded result it
+    * evaluates every view to answer a question about the schema.
     */
   def lineage(
       namespace: String = "duckdb://network-stats",
       job: String = "network-stats.schema",
-      rowCounts: Boolean = true,
+      rowCounts: Boolean = false,
   ): LineageRun =
     Lineage.of(conn, namespace, job, rowCounts)
 

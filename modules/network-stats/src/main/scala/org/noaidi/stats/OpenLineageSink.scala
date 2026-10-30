@@ -7,7 +7,8 @@ import scala.jdk.CollectionConverters.*
 
 import io.openlineage.client.OpenLineage
 import io.openlineage.client.OpenLineageClient
-import io.openlineage.client.transports.{ConsoleTransport, FileConfig, FileTransport, Transport}
+import io.openlineage.client.OpenLineageClientUtils
+import io.openlineage.client.transports.{FileConfig, FileTransport, Transport}
 
 /** A [[LineageRun]] as an OpenLineage `RunEvent`.
   *
@@ -162,7 +163,7 @@ object OpenLineageSink:
 
   /** Where the events go. */
   enum Destination:
-    /** Standard output, as JSON. Costs nothing and reaches no other system. */
+    /** Standard output, one JSON event per line. Reaches no other system. */
     case Console
 
     /** Appended to a file, one JSON event per line. */
@@ -176,9 +177,22 @@ object OpenLineageSink:
       producer: URI = Producer,
   ): OpenLineageSink =
     val transport = destination match
-      case Destination.Console      => new ConsoleTransport()
+      case Destination.Console      => new StreamTransport(System.out)
       case Destination.ToFile(path) => new FileTransport(fileConfig(path))
     new OpenLineageSink(transport, producer)
+
+  /** The console path, writing to a stream the caller supplies.
+    *
+    * Package-private and here for the test. [[Destination.Console]] is this with
+    * `System.out`, and the two differ in nothing else, so a test holding its own stream
+    * exercises the same transport without reassigning `System.out` -- which is global state
+    * that sbt's parallel suites would make a race.
+    */
+  private[stats] def toStream(
+      stream: => java.io.PrintStream,
+      producer: URI = Producer,
+  ): OpenLineageSink =
+    new OpenLineageSink(new StreamTransport(stream), producer)
 
   /** An HTTP destination, which is left to the client's own configuration.
     *
@@ -190,6 +204,26 @@ object OpenLineageSink:
     */
   def to(transport: Transport, producer: URI = Producer): OpenLineageSink =
     new OpenLineageSink(transport, producer)
+
+  /** Standard output, written here rather than through the client's own console transport.
+    *
+    * `ConsoleTransport` does not write to the console. It holds an SLF4J logger and calls
+    * `log.info`, and the client brings only `slf4j-api`: with no backend on the classpath --
+    * and this build adds none -- SLF4J binds its no-op provider, prints one "No SLF4J
+    * providers" warning, and discards every event. A caller asking for the console
+    * destination would have got silence, from a path no test covered.
+    *
+    * `System.out` is resolved per event rather than captured once, so output follows a
+    * later `System.setOut`. That is what makes this testable at all, and it is also the
+    * behaviour a caller redirecting their own output would expect.
+    */
+  private final class StreamTransport(to: => java.io.PrintStream) extends Transport:
+    def emit(event: OpenLineage.RunEvent): Unit     = write(event)
+    def emit(event: OpenLineage.DatasetEvent): Unit = write(event)
+    def emit(event: OpenLineage.JobEvent): Unit     = write(event)
+
+    private def write(event: Object): Unit =
+      to.println(OpenLineageClientUtils.toJson(event))
 
   private def fileConfig(path: java.nio.file.Path): FileConfig =
     val config = new FileConfig()

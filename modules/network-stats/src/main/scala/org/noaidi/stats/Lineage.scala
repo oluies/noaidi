@@ -140,7 +140,14 @@ object Lineage:
       conn: Connection,
       namespace: String = "duckdb://network-stats",
       job: String = "network-stats.schema",
-      rowCounts: Boolean = true,
+      /** Count the rows of every relation.
+        *
+        * Off by default because it is not free and nothing about lineage needs it: a
+        * `count(*)` over these views evaluates them, and `bus_load_weight` runs a correlated
+        * subquery per bus and snapshot to answer it. Describing a schema should not be the
+        * expensive call.
+        */
+      rowCounts: Boolean = false,
   ): LineageRun =
     val columns = columnsByRelation(conn)
     val views   = viewDefinitions(conn)
@@ -489,6 +496,18 @@ object Lineage:
     aliased.obj("alias") = ujson.Str(Sentinel)
     oneColumn.obj("select_list") = ujson.Arr(aliased)
 
+    // DISTINCT has to come off, and it is the only modifier that does. The text is taken
+    // from after `SELECT `, and DuckDB renders a `DISTINCT_MODIFIER` in exactly that gap:
+    // `transmission_branch` is `SELECT DISTINCT a.component, a.entity`, and its two fields
+    // came back claiming to be computed by `DISTINCT a.component` and `DISTINCT a.entity`.
+    // Neither is an expression, and both were being shipped as an OpenLineage
+    // `transformationDescription`. Every other modifier -- ORDER BY, LIMIT, OFFSET --
+    // renders after the select list and so cannot reach the text.
+    oneColumn.obj.get("modifiers").foreach { modifiers =>
+      oneColumn.obj("modifiers") = ujson.Arr.from(
+        modifiers.arr.filterNot(m => nodeType(m) == "DISTINCT_MODIFIER"))
+    }
+
     val head    = statement.obj("statements").arr.head
     val rebuilt = ujson.Obj.from(head.obj.toSeq.map {
       case ("node", _) => ("node", oneColumn: ujson.Value)
@@ -513,6 +532,40 @@ object Lineage:
       case _: Exception => None
     finally ps.close()
 
+  /** Refuse to pair the catalog's columns with the select list unless they correspond.
+    *
+    * Everything below matches output column `i` to select entry `i`, which is how SQL
+    * matches them -- until a `*` appears. A star is one select entry standing for several
+    * columns, so every entry after it is at the wrong index: those columns would be handed
+    * another column's inputs and still be labelled [[LineageBasis.Exact]].
+    *
+    * Not reported as widened, and not skipped. The lineage of column A, presented as the
+    * lineage of column B with full confidence, is worse than no lineage at all -- a reader
+    * cannot tell it apart from the truth, and `reads` and the "every edge points at
+    * something real" test both stay green while it happens, because the edges do point at
+    * real columns. So this refuses to describe the view at all, in the same way
+    * [[selectBody]] refuses a definition it cannot recognise.
+    *
+    * No view in this schema selects a star. The guard is for the one that does next.
+    */
+  private def requireAligned(
+      name: String,
+      declared: Seq[(String, String)],
+      columnsOf: Seq[Seq[(ujson.Value, Scope)]],
+  ): Unit =
+    val stars = columnsOf.zipWithIndex.collect {
+      case (contributors, i) if contributors.exists((expr, _) => nodeType(expr) == "STAR") => i
+    }
+    if stars.nonEmpty then
+      throw new IllegalStateException(
+        s"view '$name' selects a star at position(s) ${stars.mkString(", ")}, so its output " +
+          "columns cannot be matched to its select list by position; column lineage for it " +
+          "would attribute one column's inputs to another")
+    if declared.length != columnsOf.length then
+      throw new IllegalStateException(
+        s"view '$name' declares ${declared.length} columns but its select list has " +
+          s"${columnsOf.length}, so they cannot be matched by position")
+
   private final case class Analysis(fields: Seq[LineageField], reads: Seq[String])
 
   private def analyse(
@@ -526,28 +579,23 @@ object Lineage:
     val node      = statement.obj("statements").arr.head.obj("node")
     val declared  = columns.getOrElse(name, Seq.empty)
     val columnsOf = projections(node)
+    requireAligned(name, declared, columnsOf)
 
     val fields = declared.zipWithIndex.map { case ((field, dataType), i) =>
-      columnsOf.lift(i) match
-        case None =>
-          // The catalog declares a column the parse did not reach. Reported as widened with
-          // no edges rather than dropped: a field missing from the graph reads as a field
-          // with no inputs, which is a different and wrong claim.
-          LineageField(field, dataType, Seq.empty, Seq.empty, LineageBasis.Widened)
-        case Some(contributors) =>
-          val resolved = contributors.foldLeft(Resolution.exact) { case (acc, (expr, scope)) =>
-            acc ++ resolve(expr, scope, columns, 0)
-          }
-          val texts = contributors.flatMap { (expr, _) =>
-            expressionText(conn, statement, branchFor(node, i, expr), expr)
-          }
-          LineageField(
-            name = field,
-            dataType = dataType,
-            inputs = resolved.inputs.toSeq.sortBy(r => (r.dataset, r.field)),
-            expressions = texts.distinct,
-            basis = resolved.basis,
-          )
+      val contributors = columnsOf(i)
+      val resolved = contributors.foldLeft(Resolution.exact) { case (acc, (expr, scope)) =>
+        acc ++ resolve(expr, scope, columns, 0)
+      }
+      val texts = contributors.flatMap { (expr, _) =>
+        expressionText(conn, statement, branchFor(node, i, expr), expr)
+      }
+      LineageField(
+        name = field,
+        dataType = dataType,
+        inputs = resolved.inputs.toSeq.sortBy(r => (r.dataset, r.field)),
+        expressions = texts.distinct,
+        basis = resolved.basis,
+      )
     }
 
     val reads = allTables(node).distinct.sorted

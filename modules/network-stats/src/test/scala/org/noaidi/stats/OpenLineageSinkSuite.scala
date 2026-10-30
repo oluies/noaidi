@@ -33,7 +33,7 @@ class OpenLineageSinkSuite extends munit.FunSuite:
       try StatsSchema.ddl.foreach(st.execute)
       finally st.close()
       val sink = OpenLineageSink(OpenLineageSink.Destination.ToFile(out))
-      try sink.emit(Lineage.of(conn))
+      try sink.emit(Lineage.of(conn, rowCounts = true))
       finally sink.close()
 
       val lines = Files.readAllLines(out).asScala.filter(_.trim.nonEmpty).toSeq
@@ -86,6 +86,31 @@ class OpenLineageSinkSuite extends munit.FunSuite:
     // vocabulary. See `OpenLineageSink`.
     assert(!value.obj.contains("transformationType") || value("transformationType").isNull,
       value.render())
+  }
+
+  test("the console destination writes the event instead of dropping it") {
+    // `ConsoleTransport`, which this used to be built on, holds an SLF4J logger and calls
+    // `log.info`. The client brings only `slf4j-api` and this build adds no backend, so
+    // SLF4J bound its no-op provider and discarded every event: the destination documented
+    // as writing JSON to standard output wrote nothing at all, from a path no test touched.
+    val buffer = new java.io.ByteArrayOutputStream()
+    val stream = new java.io.PrintStream(buffer, true, "UTF-8")
+    val conn   = DriverManager.getConnection("jdbc:duckdb:")
+    try
+      val st = conn.createStatement()
+      try StatsSchema.ddl.foreach(st.execute)
+      finally st.close()
+      val sink = OpenLineageSink.toStream(stream)
+      try sink.emit(Lineage.of(conn))
+      finally sink.close()
+    finally conn.close()
+
+    val written = buffer.toString("UTF-8").linesIterator.filter(_.trim.nonEmpty).toSeq
+    assertEquals(written.length, 1, s"expected one event, got: ${written.mkString(" / ")}")
+    val parsed = ujson.read(written.head)
+    assertEquals(parsed("eventType").str, "COMPLETE")
+    assertEquals(parsed("job")("name").str, "network-stats.schema")
+    assertEquals(parsed("outputs").arr.length, 8)
   }
 
   test("a measured row count becomes an output statistics facet") {

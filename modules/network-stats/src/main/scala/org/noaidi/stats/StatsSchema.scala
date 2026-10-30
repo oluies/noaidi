@@ -2,7 +2,7 @@ package org.noaidi.stats
 
 /** The star schema a solved result is loaded into, as DDL.
   *
-  * Two long fact tables and five dimensions, with nine views over them. Long rather than wide
+  * Two long fact tables and six dimensions, with eight views over them. Long rather than wide
   * because the quantities differ by component — a generator has one series, a storage unit has
   * five — so a wide table is a sparse column per component per quantity and every query has to
   * know which of them exist for the components it touches.

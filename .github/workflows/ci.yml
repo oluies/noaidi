@@ -676,6 +676,12 @@ jobs:
     # instance, chosen so all nine finish well inside the step budget. That
     # turns a degenerate search into `Feasible` plus a FAIL line -- which
     # `MilpReport` already treats as a failure -- instead of an opaque kill.
+    #
+    # That bound was at first read only between nodes, which left the degenerate
+    # case it was written for still able to get past it: the cost of one node
+    # rises a thousandfold when its relaxation stops converging, and the limit
+    # could not interrupt the node it was inside. It now goes down into each
+    # relaxation as well.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -724,7 +730,7 @@ jobs:
           timeout 600 sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
             | tee milp-report.txt || status=$?
           if [ "$status" -eq 124 ]; then
-            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, so look for one LP running to its iteration cap rather than a slow runner. The rows printed before this point name the instances that did finish."
+            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, and it now bounds each relaxation and not only the node loop -- so the LP running to its iteration cap, which is what used to get past it, is no longer the explanation. Look below the relaxation: a solve that never returns to check its own clock. The rows printed before this point name the instances that did finish."
           fi
           exit "$status"
 

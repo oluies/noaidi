@@ -287,6 +287,62 @@ class BranchAndBoundSuite extends munit.FunSuite:
       assert(limited.nodesExplored < full.nodesExplored, s"the limit did not stop anything: $limited")
   }
 
+  test("the time limit reaches inside a node's relaxation, not only between nodes") {
+    // The limit used to be read only by the loop guard, so it bounded the search
+    // in units of whole nodes. A relaxation that stopped converging and ran to
+    // `maxIterations` then overran it by however long that took: a search given
+    // ten minutes of CI held its runner for nearly two hours, with the limit set
+    // the whole time and unable to interrupt the node it was inside.
+    //
+    // A chain of equalities pinning every variable to 1. The answer is trivial
+    // and integral, which is the point -- a knapsack is the wrong instance here
+    // because its relaxation converges in a few hundred iterations and finishes
+    // inside the 10ms the budget below will not go under, so there would be
+    // nothing to cut off. This one takes tens of thousands of iterations, and
+    // the budget is set to a fraction of its measured time, so the cut-off is a
+    // construction rather than a race against the clock's resolution.
+    val n = 400
+    val b = LpProblem.builder(n)
+    (0 until n).foreach { i =>
+      b.objectiveCoefficient(i, if i % 2 == 0 then 1.0 else -1.0)
+      b.bounds(i, 0.0, 10.0)
+    }
+    b.equalityConstraint(Seq((0, 1.0)), 1.0)
+    (0 until n - 1).foreach(i => b.equalityConstraint(Seq((i, 1.0), (i + 1, -1.0)), 0.0))
+    val chain    = b.build()._1
+    val integers = (0 until n).toSet
+
+    val before  = System.currentTimeMillis()
+    val relaxed = Pdhg.solve(chain, params.lp)
+    val relaxMs = System.currentTimeMillis() - before
+    assertEquals(relaxed.status, SolveStatus.Optimal, s"$relaxed")
+    assume(relaxMs > 40, s"one relaxation took ${relaxMs}ms, too fast to measure a cut-off")
+
+    // Calibrated against the relaxation rather than picked. A fixed 1ms budget
+    // failed on a cold CI runner with `nodes=0`: the guard is `elapsed > limit`,
+    // and sorting four hundred indices and allocating the stack between
+    // `started` and the first node took longer than the whole budget, so the
+    // search correctly reported `NoSolutionFound` having attempted nothing --
+    // and the test had nothing to measure. A quarter of one relaxation is long
+    // enough that reaching the first node is never in question, and short enough
+    // that the relaxation cannot finish inside it.
+    val budget  = math.max(10L, relaxMs / 4)
+    val limited = BranchAndBound.solve(chain, integers, params.copy(timeLimitMillis = Some(budget)))
+
+    // Before the budget reached the relaxation, this ran the root LP to
+    // `Optimal` inside a budget already spent, took its integral iterate as the
+    // incumbent and reported success with nothing unproven. Now the relaxation
+    // comes back `TimeLimit`, which is not conclusive: the node is counted
+    // unproven, its objective prunes nothing, and its iterate cannot become the
+    // incumbent.
+    assert(limited.nodesExplored >= 1, s"no node was attempted in ${budget}ms: $limited")
+    assert(limited.unprovenNodes >= 1,
+      s"a relaxation ran to completion inside a ${budget}ms budget: $limited")
+    assertNotEquals(limited.status, MilpStatus.Optimal, s"$limited")
+    assert(limited.solveTimeMillis < relaxMs / 2,
+      s"the search outlived its ${budget}ms budget by about a whole relaxation: $limited")
+  }
+
   test("the reported objective is the objective of the reported point") {
     // These were computed from different things: the objective came from the
     // relaxation's fractional iterate while the vector came from snapping it.

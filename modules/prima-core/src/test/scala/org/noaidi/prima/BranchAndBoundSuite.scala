@@ -315,11 +315,18 @@ class BranchAndBoundSuite extends munit.FunSuite:
     val relaxed = Pdhg.solve(chain, params.lp)
     val relaxMs = System.currentTimeMillis() - before
     assertEquals(relaxed.status, SolveStatus.Optimal, s"$relaxed")
-    assume(relaxMs > 20, s"one relaxation took ${relaxMs}ms, too fast to measure a cut-off")
+    assume(relaxMs > 40, s"one relaxation took ${relaxMs}ms, too fast to measure a cut-off")
 
-    // 1, not 0: the loop guard is `elapsed > limit`, so a zero budget can be
-    // spent before the first node and leave nothing solved to assert about.
-    val limited = BranchAndBound.solve(chain, integers, params.copy(timeLimitMillis = Some(1L)))
+    // Calibrated against the relaxation rather than picked. A fixed 1ms budget
+    // failed on a cold CI runner with `nodes=0`: the guard is `elapsed > limit`,
+    // and sorting four hundred indices and allocating the stack between
+    // `started` and the first node took longer than the whole budget, so the
+    // search correctly reported `NoSolutionFound` having attempted nothing --
+    // and the test had nothing to measure. A quarter of one relaxation is long
+    // enough that reaching the first node is never in question, and short enough
+    // that the relaxation cannot finish inside it.
+    val budget  = math.max(10L, relaxMs / 4)
+    val limited = BranchAndBound.solve(chain, integers, params.copy(timeLimitMillis = Some(budget)))
 
     // Before the budget reached the relaxation, this ran the root LP to
     // `Optimal` inside a budget already spent, took its integral iterate as the
@@ -327,12 +334,12 @@ class BranchAndBoundSuite extends munit.FunSuite:
     // comes back `TimeLimit`, which is not conclusive: the node is counted
     // unproven, its objective prunes nothing, and its iterate cannot become the
     // incumbent.
-    assert(limited.nodesExplored >= 1, s"no node was attempted: $limited")
+    assert(limited.nodesExplored >= 1, s"no node was attempted in ${budget}ms: $limited")
     assert(limited.unprovenNodes >= 1,
-      s"a relaxation ran to completion inside a spent budget: $limited")
+      s"a relaxation ran to completion inside a ${budget}ms budget: $limited")
     assertNotEquals(limited.status, MilpStatus.Optimal, s"$limited")
     assert(limited.solveTimeMillis < relaxMs / 2,
-      s"the search outlived its budget by about a whole relaxation: $limited")
+      s"the search outlived its ${budget}ms budget by about a whole relaxation: $limited")
   }
 
   test("the reported objective is the objective of the reported point") {

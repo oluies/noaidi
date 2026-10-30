@@ -1,4 +1,4 @@
-# Publishes modules/demo-js to GitHub Pages.
+# Publishes modules/demo-js, and the NordPSA reproduction report, to GitHub Pages.
 #
 # The page is built here rather than committed: `main.js` is a megabyte of generated
 # JavaScript and `schema.json` is a copy of a file already in the repository, so both are
@@ -6,6 +6,12 @@
 #
 # `fullLinkJS` rather than `fastLinkJS` -- the optimised output is 1.07 MB against 1.7 MB,
 # and 171 KB over the wire once the server gzips it.
+#
+# One job for both, because Pages takes one artifact as the whole site: a second job
+# deploying only the report would replace the demo rather than sit beside it. The link is
+# cached instead, keyed on everything it is built from, so a commit that only touches the
+# report restores `main.js` and skips the link -- which is what the paths filter below used
+# to achieve by never running at all.
 name: Pages
 
 on:
@@ -22,6 +28,8 @@ on:
       - 'build.sbt'
       - 'project/**'
       - '.github/workflows/pages.yml'
+      - '.github/pages/**'
+      - 'reference/nordpsa/REPRODUCTION.md'
   workflow_dispatch:
 
 permissions:
@@ -47,7 +55,20 @@ jobs:
           cache: sbt
       - uses: sbt/setup-sbt@v1
 
+      # Keyed over every module rather than the five the demo links, on purpose. A key that
+      # tried to name just the inputs would be a second, hand-maintained copy of the build
+      # graph, and the failure when it drifted would be a stale demo published silently --
+      # far worse than the occasional link this over-invalidation pays for. A documentation
+      # commit changes nothing under `modules/`, which is the case that matters here.
+      - name: Cache the linked demo
+        id: demo-link
+        uses: actions/cache@v6
+        with:
+          path: target/out/sjs1/scala-3.9.0/demo-js/demo-js-opt/main.js
+          key: demo-fulllink-${{ hashFiles('build.sbt', 'project/**', 'modules/**') }}
+
       - name: Link the demo
+        if: steps.demo-link.outputs.cache-hit != 'true'
         run: sbt --batch 'set ThisBuild / scalacOptions += "-Werror"; demoJs/fullLinkJS'
 
       - name: Assemble the site
@@ -62,6 +83,52 @@ jobs:
           # read, so the demo cannot drift from the schema the JVM build is tested against.
           cp reference/goldens/schema.json "$out/"
           ls -la "$out"
+
+      # Rendered by GitHub's own Markdown endpoint, so the page says what the repository
+      # says. `mode: markdown`, not `gfm`: both render the eight tables, but `gfm` also
+      # treats every newline as a hard break, and this report's prose is wrapped at about
+      # ninety characters -- fifty spurious `<br>` tags through the middle of its sentences.
+      - name: Render the reproduction report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/nordpsa
+          jq -Rs '{text: ., mode: "markdown"}' reference/nordpsa/REPRODUCTION.md > payload.json
+          gh api --method POST /markdown --input payload.json > rendered.html
+
+          # The report links to its own README as a sibling path, which resolves inside the
+          # repository and not on this site. Pointed at the file on GitHub instead.
+          sed 's|href="README.md"|href="https://github.com/${{ github.repository }}/blob/main/reference/nordpsa/README.md"|g' \
+            rendered.html > body.html
+
+          # awk rather than sed, for two reasons. The rendered HTML goes in as a whole file
+          # and is never treated as a replacement string, so an `&` or a backslash in the
+          # report cannot be rewritten on its way into the page. And it behaves the same
+          # under BSD and GNU awk, which means the step can be run on a laptop before it is
+          # trusted on a runner -- the sed spelling for this could not be.
+          #
+          # The marker is matched as a whole line, and the count is checked, because the
+          # first spelling of this did neither: the shell's own comment names the marker in
+          # a sentence, that line matched too, and the report went into the page twice --
+          # past a `grep -c '<table'` floor and past a check that no marker was left, since
+          # both marker lines had been consumed. Only looking at the output caught it.
+          awk 'FNR == NR { body = body $0 ORS; next }
+               $0 == "<!--CONTENT-->" { printf "%s", body; hit++; next }
+               { print }
+               END {
+                 if (hit != 1) {
+                   print "expected one content marker line, matched " hit + 0 > "/dev/stderr"
+                   exit 1
+                 }
+               }' body.html .github/pages/report.html > site/nordpsa/index.html
+
+          # The render is the part that can fail quietly: an empty or error response still
+          # produces a well-formed page, just an empty one. One h1 and the report's tables
+          # are what distinguish the page from its shell.
+          test "$(grep -c '<h1' site/nordpsa/index.html)" -eq 1
+          test "$(grep -c '<table' site/nordpsa/index.html)" -ge 8
+          ls -la site/nordpsa"
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

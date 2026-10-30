@@ -8,11 +8,14 @@ A side-by-side of how the same constraint looks in PyPSA/linopy and in Scala is 
 
 What the last regeneration measured — every family's reproduction verdict, the reference
 answers each one records, what a sweep costs in wall clock, and which NordPSA revision the
-numbers were produced against — is in [`REPRODUCTION.md`](REPRODUCTION.md). The same report
-as a page of charts is at
+numbers were produced against — is in [`REPRODUCTION.md`](REPRODUCTION.md). It is published
+as a page at
+[oluies.github.io/noaidi/nordpsa/](https://oluies.github.io/noaidi/nordpsa/), rendered from
+that file by the Pages workflow on every commit that touches it, so the page cannot say
+something the file does not. The same report as a page of charts is at
 [NordPSA fixture reproduction](https://claude.ai/artifact/CWX7eSwwhFa1SsnSbTVegW), which is a
-private artifact and resolves only for people it has been shared with. Both are views of the
-files in this directory, which stay the authority.
+private artifact and resolves only for people it has been shared with. All three are views of
+the files in this directory, which stay the authority.
 
 ## Why this directory is separate from `goldens`
 

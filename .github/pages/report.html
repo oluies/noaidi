@@ -1,0 +1,90 @@
+<!doctype html>
+<!--
+  The shell the Pages job wraps a rendered Markdown report in.
+
+  Here rather than inline in the workflow because it is a page, and a page kept as a heredoc
+  inside YAML stops being edited. The contract is the one CONTENT marker line below: the job
+  replaces that whole line with GitHub's own rendering of the Markdown, and changes nothing
+  else. Named indirectly here on purpose -- spelling it out in this sentence made the first
+  version of the job match this line as well and insert the report twice.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NordPSA fixture reproduction</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --rule: #d1d9e0;
+    --accent: #0969da;
+    --code-bg: #f6f8fa;
+    --row: #f6f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --rule: #3d444d;
+      --accent: #4493f8;
+      --code-bg: #151b23;
+      --row: #151b23;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --rule: #3d444d;
+    --accent: #4493f8;
+    --code-bg: #151b23;
+    --row: #151b23;
+  }
+
+  html { background: var(--bg); }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 2.5rem 16px 6rem;
+  }
+  main { max-width: 56rem; margin: 0 auto; }
+
+  h1, h2, h3 { line-height: 1.25; margin: 2.2rem 0 1rem; }
+  h1 { font-size: 1.9rem; margin-top: 0; }
+  h2 { font-size: 1.4rem; padding-bottom: .3rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; }
+  a { color: var(--accent); }
+  p, ul, ol { margin: 0 0 1rem; }
+
+  /* Tables are most of this report: eight of them, nearly all numeric. */
+  table { border-collapse: collapse; width: 100%; margin: 0 0 1.4rem; font-size: .92rem; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--rule); padding: .38rem .7rem; }
+  th { background: var(--row); font-weight: 600; }
+  tbody tr:nth-child(2n) { background: var(--row); }
+  td[align="right"], th[align="right"] { font-variant-numeric: tabular-nums; }
+
+  code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); border-radius: 6px; padding: .15em .35em; font-size: .88em; }
+  pre { background: var(--code-bg); border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: .85rem; }
+
+  footer { max-width: 56rem; margin: 3rem auto 0; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .85rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<!--CONTENT-->
+</main>
+<footer>
+  Generated from <code>reference/nordpsa/REPRODUCTION.md</code> by the Pages workflow.
+  The files in that directory are the authority; this page is a rendering of one of them.
+  <a href="https://github.com/oluies/noaidi/tree/main/reference/nordpsa">Source</a>
+</footer>
+</body>
+</html>

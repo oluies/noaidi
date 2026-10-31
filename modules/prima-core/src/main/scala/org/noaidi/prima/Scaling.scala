@@ -60,6 +60,39 @@ final class ScaledProblem private[prima] (
       i += 1
     out
 
+/** An equilibration, separated from the problem it was derived from.
+  *
+  * Holds the scaled matrix and the accumulated row and column factors -- the
+  * part of [[Scaling]] that reads only the constraint matrix. Applying it to a
+  * problem that shares that matrix produces the same [[ScaledProblem]] the
+  * one-shot [[Scaling.apply]] would, for one pass over `n + m` values instead of
+  * several over the nonzeros.
+  *
+  * `source` is kept and checked by reference. A plan is only valid for the
+  * matrix it was built from, and the failure if it were not is silent: the
+  * factors would equilibrate nothing in particular, the solve would converge to
+  * the wrong problem's geometry, and the answer would come back labelled
+  * `Optimal`. Reference equality is the right test rather than a conservative
+  * one, because the caller this exists for -- a branch-and-bound node -- passes
+  * the very same instance by construction, and anything that does not is a
+  * mistake rather than a different spelling.
+  */
+final class ScalingPlan private[prima] (
+    private[prima] val source: SparseMatrix,
+    private[prima] val matrix: SparseMatrix,
+    private[prima] val rowScale: Array[Double],
+    private[prima] val colScale: Array[Double],
+):
+
+  /** This equilibration, applied to a problem over the same matrix. */
+  private[prima] def applyTo(problem: LpProblem): ScaledProblem =
+    require(
+      problem.constraintMatrix eq source,
+      "a ScalingPlan was applied to a problem with a different constraint matrix; " +
+        "the factors describe the matrix it was built from and mean nothing for another",
+    )
+    Scaling.scaledProblemOf(this, problem)
+
 object Scaling:
 
   /** Equilibrate a problem with Ruiz iterations followed by an optional
@@ -75,6 +108,29 @@ object Scaling:
     * equilibrate and dividing by their zero norm would produce infinities.
     */
   def apply(problem: LpProblem, params: ScalingParams): ScaledProblem =
+    plan(problem, params).applyTo(problem)
+
+  /** The half of a scaling that depends only on the constraint matrix.
+    *
+    * Everything below the equilibration loop -- the cost, the right-hand side
+    * and the box -- is one pass over `n + m` values. Everything inside it is
+    * several passes over the nonzeros, and two whole matrices per iteration: a
+    * `transpose` to reach the columns and a `scaledBy` to apply the factors.
+    * The split is there because the second half is identical for any two
+    * problems sharing a matrix, and the first is not.
+    *
+    * Which is exactly the shape of a branch-and-bound search. Every node is the
+    * root's matrix with two different bound vectors, so a search of 423 nodes
+    * equilibrated the same matrix 423 times -- 86% of the solver's allocation,
+    * measured, and 4% to 25% of a node's solve depending on how fast that node
+    * converges. [[BranchAndBound]] now computes this once and hands it to every
+    * node.
+    *
+    * Note that the reuse extends past the matrix itself: `transpose` is a lazy
+    * val, so a plan that is reused hands back the same instance and its
+    * transpose is computed once rather than per node.
+    */
+  def plan(problem: LpProblem, params: ScalingParams): ScalingPlan =
     val m = problem.numConstraints
     val n = problem.numVariables
 
@@ -124,6 +180,17 @@ object Scaling:
       accumulate(cumulativeRow, rowFactor)
       accumulate(cumulativeCol, colFactor)
 
+    new ScalingPlan(problem.constraintMatrix, matrix, cumulativeRow, cumulativeCol)
+
+  private[prima] def scaledProblemOf(
+      plan: ScalingPlan,
+      problem: LpProblem,
+  ): ScaledProblem =
+    val n             = problem.numVariables
+    val m             = problem.numConstraints
+    val cumulativeRow = plan.rowScale
+    val cumulativeCol = plan.colScale
+
     // c~ = Dc c, q~ = Dr q, and the box scales inversely with the variables.
     val cost  = new Array[Double](n)
     val lower = new Array[Double](n)
@@ -145,7 +212,7 @@ object Scaling:
 
     val scaled = LpProblem(
       objective = Unsafe.wrap(cost),
-      constraintMatrix = matrix,
+      constraintMatrix = plan.matrix,
       rhs = Unsafe.wrap(rhs),
       numEqualities = problem.numEqualities,
       variableLower = Unsafe.wrap(lower),

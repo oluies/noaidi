@@ -51,8 +51,21 @@ object Pdhg:
       kernels: Kernels,
       cancelled: () => Boolean = () => false,
       warmStart: Option[WarmStart] = None,
+      /** An equilibration already computed for this problem's matrix.
+        *
+        * Omitted, the solve derives its own, which is the right default for a
+        * caller solving one problem. Supplied, it skips the equilibration --
+        * several passes over the nonzeros and two matrices per Ruiz iteration --
+        * which is worth doing for a caller solving many problems over one
+        * matrix. [[BranchAndBound]] is that caller: see [[Scaling.plan]].
+        *
+        * Checked by reference against the matrix it was built from, so a plan
+        * from somewhere else fails loudly rather than equilibrating the wrong
+        * geometry and returning an answer labelled `Optimal`.
+        */
+      scaling: Option[ScalingPlan] = None,
   ): LpSolution =
-    new Solve(problem, params, kernels, cancelled, warmStart).run()
+    new Solve(problem, params, kernels, cancelled, warmStart, scaling).run()
 
   /** A point to start from, in the caller's own coordinates, plus the adaptive
     * state that got there.
@@ -126,13 +139,17 @@ object Pdhg:
       k: Kernels,
       cancelled: () => Boolean,
       warmStart: Option[WarmStart],
+      plan: Option[ScalingPlan],
   ):
 
     private val n   = problem.numVariables
     private val m   = problem.numConstraints
     private val nEq = problem.numEqualities
 
-    private val scaled   = Scaling(problem, params.scaling)
+    // The supplied plan, or one derived here. Identical either way: a plan is
+    // the matrix-only half of what `Scaling.apply` computes, and applying it
+    // runs the same arithmetic over the cost, the right-hand side and the box.
+    private val scaled   = plan.fold(Scaling(problem, params.scaling))(_.applyTo(problem))
     private val sp       = scaled.problem
     private val rowScale = scaled.rowScale
     private val colScale = scaled.colScale

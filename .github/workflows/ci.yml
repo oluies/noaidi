@@ -742,10 +742,23 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          timeout 600 sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
-            | tee milp-report.txt || status=$?
+          # The report writes its own file, flushing each row, rather than being
+          # piped through `tee`. A pipe between two JVMs is block-buffered, so
+          # `timeout` killed the pipeline with the buffer unwritten: three
+          # investigations of this step have had a log with the kill message, no
+          # header and no rows, which is why the per-row printing it already does
+          # has never once helped. The path is absolute so that where the file
+          # lands is stated here rather than inherited from sbt's
+          # working-directory rules -- measured, a forked run reports the
+          # workspace root, but this step should not depend on that.
+          timeout 600 sbt --batch \
+            "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport $GITHUB_WORKSPACE/milp-report.txt" \
+            || status=$?
           if [ "$status" -eq 124 ]; then
-            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, and it now bounds each relaxation and not only the node loop -- so the LP running to its iteration cap, which is what used to get past it, is no longer the explanation. Look below the relaxation: a solve that never returns to check its own clock. The rows printed before this point name the instances that did finish."
+            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, and it now bounds each relaxation and not only the node loop -- so the LP running to its iteration cap, which is what used to get past it, is no longer the explanation. Look below the relaxation: a solve that never returns to check its own clock. \`milp-report.txt\` is written and flushed per row, so it holds every instance that finished -- and the instance that hung is the next one after the last row, in the ladder's own order."
+            echo "::group::milp-report.txt as far as it got"
+            cat milp-report.txt || echo "(no report file was written at all)"
+            echo "::endgroup::"
           fi
           exit "$status"
 
@@ -765,9 +778,12 @@ jobs:
           #
           # The anchor is safe because sbt colours the lines *it* logs and passes
           # a program's own stdout through untouched, and this table is printed
-          # by `Report`'s `println`. Not because of `Test / fork`: an earlier
-          # version of this comment said so, and `primaValidation` does not set
-          # it -- the claim was wrong about the one module that writes this file.
+          # by `Report`'s `println`. Not because of `Test / fork`, though not for
+          # the reason this comment used to give either: it claimed
+          # `primaValidation` does not set `Test / fork`, and it does --
+          # `commonSettings` sets it and sbt logs `running (fork)` for this very
+          # main. The anchor is safe because of what sbt colours, which holds
+          # whether the run forks or not.
           # The `|| cat` below is what covers the case where that reasoning is
           # wrong anyway, which is the whole reason it is not dead code.
           body=$(sed -n '/^instance /,$p' report.txt)

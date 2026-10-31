@@ -778,12 +778,13 @@ jobs:
           #
           # The anchor is safe because sbt colours the lines *it* logs and passes
           # a program's own stdout through untouched, and this table is printed
-          # by `Report`'s `println`. Not because of `Test / fork`, though not for
-          # the reason this comment used to give either: it claimed
-          # `primaValidation` does not set `Test / fork`, and it does --
-          # `commonSettings` sets it and sbt logs `running (fork)` for this very
-          # main. The anchor is safe because of what sbt colours, which holds
-          # whether the run forks or not.
+          # by `Report`'s `println`. Not because of `Test / fork`: an earlier
+          # version of this comment said so, and `primaValidation` does not set
+          # it -- the claim was wrong about the one module that writes this file.
+          # `show primaValidation/Test/fork` answers false, where `networkLopf`
+          # answers true. A later version of this comment asserted the opposite,
+          # on the strength of sbt logging `running (fork)` for `runMain` -- which
+          # is a different task from `test` and settles nothing about this one.
           # The `|| cat` below is what covers the case where that reasoning is
           # wrong anyway, which is the whole reason it is not dead code.
           body=$(sed -n '/^instance /,$p' report.txt)

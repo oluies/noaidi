@@ -97,14 +97,18 @@ object MilpReport:
     *
     * The path is an argument rather than a relative constant so that where the
     * file lands is the caller's statement rather than a consequence of sbt's
-    * working-directory rules. An earlier version of this comment justified it by
-    * claiming a forked test JVM does not run from the repository root. Measured
-    * instead: `primaValidation` does fork -- `commonSettings` sets `Test / fork`
-    * and sbt logs `running (fork)` -- and both the forked `test` task and a
-    * forked `runMain` reported the workspace root as their working directory. So
-    * a relative name would in fact have worked here, which is exactly why it is
-    * not used: the workflow needs to know where the file is without depending on
-    * that, and the rule is not one this file should be asserting.
+    * working-directory rules -- which differ by module and by task, and which
+    * two earlier versions of this comment each got wrong in a different
+    * direction.
+    *
+    * What sbt actually answers: `primaValidation / Test / fork` is false, so
+    * these tests run in sbt's own JVM from the repository root, while
+    * `networkLopf / Test / fork` is true and its forked tests run from
+    * `modules/network-lopf` -- which is why `referenceEnv` in `build.sbt` passes
+    * absolute paths, and that comment is right. A relative name would have
+    * worked for this main, since `runMain` reported the repository root too.
+    * It is still not used: the workflow has to know where the file is without
+    * reasoning about any of that.
     */
   private[validation] final class Sink(path: Option[java.nio.file.Path]) extends AutoCloseable:
     private val writer = path.map(java.nio.file.Files.newBufferedWriter(_))

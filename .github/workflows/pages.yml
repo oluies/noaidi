@@ -128,7 +128,7 @@ jobs:
           # are what distinguish the page from its shell.
           test "$(grep -c '<h1' site/nordpsa/index.html)" -eq 1
           test "$(grep -c '<table' site/nordpsa/index.html)" -ge 8
-          ls -la site/nordpsa"
+          ls -la site/nordpsa
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

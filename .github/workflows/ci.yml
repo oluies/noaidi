@@ -742,10 +742,21 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          timeout 600 sbt --batch "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport" \
-            | tee milp-report.txt || status=$?
+          # The report writes its own file, flushing each row, rather than being
+          # piped through `tee`. A pipe between two JVMs is block-buffered, so
+          # `timeout` killed the pipeline with the buffer unwritten: three
+          # investigations of this step have had a log with the kill message, no
+          # header and no rows, which is why the per-row printing it already does
+          # has never once helped. The path is absolute because a forked test JVM
+          # runs from the module, not the workspace.
+          timeout 600 sbt --batch \
+            "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport $GITHUB_WORKSPACE/milp-report.txt" \
+            || status=$?
           if [ "$status" -eq 124 ]; then
-            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, and it now bounds each relaxation and not only the node loop -- so the LP running to its iteration cap, which is what used to get past it, is no longer the explanation. Look below the relaxation: a solve that never returns to check its own clock. The rows printed before this point name the instances that did finish."
+            echo "::error::MilpReport exceeded its 10-minute budget -- it normally finishes in under a minute. The search is deterministic only holding the JDK and the runner's vector width fixed: it has now diverged between the two JDK jobs on one commit, 423 nodes against a budget-exhausting search, and not reproduced on the next. Reaching this message at all means the per-instance \`timeLimitMillis\` did not fire, and it now bounds each relaxation and not only the node loop -- so the LP running to its iteration cap, which is what used to get past it, is no longer the explanation. Look below the relaxation: a solve that never returns to check its own clock. \`milp-report.txt\` is written and flushed per row, so it holds every instance that finished -- and the instance that hung is the next one after the last row, in the ladder's own order."
+            echo "::group::milp-report.txt as far as it got"
+            cat milp-report.txt || echo "(no report file was written at all)"
+            echo "::endgroup::"
           fi
           exit "$status"
 

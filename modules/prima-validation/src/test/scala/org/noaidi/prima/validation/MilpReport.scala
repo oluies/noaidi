@@ -82,9 +82,43 @@ object MilpReport:
       f"$mineObj $theirsObj $gap $intGap ${r.nodes}%7d ${r.unproven}%6d " +
       f"${r.primaMillis}%9d ${r.oracleMillis}%10d"
 
+  /** Writes a line to stdout and, when CI asked for one, to a file it flushes.
+    *
+    * The flush is the whole point. Every row of this report is already printed
+    * as its instance finishes, precisely so that a search which outruns CI's
+    * ten-minute budget leaves behind the rows that did finish and names the
+    * instance that did not. It has never once worked: the step pipes sbt through
+    * `tee`, a pipe between two JVMs is block-buffered, and `timeout` kills the
+    * pipeline with the buffer unwritten. Three timeouts have now been
+    * investigated from a log containing the kill message, no header and no rows.
+    *
+    * A file written and flushed from inside this process does not depend on
+    * anything surviving the signal. The path is an argument rather than a
+    * constant because a forked test JVM does not run from the repository root --
+    * `Test / baseDirectory` is the module -- so a relative name would land
+    * somewhere the workflow is not looking.
+    */
+  private[validation] final class Sink(path: Option[java.nio.file.Path]) extends AutoCloseable:
+    private val writer = path.map(java.nio.file.Files.newBufferedWriter(_))
+
+    def line(text: String): Unit =
+      println(text)
+      writer.foreach { w =>
+        w.write(text)
+        w.newLine()
+        w.flush()
+      }
+
+    def close(): Unit = writer.foreach(_.close())
+
   def main(args: Array[String]): Unit =
     java.util.Locale.setDefault(java.util.Locale.ROOT)
-    println(ValidationLadder.host)
+    val sink = new Sink(args.headOption.filter(_.nonEmpty).map(java.nio.file.Path.of(_)))
+    try report(sink)
+    finally sink.close()
+
+  private def report(sink: Sink): Unit =
+    sink.line(ValidationLadder.host)
 
     val params = MilpLadder.params
     val lp     = params.lp
@@ -98,7 +132,7 @@ object MilpReport:
     // that never got printed. Which instance had diverged was then a guess. The
     // order of the output is unchanged, so the job summary still finds its
     // table by the `^instance ` header.
-    println(header)
+    sink.line(header)
 
     val rows = MilpLadder.instances.map { instance =>
       // On stderr, so it stays out of `milp-report.txt` and the job summary
@@ -138,7 +172,7 @@ object MilpReport:
         relaxationStatus = relaxed.status,
         primaPrimal = mine.primal,
       )
-      println(render(row))
+      sink.line(render(row))
       row
     }
 
@@ -146,15 +180,16 @@ object MilpReport:
       r.oracleStatus == MilpStatus.Optimal && r.primaStatus == MilpStatus.Optimal
     )
     val worst = if comparable.isEmpty then 0.0 else comparable.map(_.relativeGap).max
-    println(f"%nworst relative objective gap against the oracle: $worst%.3e")
+    sink.line("")
+    sink.line(f"worst relative objective gap against the oracle: $worst%.3e")
     // Unrounded too, for the reason `Report` gives at length: this figure gets
     // compared across CI's two JDK jobs, and four significant digits agreeing
     // does not make two doubles equal. Shared with `Report` rather than copied,
     // because the precision and layout are the part a reader diffs.
-    println(ValidationLadder.exactly(worst))
-    println(f"instances where Prima claimed a better objective than the oracle: " +
+    sink.line(ValidationLadder.exactly(worst))
+    sink.line(f"instances where Prima claimed a better objective than the oracle: " +
       comparable.count(r => r.primaObjective < r.oracleObjective - 1e-6))
-    println(f"total nodes explored: ${rows.map(_.nodes).sum}, of which unproven: ${rows.map(_.unproven).sum}")
+    sink.line(f"total nodes explored: ${rows.map(_.nodes).sum}, of which unproven: ${rows.map(_.unproven).sum}")
 
     // The gate has to fail *because* Prima regressed, not go quiet.
     //

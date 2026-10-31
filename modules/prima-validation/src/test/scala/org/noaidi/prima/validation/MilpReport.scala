@@ -93,10 +93,18 @@ object MilpReport:
     * investigated from a log containing the kill message, no header and no rows.
     *
     * A file written and flushed from inside this process does not depend on
-    * anything surviving the signal. The path is an argument rather than a
-    * constant because a forked test JVM does not run from the repository root --
-    * `Test / baseDirectory` is the module -- so a relative name would land
-    * somewhere the workflow is not looking.
+    * anything surviving the signal.
+    *
+    * The path is an argument rather than a relative constant so that where the
+    * file lands is the caller's statement rather than a consequence of sbt's
+    * working-directory rules. An earlier version of this comment justified it by
+    * claiming a forked test JVM does not run from the repository root. Measured
+    * instead: `primaValidation` does fork -- `commonSettings` sets `Test / fork`
+    * and sbt logs `running (fork)` -- and both the forked `test` task and a
+    * forked `runMain` reported the workspace root as their working directory. So
+    * a relative name would in fact have worked here, which is exactly why it is
+    * not used: the workflow needs to know where the file is without depending on
+    * that, and the rule is not one this file should be asserting.
     */
   private[validation] final class Sink(path: Option[java.nio.file.Path]) extends AutoCloseable:
     private val writer = path.map(java.nio.file.Files.newBufferedWriter(_))

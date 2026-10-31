@@ -40,14 +40,21 @@ class MilpReportSinkSuite extends munit.FunSuite:
     }
   }
 
-  test("a sink with no path writes no file and still prints") {
-    // The local default. `MilpReport` takes the path as an argument because a
-    // forked test JVM runs from the module rather than the workspace, so there
-    // is no safe relative name to default to -- and a run without one must not
-    // fail for want of a file nobody asked for.
-    val sink = new MilpReport.Sink(None)
-    try sink.line("no file for this one")
+  test("a sink with no path still prints the line") {
+    // The local default: no path given, so nothing is written and the line goes
+    // to stdout only. The first version of this test asserted none of that -- it
+    // called `line` and `close` and checked that neither threw, so it would have
+    // passed just as well if `Sink(None)` had printed nothing at all, which is
+    // the one behaviour it exists to protect.
+    //
+    // `Console.withOut` captures it because `Sink.line` uses `Predef.println`,
+    // which writes through `scala.Console`. A `System.out.println` would escape
+    // this, so the capture is also what pins that choice.
+    val captured = new java.io.ByteArrayOutputStream()
+    val sink     = new MilpReport.Sink(None)
+    try Console.withOut(captured)(sink.line("no file for this one"))
     finally sink.close()
+    assertEquals(captured.toString("UTF-8").trim, "no file for this one")
   }
 
   test("closing twice is not an error") {

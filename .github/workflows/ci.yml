@@ -747,8 +747,10 @@ jobs:
           # `timeout` killed the pipeline with the buffer unwritten: three
           # investigations of this step have had a log with the kill message, no
           # header and no rows, which is why the per-row printing it already does
-          # has never once helped. The path is absolute because a forked test JVM
-          # runs from the module, not the workspace.
+          # has never once helped. The path is absolute so that where the file
+          # lands is stated here rather than inherited from sbt's
+          # working-directory rules -- measured, a forked run reports the
+          # workspace root, but this step should not depend on that.
           timeout 600 sbt --batch \
             "primaValidation/Test/runMain org.noaidi.prima.validation.MilpReport $GITHUB_WORKSPACE/milp-report.txt" \
             || status=$?
@@ -776,9 +778,12 @@ jobs:
           #
           # The anchor is safe because sbt colours the lines *it* logs and passes
           # a program's own stdout through untouched, and this table is printed
-          # by `Report`'s `println`. Not because of `Test / fork`: an earlier
-          # version of this comment said so, and `primaValidation` does not set
-          # it -- the claim was wrong about the one module that writes this file.
+          # by `Report`'s `println`. Not because of `Test / fork`, though not for
+          # the reason this comment used to give either: it claimed
+          # `primaValidation` does not set `Test / fork`, and it does --
+          # `commonSettings` sets it and sbt logs `running (fork)` for this very
+          # main. The anchor is safe because of what sbt colours, which holds
+          # whether the run forks or not.
           # The `|| cat` below is what covers the case where that reasoning is
           # wrong anyway, which is the whole reason it is not dead code.
           body=$(sed -n '/^instance /,$p' report.txt)

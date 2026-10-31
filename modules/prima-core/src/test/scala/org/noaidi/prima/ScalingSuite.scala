@@ -104,3 +104,59 @@ class ScalingSuite extends munit.FunSuite:
     assert(scaled.rowScale.forall(_ == 1.0))
     assert(scaled.colScale.forall(_ == 1.0))
   }
+
+  test("a plan applied to its own problem is the one-shot scaling, bit for bit") {
+    // `apply` is defined as `plan(...).applyTo(...)`, and the point of splitting
+    // it was that branch-and-bound could hold the plan across nodes. That is only
+    // sound if the split changes nothing, so this compares the two paths on the
+    // raw bits rather than within a tolerance: the arithmetic is meant to be the
+    // same operations in the same order, not merely a close answer.
+    val problem = LpFixtures.productMix.problem
+    val params  = ScalingParams.default
+
+    val oneShot = Scaling(problem, params)
+    val viaPlan = Scaling.plan(problem, params).applyTo(problem)
+
+    def bits(xs: Seq[Double]) = xs.map(java.lang.Double.doubleToRawLongBits)
+    assertEquals(bits(viaPlan.rowScale.toSeq), bits(oneShot.rowScale.toSeq))
+    assertEquals(bits(viaPlan.colScale.toSeq), bits(oneShot.colScale.toSeq))
+    assertEquals(
+      bits(viaPlan.problem.constraintMatrix.values.toSeq),
+      bits(oneShot.problem.constraintMatrix.values.toSeq))
+    assertEquals(bits(viaPlan.problem.rhs.toSeq), bits(oneShot.problem.rhs.toSeq))
+    assertEquals(bits(viaPlan.problem.objective.toSeq), bits(oneShot.problem.objective.toSeq))
+    assertEquals(bits(viaPlan.problem.variableLower.toSeq), bits(oneShot.problem.variableLower.toSeq))
+    assertEquals(bits(viaPlan.problem.variableUpper.toSeq), bits(oneShot.problem.variableUpper.toSeq))
+  }
+
+  test("a plan reuses the scaled matrix rather than rebuilding it") {
+    // What makes holding a plan worth anything. The scaled matrix and its
+    // transpose are the expensive products -- several passes over the nonzeros,
+    // and `transpose` is a lazy val, so handing back the same instance is what
+    // keeps it from being recomputed for every node of a search.
+    val problem = LpFixtures.productMix.problem
+    val plan    = Scaling.plan(problem, ScalingParams.default)
+
+    val first  = plan.applyTo(problem)
+    val second = plan.applyTo(problem)
+    assert(first.problem.constraintMatrix eq second.problem.constraintMatrix)
+    assert(first.problem.constraintMatrix.transpose eq second.problem.constraintMatrix.transpose)
+
+    // The parts that do depend on the problem are rebuilt, because a node's
+    // bounds are the thing that differs between two problems sharing a plan.
+    assert(
+      !(first.problem.variableLower.asInstanceOf[AnyRef] eq
+        second.problem.variableLower.asInstanceOf[AnyRef]),
+      "the scaled bounds were shared between two applications of one plan")
+  }
+
+  test("a plan refuses a problem over a different matrix") {
+    // The failure it prevents is silent: factors that equilibrate some other
+    // matrix would still produce a scaled problem, the solve would converge to
+    // the wrong geometry, and the answer would come back labelled Optimal.
+    val plan  = Scaling.plan(LpFixtures.productMix.problem, ScalingParams.default)
+    val other = LpFixtures.randomFeasible(1, 20, 6, 10, 0.3)
+
+    val failure = intercept[IllegalArgumentException](plan.applyTo(other))
+    assert(failure.getMessage.contains("different constraint matrix"), failure.getMessage)
+  }

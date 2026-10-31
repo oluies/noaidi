@@ -130,7 +130,41 @@ final class VectorKernels(alsoWidenAutoVectorised: Boolean = false) extends Kern
   def length(v: Array[Double]): Int                         = v.length
   def close(): Unit                                         = scalar.close()
 
-  /** Unchanged. See the class scaladoc: the gather is its own question. */
+  /** Unchanged, and now for a measured reason rather than a deferred one.
+    *
+    * This was "the gather is its own question". It has been asked. A gathered
+    * CSR product -- contiguous `values`, `x` through
+    * `DoubleVector.fromArray(species, x, 0, colIndices, p)` -- was measured
+    * against the scalar loop on three matrices from 9.5k to 54k nonzeros, 18 to
+    * 24 nonzeros per row, on a 2-lane machine:
+    *
+    *   - the gathered product runs at '''0.05x to 0.07x''' of scalar: 15 to 20
+    *     times slower. The gather is not intrinsified here, so each one is a
+    *     method call where the scalar loop has an indexed load.
+    *   - gathering by hand into a scratch buffer and loading that contiguously
+    *     avoids the intrinsic and still loses, at 0.72x to 0.84x. The per-lane
+    *     copy costs more than two lanes of arithmetic save.
+    *   - and the ceiling, measured by reading `x` contiguously and accepting the
+    *     wrong answer, is '''1.11x to 1.18x'''. That is the whole budget a
+    *     perfect, free gather would be competing for.
+    *
+    * Which is the point: at two lanes a twenty-nonzero row is ten vector
+    * operations, and `reduceLanes` plus the loop setup consumes what they win.
+    * A sparse product is bound by the memory it walks rather than by the
+    * arithmetic it does, and widening arithmetic does not move that bound.
+    *
+    * The share this would be attacking is the largest in the solver -- 54.5% of
+    * a `scigrid-de` solve by `KernelSplit`, and 70% of execution samples on a
+    * 9.5k-nonzero instance under JFR -- which is exactly why it looked worth
+    * doing and exactly why the measurement had to come first.
+    *
+    * What this does not settle: a machine with a hardware gather. Those figures
+    * are from one lane count on one architecture, and the 1.18x ceiling is the
+    * number to beat there too -- a gather that is merely free, rather than
+    * negative, still leaves under a fifth. Reaching further than that needs the
+    * bytes per nonzero to come down or the column access to become local, which
+    * is a storage format rather than a kernel.
+    */
   def spmv(a: SparseMatrix, x: Array[Double], out: Array[Double]): Unit = scalar.spmv(a, x, out)
 
   def copy(src: Array[Double], dst: Array[Double]): Unit = scalar.copy(src, dst)

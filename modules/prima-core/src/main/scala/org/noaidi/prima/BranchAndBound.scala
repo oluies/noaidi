@@ -187,6 +187,18 @@ object BranchAndBound:
     }
     val started = System.currentTimeMillis()
 
+    // Equilibrated once for the whole search rather than once per node.
+    //
+    // Every node is this matrix with two different bound vectors, and the
+    // equilibration reads only the matrix -- so a search of 423 nodes was
+    // deriving the same factors 423 times, which measured as 86% of the
+    // solver's allocation and 4% to 25% of a node's solve. `Scaling.plan` is
+    // that derivation; applying it per node is one pass over `n + m` values.
+    //
+    // The nodes below build their sub-problems with `problem.constraintMatrix`
+    // itself, so the reference check inside `applyTo` holds by construction.
+    val plan = Some(Scaling.plan(problem, params.lp.scaling))
+
     // The LP parameters for one node, carrying what is left of the search's
     // wall clock.
     //
@@ -223,7 +235,7 @@ object BranchAndBound:
       // No integrality to enforce, so the relaxation *is* the answer. Worth
       // short-circuiting rather than running one node, so a caller can hand this
       // a pure LP without paying for the machinery.
-      val root = Pdhg.solveWith(problem, nodeLp, kernels)
+      val root = Pdhg.solveWith(problem, nodeLp, kernels, scaling = plan)
       val status = root.status match
         case SolveStatus.Optimal          => MilpStatus.Optimal
         case SolveStatus.PrimalInfeasible => MilpStatus.Infeasible
@@ -312,8 +324,9 @@ object BranchAndBound:
         )
 
         val relaxation =
-          if params.warmStart then Pdhg.solveWith(sub, nodeLp, kernels, warmStart = node.warm)
-          else Pdhg.solveWith(sub, nodeLp, kernels)
+          if params.warmStart then
+            Pdhg.solveWith(sub, nodeLp, kernels, warmStart = node.warm, scaling = plan)
+          else Pdhg.solveWith(sub, nodeLp, kernels, scaling = plan)
         nodes += 1
 
         relaxation.status match

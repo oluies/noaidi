@@ -103,6 +103,21 @@ jobs:
 
       - run: python3 .github/scripts/check_orphan_docs.py
 
+      # Every `run:` block, parsed by the shell that will run it. Valid YAML says
+      # nothing about the script inside it: a stray quote in one is a perfectly
+      # good YAML document, and the error arrives on a runner after checkout,
+      # `setup-java` and a cache restore as `unexpected EOF` and exit code 2.
+      #
+      # That is how `pages.yml` reached `main` broken. Every command in the block
+      # had been run by hand and worked, the YAML parsed, and the job still failed
+      # on its first execution with the step never starting. `bash -n` finds it in
+      # milliseconds, and this job already has the interpreter and PyYAML.
+      #
+      # Tests first, for the reason the two pairs above give.
+      - run: python3 .github/scripts/test_check_workflow_shell.py
+
+      - run: python3 .github/scripts/check_workflow_shell.py
+
       # The patterns the workflows use to read sbt's own output. A grep in YAML
       # has nothing behind it: a pattern that matches nothing looks exactly like
       # a log with nothing in it, so a guard built on one reports the absence of

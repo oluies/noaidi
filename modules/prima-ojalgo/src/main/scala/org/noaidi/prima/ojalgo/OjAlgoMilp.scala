@@ -39,7 +39,25 @@ object OjAlgoMilp:
     // well below the 1e-5 the comparison asserts. An oracle that is sometimes
     // right is worse than no oracle, because a disagreement stops meaning
     // anything.
-    model.options.time_abort = Long.MaxValue
+    // `time_suffice` stays out of reach, for the reason above. `time_abort` does
+    // not, and the two are not the same lever: suffice stops the search and
+    // reports its incumbent as OPTIMAL, which is what made the oracle lie.
+    // Abort stops it and reports a state that is not OPTIMAL, which `MilpReport`
+    // already fails on by name -- "the oracle did not solve it" -- so the worst
+    // an abort can do is turn a wrong answer into a named failure.
+    //
+    // Unbounded, this was the only solve in the report with no wall clock on it
+    // at all. Prima's side is bounded at 20s per instance over nine instances,
+    // so after that limit began reaching inside each relaxation the Prima half
+    // cannot spend more than about three minutes of the step's ten -- and the
+    // step has still timed out three times, with exit 124 and no row to say
+    // where. By elimination the unbounded half is where the time goes.
+    //
+    // 20s to match Prima's per-instance budget, which keeps both halves inside
+    // the step with room over, and is about 75x the slowest oracle solve this
+    // ladder has produced: 268ms on `fractional-pair`, with the other eight
+    // between 4 and 48ms. Nothing healthy comes near it.
+    model.options.time_abort = 20_000L
     model.options.time_suffice = Long.MaxValue
 
     // Single-threaded with a tight gap tolerance. Parallelism is the other half

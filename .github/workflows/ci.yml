@@ -65,7 +65,7 @@ jobs:
       # surprised by.
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.15"
 
       # Pinned exactly, both of them. A job whose whole subject is pinning
       # discipline should not install its own dependencies unpinned. Neither bot

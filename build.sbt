@@ -437,7 +437,7 @@ lazy val primaNetlib = project
 // registry (reference/goldens/schema.json), which is why upickle is here.
 val upickleVersion = "4.4.3"
 val duckdbVersion  = "1.3.2.1"
-val openlineageVersion = "1.54.0"
+val openlineageVersion = "1.55.0"
 val jhdfVersion    = "0.13.0"
 
 // Where the network modules find the goldens and the port's own sources.

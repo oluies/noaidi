@@ -18,8 +18,13 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   *
   * `NOTES.md` records `scigrid-de` at 60,552 variables: 14,848 iterations and 12.7 s at
   * 1e-4. `nordic-today` is almost exactly the same size -- 57,305 columns -- and this
-  * harness measures it at '''101,824 iterations and 37.7 s''' at the same tolerance, on
+  * harness measures it at '''101,824 iterations and 47.6 s''' at the same tolerance, on
   * macOS/aarch64. Seven times the iterations at the same column count.
+  *
+  * The iteration count is deterministic and the wall clock is not: the same solve has come
+  * out between 38.3 s and 47.6 s across runs on this host, a quarter either way. The figure
+  * above is the one NOTES tabulates, and every ratio quoted there is computed from it, so
+  * that a reader dividing two numbers gets the number printed beside them.
   *
   * So the iteration count is not a function of size, and an extrapolation anchored on the
   * one instance that happened to get published is an extrapolation from the wrong curve.
@@ -95,8 +100,12 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   * # 2. push it to a genuine two-hourly year, 4,380 snapshots
   * ... HorizonScaling --hours 4,2 --time-limit 7200 --out horizon-2h.txt
   *
-  * # 3. the horizon itself, at and around the target
-  * ... HorizonScaling --hours 2 --copies 2,3 --time-limit 21600 --out horizon-3y.txt
+  * # 3. the horizon itself, at and around the target. The heap guard asks for about
+  * #    11 GiB at 13,140 snapshots, so this one needs its own -Xmx rather than the 8g
+  * #    above -- which it was documented with, and would have been refused by.
+  * sbt --batch '; set networkLopf / Test / javaOptions += "-Xmx14g" ; \
+  *   networkLopf / Test / runMain org.noaidi.lopf.HorizonScaling \
+  *     --hours 2 --copies 2,3 --time-limit 21600 --out horizon-3y.txt'
   *
   * # 4. what capacity expansion does to the exponent -- the one structural gap
   * #    between this ladder and a NordPSA `expand` run
@@ -130,7 +139,7 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   * --capital   60000.0        invented capital cost per MW per year for those carriers
   * --expand-max 3.0           cap on the build, as a multiple of the existing fleet
   * --export    (none)         a directory to write each rung's network into, as PyPSA CSVs
-  * --target    13152          the horizon the closing prediction is made for
+  * --target    13140          the horizon the closing prediction is made for
   * --max-iter  2000000        iteration cap per solve
   * --time-limit 1800          wall-clock cap per solve, in seconds
   * --out       (none)         a file written and flushed per row
@@ -238,6 +247,32 @@ object HorizonScaling:
     )
     values.values.headOption.getOrElse(1.0)
 
+  /** How many snapshots one of the base's becomes at `hours`, and the refusal if it cannot.
+    *
+    * Split out of [[stretched]] so the ladder can be '''validated before it is solved'''.
+    * `stretched` is called just before each rung, so with the checks only in there
+    * `--hours 12,5` on a 24 h base solved the base anchor and both 12 h rungs -- minutes to
+    * hours of work -- and then threw on the 5 h rung, printing no replication check, no
+    * premium and no fit. `--hours 0` was worse: `24/0` rounds to a nonsense subdivision
+    * count, so the printed ladder and the heap guard were sized from it before anything
+    * refused. That is the wasted run the up-front heap check exists to prevent,
+    * reappearing one argument to its left.
+    */
+  def subdivisions(base: Network, hours: Double): Int =
+    require(hours > 0.0, s"hours must be positive, got $hours")
+    val from  = baseHours(base)
+    val count = math.round(from / hours).toInt
+    require(
+      count >= 1 && math.abs(count * hours - from) < 1e-9,
+      f"network '${base.name}%s' weighs a snapshot at $from%.4g h, which does not divide " +
+        f"into whole snapshots of $hours%.4g h: $from%.4g/$hours%.4g is ${from / hours}%.6f",
+    )
+    require(
+      math.abs(math.round(hours * 60.0) - hours * 60.0) < 1e-9,
+      s"$hours h is not a whole number of minutes, and the snapshot labels are timestamps",
+    )
+    count
+
   /** The same network over a longer horizon at a finer resolution.
     *
     * Two operations at once, because they are the same operation: snapshot `i` takes its
@@ -258,29 +293,18 @@ object HorizonScaling:
     */
   def stretched(base: Network, copies: Int, hours: Double): Network =
     require(copies >= 1, s"copies must be at least 1, got $copies")
-    require(hours > 0.0, s"hours must be positive, got $hours")
     require(
       !base.isMultiPeriod,
       s"network '${base.name}' has investment periods, and stretching it would have to " +
         "decide which period each new snapshot belongs to. That is a modelling choice, " +
         "not a tiling, so it is refused rather than guessed.",
     )
-    val from         = baseHours(base)
-    val subdivisions = math.round(from / hours).toInt
-    require(
-      subdivisions >= 1 && math.abs(subdivisions * hours - from) < 1e-9,
-      f"network '${base.name}%s' weighs a snapshot at $from%.4g h, which does not divide " +
-        f"into whole snapshots of $hours%.4g h: $from%.4g/$hours%.4g is ${from / hours}%.6f",
-    )
+    val subs    = subdivisions(base, hours)
     val minutes = math.round(hours * 60.0)
-    require(
-      math.abs(minutes - hours * 60.0) < 1e-9,
-      s"$hours h is not a whole number of minutes, and the snapshot labels are timestamps",
-    )
 
     val sources = base.snapshotCount
-    val total   = sources * subdivisions * copies
-    def sourceOf(i: Int): Int = (i / subdivisions) % sources
+    val total   = sources * subs * copies
+    def sourceOf(i: Int): Int = (i / subs) % sources
 
     val weightings = ListMap.from(base.snapshotWeightings.view.map { (kind, _) =>
       kind -> IArray.fill(total)(hours)
@@ -588,7 +612,11 @@ object HorizonScaling:
         capital = num("capital", 60000.0),
         expandMax = num("expand-max", 3.0),
         exportTo = options.get("export").filter(_.nonEmpty).map(Path.of(_)),
-        target = int("target", 13152),
+        // 365 x 12 x 3: the three-year two-hourly horizon this ladder can actually build,
+        // so the closing prediction is for a rung that can be run and checked against it.
+        // NordPSA's own three-year window is 13,152, twelve more, because 2024 has a leap
+        // day that a repeated 365-day profile does not.
+        target = int("target", 13140),
         maxIter = int("max-iter", 2_000_000),
         timeLimit = num("time-limit", 1800.0),
       )
@@ -634,9 +662,10 @@ object HorizonScaling:
     val rungs = (for
       h <- hours
       c <- copies
-      subdivisions = math.round(resolution / h).toInt
-      if !(c == 1 && subdivisions == 1)
-    yield Rung(c, h, base.snapshotCount * subdivisions * c)).sortBy(_.snapshots)
+      // Refuses here, before the anchor is solved, rather than when the rung comes up.
+      subs = subdivisions(base, h)
+      if !(c == 1 && subs == 1)
+    yield Rung(c, h, base.snapshotCount * subs * c)).sortBy(_.snapshots)
 
     // Before anything is read, let alone solved. The last rung is where the heap bites and
     // it is an hour in, which is the one place a check like this pays for itself. The

@@ -59,6 +59,7 @@ Run it on whatever `--export` wrote:
 """
 
 import argparse
+import math
 import platform
 import sys
 import time
@@ -236,7 +237,11 @@ def main() -> None:
             "solver verdict unless the vars and cons columns agree."
         )
         for r in rows:
-            if r["constant"]:
+            # `not math.isnan`, because a solve that did not reach `ok` sets every number
+            # to NaN -- and NaN is truthy, so this footer printed "system cost nan =
+            # objective nan + sunk capital nan" for exactly the rows that have no result to
+            # report. The footer is for rows carrying a real sunk-capital term.
+            if r["constant"] and not math.isnan(r["constant"]):
                 sink.line(
                     f"{r['horizon']}: system cost {r['total']:.2f} "
                     f"= objective {r['objective']:.2f} + sunk capital {r['constant']:.2f}"

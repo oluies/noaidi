@@ -185,7 +185,13 @@ jobs:
       - name: Fail if an answer moved
         if: always() && steps.drift.outputs.drifted == 'true'
         run: |
-          if [ "${{ steps.generate.outputs.status }}" != "0" ]; then
+          # Three failures, three messages. The install is checked first because when it
+          # fails the generator never runs, its `status` output is empty, and `"" != "0"`
+          # then reported "the generator did not finish (exit )" about a generator that
+          # never started -- while the version table showed every row as "not installed".
+          if [ "${{ steps.install.outcome }}" != "success" ]; then
+            echo "::error::the newest PyPSA could not be installed -- the generator never ran, and the job summary's version table is empty for the same reason"
+          elif [ "${{ steps.generate.outputs.status }}" != "0" ]; then
             echo "::error::the golden generator did not finish (exit ${{ steps.generate.outputs.status }}) -- no answer to compare; the job summary names the version that moved"
           else
             echo "::error::an upstream result moved -- see the job summary"

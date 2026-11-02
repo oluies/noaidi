@@ -3225,7 +3225,9 @@ point before it is a trend.
 
 What they cost in the model does not drift at all: **+3.8% on the objective**,
 stable to two figures on every rung measured, from 365 snapshots to 13,140
-(3.85%, 3.78%, 3.85%, 3.84%). In size they are 6% more columns and 79% more rows.
+(3.85%, 3.78%, 3.85%, 3.84%). In size they are about **3%** more columns and 79%
+more rows — 3.19% on every rung from 365 snapshots to 13,140, since the online
+columns are five per snapshot against 157.
 The columns are few because `nordic-today` carries `p_min_pu == p_max_pu` on
 every thermal, run-of-river and nuclear unit, so `Stability` reads them as fixed
 and they enter the requirement rows as constants; the only online columns are its
@@ -3299,8 +3301,8 @@ the harder problem:
 | grid strength | DK's own SCR, 12 GVA external | `scrMin 0`, off |
 | threads | 16 | 1 |
 
-So 17.2 h against 3.2 h is not a solver comparison, and nobody should read it as
-one: the Prima figure is a looser answer to an easier question on one core. What
+So 17.2 h against the measured 1 h 30 min is not a solver comparison, and nobody
+should read it as one: the Prima figure is a looser answer to an easier question on one core. What
 the pair does bracket is the cost of the two things the ladder leaves out, and
 the configuration says which of them to suspect first. `zones.yaml` carries
 `ipm_optimality_tolerance` back at 1e-6 with a comment that 1e-4 gave crossover a
@@ -3336,11 +3338,19 @@ snapshots, HiGHS 1.15.1 `ipm` with crossover on, `ipm_optimality_tolerance`
 
 | | Prima, 1e-4 | HiGHS, 1e-6 and a vertex |
 | --- | --: | --: |
-| wall clock | 38 s | **0.93 s** |
+| wall clock | 47.6 s | **1.9 s** |
 | iterations | 101,824 PDHG | 34 IPM, 916 crossover |
 | objective | −2,460,298,964.99 | −2,460,299,248.77 |
 
-HiGHS is about **twenty times faster** on that network, at a tighter tolerance,
+Both columns are wall clock around the solve call, which is the only pair that
+compares: HiGHS also reports 0.93 s of its own internal runtime, which excludes
+the handoff through linopy that Prima has no equivalent of. And the base solve's
+wall clock moves between runs on this host — 38.3 s and 47.6 s have both been
+measured, at an iteration count that is identical to the digit — so the figure
+tabulated in the ladder above is the one used here and in every ratio below. A
+ratio is a factor here, not a decimal.
+
+HiGHS is about **twenty-five times faster** on that network, at a tighter tolerance,
 and it finishes at a vertex rather than in the interior of the optimal face. Its
 objective is the figure `nordic.json` records and `BidLadderSuite` asserts this
 port reaches, so the chain from export to Python and back is sound; Prima's
@@ -3354,17 +3364,19 @@ comparison at one and at three years of two-hourly snapshots:
 
 | snapshots | Prima, 1e-4 | HiGHS, 1e-6 + vertex | ratio |
 | --: | --: | --: | --: |
-| 365 | 38.3 s | 1.9 s | 20.2x |
+| 365 | 47.6 s | 1.9 s | 25.1x |
 | 4,380 | — | 82.7 s | — |
 | 13,140 | 5,373 s | **597.6 s** | **9.0x** |
 
 Because the two scale differently: Prima's total work goes as `columns^1.36` —
 iterations `^0.36` against a linear per-iteration cost — and HiGHS's as
 `columns^1.5` from 365 to 4,380 and `^1.80` from 4,380 to 13,140, the crossover
-growing faster than the interior-point solve it finishes. Extrapolating that pair
-has the ratio falling by about 1.6 per tripling of the horizon, which closes it
-somewhere past a million snapshots: narrowing, and not at any horizon anyone
-would run. The full-horizon HiGHS solve builds 2,010,816 variables and 4,099,680
+growing faster than the interior-point solve it finishes. Measured end to end the
+ratio falls by 2.8 across a 36-fold horizon, which is slower than those exponents
+imply on their own — they are not constants, and HiGHS's rises — so the crossing
+point is not worth computing from them. What the two measured ends support is
+narrower and enough: the gap closes with the horizon and is still ninefold at the
+longest one anybody here has run. The full-horizon HiGHS solve builds 2,010,816 variables and 4,099,680
 constraints and peaks at 9.2 GiB resident, against the 3.3 GiB the one-year rung
 needed — close to linear, and well inside a laptop.
 

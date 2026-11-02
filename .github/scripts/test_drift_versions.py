@@ -37,8 +37,17 @@ check("the moved dependency is marked",
       "| pandas | `3.0.6` | `3.1.0` | **moved** |" in rendered, rendered)
 check("an equal dependency is not marked",
       "| numpy | `2.5.4` | `2.5.4` |  |" in rendered, rendered)
-check("a moved interpreter is marked too",
-      "| python | `3.14.8` | `3.13.17` | **moved** |" in rendered, rendered)
+# The interpreter is the workflow's own choice and not a pip resolution, so it is shown
+# without being counted as drift -- it differs on every scheduled run against locally
+# generated goldens, and marking it `**moved**` made the table's one useful column lie.
+check("a differing interpreter is shown without claiming drift",
+      "| python | `3.14.8` | `3.13.17` | runner differs |" in rendered, rendered)
+python_row = next(r for r in rendered.splitlines() if r.startswith("| python "))
+check("the interpreter row never claims drift", "**moved**" not in python_row, python_row)
+
+# And an interpreter that did not move is blank, like any other unchanged row.
+same = table({"python": "3.14.8"}, {"python": "3.14.8"})
+check("an equal interpreter is unmarked", "| python | `3.14.8` | `3.14.8` |  |" in same, same)
 
 # A package the manifest does not pin, and one the venv does not have.
 rendered = table({"pypsa": "1.4.0"}, {"pypsa": "1.4.0", "linopy": "0.5.6"})
@@ -92,4 +101,4 @@ if failures:
     for failure in failures:
         print(f"  - {failure}")
     raise SystemExit(1)
-print("drift_versions: 13 checks pass")
+print("drift_versions: 15 checks pass")

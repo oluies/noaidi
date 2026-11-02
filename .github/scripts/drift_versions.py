@@ -66,6 +66,12 @@ def table(pinned: dict[str, str], latest: dict[str, str]) -> str:
     A package the goldens do not pin is marked as such rather than left blank, because the
     two cases call for different actions: a pinned package that moved is a drift question,
     and an unpinned one that moved is a gap in the manifest.
+
+    `python` is marked `runner differs` rather than `**moved**` for the same reason read the
+    other way: the interpreter is the workflow's own choice through `setup-python` and is
+    not resolved by pip, so it differs on every scheduled run against locally generated
+    goldens. It stays visible -- a Python change can move an answer -- without being
+    counted as the thing that did.
     """
     rows = [
         "| | pinned | latest | |",
@@ -81,6 +87,13 @@ def table(pinned: dict[str, str], latest: dict[str, str]) -> str:
             mark = "not installed"
         elif here == there:
             mark = ""
+        elif package == "python":
+            # Not `**moved**`. The interpreter is chosen by the workflow's `setup-python`,
+            # not resolved by pip, and the goldens are generated locally -- so this row
+            # differs on every scheduled run whether or not anything changed. Marked as
+            # `**moved**` it was a guaranteed false lead in the one column this file exists
+            # to provide, and the failure annotation sends the reader straight here.
+            mark = "runner differs"
         else:
             mark = "**moved**"
         rows.append(f"| {package} | `{here or '—'}` | `{there or '—'}` | {mark} |")

@@ -436,7 +436,7 @@ lazy val primaNetlib = project
 // set of case classes. The schema is read from the pinned PyPSA install's own
 // registry (reference/goldens/schema.json), which is why upickle is here.
 val upickleVersion = "4.4.3"
-val duckdbVersion  = "1.3.2.1"
+val duckdbVersion  = "1.5.6.0"
 val openlineageVersion = "1.54.0"
 val jhdfVersion    = "0.13.0"
 

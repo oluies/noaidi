@@ -3429,10 +3429,51 @@ of the horizon.
 What is left to account for them is everything the ladder leaves out: capacity as
 a decision, the nuclear candidates in every zone, `stab_batt12`, DK's own SCR,
 and the heat, EV and hydrogen sectors that `nordic-today` has none of, so that
-`run630`'s snapshot is a bigger snapshot than this one. Which of those dominates
-is not answered here, and `HorizonScaling --expand` exists to take the first of
-them apart — but the horizon can be struck off the list, which is where this
-started.
+`run630`'s snapshot is a bigger snapshot than this one. The horizon can be struck
+off the list, which is where this started.
+
+**And the first of those is measured now, which changes the shape of the
+answer.** The same three rungs with `wind_onshore`, `wind_offshore`, `solar` and
+`battery` extendable at an invented 60,000 per MW per year, capped at three times
+the existing fleet:
+
+| snapshots | dispatch | expanding | |
+| --: | --: | --: | --- |
+| 365 | 101,824 | 710,528 | 7.0x |
+| 730 | 180,224 | 1,768,832 | 9.8x |
+| 1,460 | 224,000 | hit the 2,000,000 cap | >8.9x |
+
+Seven to ten times the iterations at the same horizon — and, which matters more,
+**the exponent changes sign of curvature**. Dispatch is `iterations ~
+columns^0.57` over these three rungs and `^0.36` over the full 36-fold span.
+Expanding is `^1.32`. Sublinear becomes superlinear, which is exactly what the
+structure predicts: a capacity column appears in a row at *every* snapshot, so it
+carries 13,140 nonzeros at the target horizon and ties the whole thing together,
+and the sublinear exponent rested on the horizon being the same sparse block
+repeated.
+
+Read with the care it deserves, that fit is two Optimal rungs extrapolated
+eighteen-fold, and it says **days rather than hours** for three years at
+two-hourly resolution with capacity a decision. The printed 20 days is a
+two-parameter fit through two points and should be read as the order, not the
+number. Four of the six rungs stopped at the iteration cap rather than at 1e-4,
+at relative gaps of 1e-3 to 8e-3, so their iteration counts are censored from
+below and the thin Optimal set is the honest limit here.
+
+Two things that cap also costs. The stability premium cannot be read at all on
+this ladder: it comes out near 0.5% against the 3.8% the dispatch rungs give, and
+0.5% is the same order as the 5e-3 gap the stability rungs stopped at, so the
+figure is not resolved rather than reduced. And the replication check is skipped
+by design, because capital is charged per horizon rather than per snapshot — the
+objective nevertheless comes out within 2e-8 across all three expanding rungs
+(−4,456,056,027, −4,456,056,009, −4,456,056,025), which is the capacity decision
+being horizon-invariant on a repeated year, as it should be.
+
+So the account of `run630`'s seventeen hours now has a named first term. Not the
+horizon — ten minutes of HiGHS, ninety of Prima. Expansion, which moves Prima's
+growth from `columns^1.36` to something near `columns^2.4` all told, and which
+`run630` carries along with a candidate set, a grid-strength row and three
+sectors this network has none of.
 
 ### Where the time actually goes: 55% sparse, 45% dense
 

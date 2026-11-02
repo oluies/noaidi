@@ -59,7 +59,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.15"
 
       # The comparator before the comparison, for the reason the sibling job
       # gives: a green run here is read as "upstream did not change an answer",
@@ -176,7 +176,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.15"
 
       - uses: actions/setup-java@v6
         with:

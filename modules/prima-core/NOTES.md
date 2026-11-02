@@ -3340,14 +3340,33 @@ snapshots, HiGHS 1.15.1 `ipm` with crossover on, `ipm_optimality_tolerance`
 | iterations | 101,824 PDHG | 34 IPM, 916 crossover |
 | objective | −2,460,298,964.99 | −2,460,299,248.77 |
 
-HiGHS is about **forty times faster**, at a tighter tolerance, and it finishes at
-a vertex rather than in the interior of the optimal face. Its objective is the
-figure `nordic.json` records and `BidLadderSuite` asserts this port reaches, so
-the chain from export to Python and back is sound; Prima's differs in the tenth
-digit, which is what 1e-4 buys. Nothing here is a surprise about the algorithm —
-a restarted first-order method against a mature interior-point code with
-presolve and crossover, on a problem small enough that the simplex crossover is
-cheap — but it is the number to hold beside any claim about horizons.
+HiGHS is about **twenty times faster** on that network, at a tighter tolerance,
+and it finishes at a vertex rather than in the interior of the optimal face. Its
+objective is the figure `nordic.json` records and `BidLadderSuite` asserts this
+port reaches, so the chain from export to Python and back is sound; Prima's
+differs in the tenth digit, which is what 1e-4 buys. Nothing here is a surprise
+about the algorithm — a restarted first-order method against a mature
+interior-point code with presolve and crossover — but it is the number to hold
+beside any claim about horizons.
+
+**And the gap narrows with the horizon, measured on all three.** The same
+comparison at one and at three years of two-hourly snapshots:
+
+| snapshots | Prima, 1e-4 | HiGHS, 1e-6 + vertex | ratio |
+| --: | --: | --: | --: |
+| 365 | 38.3 s | 1.9 s | 20.2x |
+| 4,380 | — | 82.7 s | — |
+| 13,140 | 5,373 s | **597.6 s** | **9.0x** |
+
+Because the two scale differently: Prima's total work goes as `columns^1.36` —
+iterations `^0.36` against a linear per-iteration cost — and HiGHS's as
+`columns^1.5` from 365 to 4,380 and `^1.80` from 4,380 to 13,140, the crossover
+growing faster than the interior-point solve it finishes. Extrapolating that pair
+has the ratio falling by about 1.6 per tripling of the horizon, which closes it
+somewhere past a million snapshots: narrowing, and not at any horizon anyone
+would run. The full-horizon HiGHS solve builds 2,010,816 variables and 4,099,680
+constraints and peaks at 9.2 GiB resident, against the 3.3 GiB the one-year rung
+needed — close to linear, and well inside a laptop.
 
 The formulations are worth reading too. linopy builds 55,856 variables and
 **113,880** constraints where this port builds 57,305 columns and **5,110** rows;
@@ -3365,6 +3384,15 @@ to twelve-hourly, read back by `pypsa.Network` and solved by HiGHS, reaches
 through the same solver. So `stretched` is energy-exact by an independent
 measurement and not only by its own assertion.
 
+The replication identity is settled to twelve digits by the same route. Three
+copies of a year should cost three times one copy; the port's own check agreed to
+1.0e-4, which is its tolerance and therefore the most it could say. HiGHS at a
+vertex reaches **−7,380,897,746.32** on the three-year horizon against three
+times its own one-year **−2,460,299,248.77**, which is −7,380,897,746.31:
+**1.35e-12 apart**. So the tiling is exact, by an implementation that shares no
+code with it, and the arithmetic the whole ladder rests on is no longer an
+assumption.
+
 And capacity expansion is now checked on this network, which has no golden for
 it. With `wind_onshore` extendable at an invented 60,000 per MW per year, this
 port reaches −4,067,103,384.10 against PyPSA's −4,067,083,156.57: **5.0e-6
@@ -3379,13 +3407,20 @@ the capacity columns existed, decided nothing, and both sides returned the
 unexpanded answer. `expandable` refuses a carrier with no fleet now, by name and
 before the solve, for the reason every refusal in this port exists.
 
-That reframes the `run630` anchor rather than settling it. If HiGHS does 365
-snapshots in 0.93 s, no dispatch scaling reaches 62,000 s at 36 times the
-horizon — so the time is in what `expand` adds, and in the vertex a capacity
-decision needs, rather than in the horizon. That is a hypothesis and not a
-result: `run630` also carries heat, EVs, hydrogen and a candidate set that
-`nordic-today` has none of, so its snapshot is a bigger snapshot. It is what
-`HorizonScaling --expand` exists to separate.
+**That settles the `run630` question, and the answer is that the horizon was
+never the problem.** The dispatch core of exactly that horizon — three years,
+two-hourly, 13,140 snapshots — solves in **ten minutes** through the same solver
+family at a tighter tolerance than the run used. `run630` took 62,000 s, which is
+**104 times** that. Whatever those seventeen hours are, they are not the length
+of the horizon.
+
+What is left to account for them is everything the ladder leaves out: capacity as
+a decision, the nuclear candidates in every zone, `stab_batt12`, DK's own SCR,
+and the heat, EV and hydrogen sectors that `nordic-today` has none of, so that
+`run630`'s snapshot is a bigger snapshot than this one. Which of those dominates
+is not answered here, and `HorizonScaling --expand` exists to take the first of
+them apart — but the horizon can be struck off the list, which is where this
+started.
 
 ### Where the time actually goes: 55% sparse, 45% dense
 

@@ -2008,7 +2008,24 @@ def link_delay_wrap():
     n = pypsa.Network()
     n.set_snapshots(range(4))
     n.snapshot_weightings.loc[:, "generators"] = 2.0
-    n.snapshot_weightings.loc[:, "objective"] = [1.0, 1.0, 3.0, 1.0]
+    # `[...]` rather than `.loc[:, ...]`, which is not a style choice. `.loc` assigns
+    # *into* the existing column and so depends on the dtype PyPSA built it with -- and
+    # that dtype is not fixed by PyPSA -- it is fixed by pandas, and pandas moved. Holding
+    # PyPSA at 1.4.0 and changing nothing else, `snapshot_weightings` arrives as `float64`
+    # under the pinned pandas 3.0.6 and as `int64` under 3.1.0, where this line raised
+    # `pandas.errors.LossySetitemError` -> `TypeError: Invalid value '[1.0, 1.0, 3.0, 1.0]'
+    # for dtype 'int64'`. Measured both ways round, under two interpreters, so the
+    # interpreter is not the variable; numpy did not move either. The weekly drift job of
+    # 2026-11-02 died here after writing every network before it, which left no manifest
+    # and therefore nothing to compare at all.
+    #
+    # Plain `__setitem__` replaces the column and takes its dtype from the data, so it
+    # cannot reach that path on any dtype. It is also the idiom
+    # `investment_period_weightings` already uses throughout this file, which is why none
+    # of those lines failed. The scalar `.loc` assignments around this one survive because
+    # a whole float casts to an integer losslessly, which leaves them correct by luck and
+    # a fractional weighting away from the same crash.
+    n.snapshot_weightings["objective"] = [1.0, 1.0, 3.0, 1.0]
     n.snapshot_weightings.loc[:, "stores"] = 1.0
 
     # Cyclic: the load at the first snapshot is served from the last one.

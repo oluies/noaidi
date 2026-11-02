@@ -3172,11 +3172,83 @@ sparse matrix-vector products each is precisely the workload `Kernels` exists to
 move, and it is the first instance in this repository large enough for the
 question to matter.
 
+### A long horizon: iterations grow as the square root of it
+
+The section above was this file's only whole-solve performance figure, and it is
+a figure about **one network** rather than about one size. The ladder below is
+the first measurement that can tell the difference, and the first thing it says
+is that the distinction matters: `nordic-today` has 57,305 columns
+against `scigrid-de`'s 60,552 — the same instance size by any reading — and at
+the same 1e-4 it takes **101,824 iterations where `scigrid-de` takes 14,848**.
+Seven times, at the same column count. Nothing extrapolated from the table above
+transfers to another network.
+
+`HorizonScaling`, in `network-lopf`'s test sources, solves a ladder of horizons
+on one network by subdividing its snapshots and repeating its year. The
+subdivision is energy-exact — every weighting column becomes the new resolution
+and PyPSA multiplies by `eh` wherever energy is meant — so the objective is
+comparable across the ladder, which is what makes an iteration count comparable
+too. Measured on macOS/aarch64, one thread, tolerance 1e-4, `nordic-today` with
+NordPSA's stability requirements off and on:
+
+| horizon | stab | snapshots | columns | rows | iterations | wall clock | ms/iter |
+| --- | --- | --: | --: | --: | --: | --: | --: |
+| base | off | 365 | 57,305 | 5,110 | 101,824 | 47.6 s | 0.47 |
+| base | on | 365 | 59,130 | 9,125 | 114,560 | 47.4 s | 0.41 |
+| 12 h | off | 730 | 114,610 | 10,220 | 180,224 | 153.1 s | 0.85 |
+| 12 h | on | 730 | 118,260 | 18,250 | 143,360 | 158.8 s | 1.11 |
+| 6 h | off | 1,460 | 229,220 | 20,440 | 224,000 | 390.2 s | 1.74 |
+| 6 h | on | 1,460 | 236,520 | 36,500 | 211,520 | 371.5 s | 1.76 |
+
+**The iteration count grows sublinearly in the horizon.** `iterations ~
+columns^0.57` with the requirements off and `^0.44` with them on, while the cost
+of an iteration grows as `columns^0.95` and `^1.04` — linear, as a sparse method
+should. Total work therefore goes as roughly `columns^1.5`, which is the headline:
+a horizon ten times longer costs about thirty times as much, not a hundred.
+
+That is the opposite of what "iteration count grows steeply with size" above
+predicts, and the two are both right. Dense random LPs are close to the worst
+case for a first-order method; a dispatch model over a longer horizon is the same
+sparse block repeated, coupled only through storage, and a method whose per
+iteration cost is a sparse product takes that in its stride.
+
+**The stability requirements cost no iterations.** The one-sided guess — that
+rotational-energy and grid-strength rows mix MW, MWs and MVA and so must wreck
+the conditioning — does not survive measurement. The iteration delta across the
+three rungs is +12.5%, −20.5% and −5.6%: noise about zero, no trend. What they do
+cost is +3.8% on the objective, stable to two figures across every rung (3.85%,
+3.78%, 3.85%), 6% more columns and 79% more rows. The columns are few because
+`nordic-today` carries `p_min_pu == p_max_pu` on every thermal, run-of-river and
+nuclear unit, so `Stability` reads them as fixed and they enter as constants; the
+only online columns are its five hydro reservoirs.
+
+The requirement is 150 GWs of system inertia, which is read off the fleet rather
+than chosen: the fixed units carry 67.1 to 110.9 GWs across the year and the five
+reservoirs can add 146.7 GWs more, so 150 binds at every snapshot and is feasible
+at every snapshot. The premium is the measurement that it binds.
+
+**What the ladder does not say.** It is one network, one host and one thread. The
+rungs repeat one year of data, so a multi-copy horizon has interchangeable years
+and an optimal face rather than a point, which can cost a first-order method
+iterations a real profile would not — `--jitter` exists to bracket that effect
+and the figures above do not use it. The fit spans a factor of four in columns,
+and the horizon the question is about is nine times past the last rung. And it is
+all at 1e-4: on `scigrid-de` the step from 1e-4 to 1e-6 cost a factor of 19 in
+iterations, and a study that reads the shadow price of an inertia row needs the
+tighter end rather than this one.
+
+With those caveats stated, what the fit predicts for three years at two-hourly
+resolution — 13,140 snapshots, about 2.06 M columns — is 8.3e5 iterations at
+13.7 ms each with the requirements off, and 5.4e5 at 19.0 ms with them on: **3.2
+and 2.9 hours**. Hours rather than days, and the reason is the exponent rather
+than the hardware.
+
 ### Where the time actually goes: 55% sparse, 45% dense
 
-The paragraph above reasons from a whole-solve number that SpMV "is precisely the
-workload `Kernels` exists to move". That is the standard expectation for a
-first-order method, and it is half right in a way that changes what to do first.
+The 60,000-variable section above reasons from a whole-solve number that SpMV
+"is precisely the workload `Kernels` exists to move". That is the standard
+expectation for a first-order method, and it is half right in a way that changes
+what to do first.
 
 `KernelSplit` runs the real solve with a `Kernels` decorator that attributes wall
 clock to each of the eight operations. On `scigrid-de` at 1e-4 — 60,552 variables,

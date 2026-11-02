@@ -58,7 +58,7 @@ ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature")
 
 val munitVersion  = "1.3.6"
 val zioVersion    = "2.1.27"
-val ojalgoVersion = "57.5.0"
+val ojalgoVersion = "57.6.2"
 val scalajsDomVersion = "2.8.1"
 val scalaJavaTimeVersion = "2.6.0"
 

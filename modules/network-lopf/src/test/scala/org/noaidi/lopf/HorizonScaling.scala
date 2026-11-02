@@ -4,7 +4,7 @@ import java.nio.file.{Files, Path, Paths}
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import scala.collection.immutable.ListMap
-import org.noaidi.network.{CsvReader, Network, Schema, TimeSeries}
+import org.noaidi.network.{Column, CsvReader, CsvWriter, Network, Schema, TimeSeries}
 import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
 
 /** What a long horizon costs this solver, measured rather than extrapolated.
@@ -58,10 +58,10 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   *   - '''Not a comparison.''' One solver, one host, one thread. `ScalaKernels` is scalar
   *     `while` loops by design and the solve runs on one of them.
   *
-  * The subdivision being energy-exact is also the self-check: with `--jitter 0` every
-  * one-copy rung has to reach the same objective as the untouched network, and the report
-  * says so by name. If that line fails, every row below it is measuring a different
-  * network and the exponent means nothing.
+  * The subdivision being energy-exact is also the self-check: with `--jitter 0` every rung
+  * has to reach `copies` times the untouched network's objective, and the report says so by
+  * name. If that line fails, every row below it is measuring a different network and the
+  * exponent means nothing.
   *
   * ==The inertia level, and why 150 GWs==
   *
@@ -97,6 +97,10 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   *
   * # 3. the horizon itself, at and around the target
   * ... HorizonScaling --hours 2 --copies 2,3 --time-limit 21600 --out horizon-3y.txt
+  *
+  * # 4. what capacity expansion does to the exponent -- the one structural gap
+  * #    between this ladder and a NordPSA `expand` run
+  * ... HorizonScaling --expand wind_onshore,wind_offshore,solar --out horizon-exp.txt
   * }}}
   *
   * The `;` prefix is not decoration: without it sbt 2 reads the `set` and the `runMain` as
@@ -122,6 +126,10 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   * --scr-min   0.0            scrMin; off by default, see below
   * --penalty   0.0            slack price on every requirement row; see above
   * --jitter    0.0            intra-day and horizon-long price shape, see below
+  * --expand    (none)         carriers to make extendable; off means dispatch only
+  * --capital   60000.0        invented capital cost per MW per year for those carriers
+  * --expand-max 3.0           cap on the build, as a multiple of the existing fleet
+  * --export    (none)         a directory to write each rung's network into, as PyPSA CSVs
   * --target    13152          the horizon the closing prediction is made for
   * --max-iter  2000000        iteration cap per solve
   * --time-limit 1800          wall-clock cap per solve, in seconds
@@ -137,6 +145,11 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   * zone and its feasibility depends on where the converters are, which no arithmetic off
   * the committed files settles. Switch it on deliberately and read the status column.
   *
+  * `--expand` is off for a sharper reason: with it on the ladder measures a different
+  * '''kind''' of problem rather than a harder one, and the two must not be averaged into
+  * one exponent. See [[expandable]] for what the three numbers behind it are, and for why
+  * the objective of an expanding rung may not be compared with a dispatching one.
+  *
   * `--jitter a` multiplies every `marginal_cost` '''series''' by
   * `1 + a*(sin(2*pi*i/subdivisions) + 0.5*sin(2*pi*i/total))`: an intra-day shape, which a
   * subdivided daily profile has none of, and a horizon-long one, which is what makes
@@ -144,6 +157,23 @@ import org.noaidi.prima.{Pdhg, PdhgParams, SolveStatus}
   * ladder at `0` and at `0.1` and the pair brackets how much of the iteration count is
   * degeneracy rather than size. At the base resolution the intra-day term is identically
   * zero, as it should be: a daily model has no within-day structure to shape.
+  *
+  * ==Handing a rung to PyPSA==
+  *
+  * `--export <dir>` writes every rung as a PyPSA CSV directory, one subdirectory per rung,
+  * through the same `CsvWriter` whose round-trip is asserted byte-for-byte against pandas.
+  * That makes a genuine head-to-head possible, which none of the numbers above is: the
+  * same LP, read by `pypsa.Network`, solved by HiGHS at a stated tolerance and thread
+  * count. It is the only way to tell a solver difference from a problem difference, and
+  * the external anchor in NOTES exists because that distinction was about to be guessed.
+  *
+  * What an export '''cannot''' carry is the stability requirements. They live in an
+  * `extra_functionality` callback, PyPSA stores none of it on the network, and a reader
+  * gets a strictly easier problem -- which is the whole argument of
+  * `docs/pypsa-and-noaidi.md` and the reason `reference/nordpsa` keeps networks and
+  * answers in separate files. So an exported rung compares the '''dispatch''' halves of
+  * the two implementations honestly, and says nothing about the requirement rows unless
+  * the Python side is handed NordPSA's own callback as well.
   *
   * Every row is printed as its rung finishes and flushed to `--out` if given, for the
   * reason `MilpReport.Sink` gives at length: this ladder runs for hours, a pipe between two
@@ -218,7 +248,7 @@ object HorizonScaling:
     * PyPSA's formulation multiplies by `eh` wherever energy is meant -- the storage
     * balance, the inflow, the objective -- so twelve two-hour snapshots carrying one day's
     * MW values are worth exactly what that day's single 24-hour snapshot was. That is what
-    * makes the objective comparable across the ladder, and the report's subdivision check
+    * makes the objective comparable across the ladder, and the report's replication check
     * is the measurement of it rather than the claim.
     *
     * The copies '''share''' their rows: `values(i)` is a reference to the source row, not a
@@ -303,6 +333,116 @@ object HorizonScaling:
         }))
       })
       network.copy(tables = tables)
+
+  /** The same network with a candidate set made extendable.
+    *
+    * This is the one structural difference between what the ladder measures and what a
+    * NordPSA `expand` run solves, and it is the difference that matters most: a dispatch
+    * horizon is the same sparse block repeated, coupled only through storage, which is
+    * exactly the structure the sublinear iteration exponent rests on. A capacity column is
+    * not that. It appears in a row at '''every''' snapshot, so at 13,152 snapshots one such
+    * column has 13,152 nonzeros, and it ties the whole horizon together in a way no
+    * dispatch variable does. Whether the exponent survives that is not a question the
+    * dispatch ladder can answer, and it is the question that decides whether a 17-hour
+    * `expand` run is the horizon's fault or the expansion's.
+    *
+    * '''The three numbers here are invented''' and named as such, like `--jitter`'s. The
+    * point is the column structure, not a cost-optimal build:
+    *
+    *   - `p_nom_min = p_nom`, so the existing fleet stays and the LP decides '''additions'''.
+    *     A floor of zero would let it retire the fleet instead, which is a different study.
+    *   - `p_nom_max = maxFactor * p_nom`, so the build cannot wander off to a number no
+    *     Nordic plan would contain. With `p_nom_max` left at the file's `inf` the LP is
+    *     still bounded -- capital is positive -- but the capacity it reaches is then set by
+    *     an invented capital cost alone, which is a worse-founded number than a cap is.
+    *   - one `capital_cost` for every carrier named, because a cost per carrier is three
+    *     more invented numbers with no better claim behind any of them.
+    *
+    * A multiplicative cap cannot express a '''greenfield''' candidate -- a unit with no
+    * fleet, which is what `nuclear_nordic` adds on the NordPSA side -- and a carrier whose
+    * fleet is 0 MW is refused rather than given a capacity column pinned at zero. So this
+    * reproduces the shape of an expansion over an existing fleet and not the shape of a
+    * new-build study, and the refusal says which.
+    *
+    * Capital is charged on the whole capacity, existing fleet included, which is what PyPSA
+    * does. So the objective of an expanding rung is '''not''' comparable to a dispatching
+    * one: it carries the fleet's capital as a constant the other does not. Compare
+    * iterations and wall clock across the two, never the objective.
+    *
+    * Generic over the tables that can carry an extendable capacity -- `Generator`,
+    * `StorageUnit` and `Link` all do -- rather than special-casing generators, because the
+    * code is one loop either way and `stab_batt12` is a battery candidate.
+    *
+    * A carrier naming nothing is refused. A flag that silently matches no component is the
+    * failure this whole file is written against: the run finishes, reports a number, and
+    * the number answers a question nobody asked.
+    */
+  def expandable(
+      network: Network,
+      carriers: Set[String],
+      capital: Double,
+      maxFactor: Double,
+  ): Network =
+    if carriers.isEmpty then network
+    else
+      require(capital > 0.0, s"--capital must be positive, got $capital")
+      require(maxFactor >= 1.0, s"--expand-max must be at least 1, got $maxFactor")
+      val needed =
+        Seq("carrier", "p_nom", "p_nom_extendable", "p_nom_min", "p_nom_max", "capital_cost")
+
+      val eligible = network.tables.values
+        .filter(table => needed.forall(a => table.spec.attributes.exists(_.name == a)))
+      val fleet = eligible
+        .flatMap(table => table.ids.map(id => table.string("carrier", id) -> table.float("p_nom", id)))
+        .groupMapReduce((carrier, _) => carrier)((_, capacity) => capacity)(_ + _)
+
+      // Two refusals rather than one, because they are two different mistakes and a reader
+      // needs to know which. Both were found the hard way: `--expand gas` on this network
+      // ran clean, reported a number and expanded nothing, because every gas unit in it
+      // has `p_nom = 0` and a multiple of zero is zero. That is the inert setting the rest
+      // of this port refuses by name, reappearing in the tool written to measure it.
+      val missing = carriers.filterNot(fleet.contains)
+      require(
+        missing.isEmpty,
+        s"--expand named ${missing.toSeq.sorted.mkString(", ")}, which network " +
+          s"'${network.name}' has no extendable-capable component for. Its carriers are " +
+          fleet.keys.toSeq.sorted.mkString(", ") + ".",
+      )
+      val barren = carriers.filter(c => fleet(c) <= 0.0)
+      require(
+        barren.isEmpty,
+        s"--expand named ${barren.toSeq.sorted.mkString(", ")}, whose fleet in network " +
+          s"'${network.name}' is 0 MW. The cap here is a multiple of the existing " +
+          f"capacity, and $maxFactor%.1f x 0 is 0, so those units would carry a capacity " +
+          "column pinned at zero: more rows, no decision, and an objective that looks " +
+          "like an answer. Name a carrier that has a fleet to extend -- this flag " +
+          "expands one, and a greenfield candidate needs an absolute cap that this " +
+          "harness does not offer.",
+      )
+
+      val rewritten = network.tables.toSeq.map { (name, table) =>
+        val canExtend = needed.forall(a => table.spec.attributes.exists(_.name == a))
+        val chosen =
+          if canExtend then table.ids.map(id => carriers.contains(table.string("carrier", id)))
+          else table.ids.map(_ => false)
+        if !chosen.contains(true) then (name, table)
+        else
+          def floats(attribute: String, value: String => Double): Column =
+            Column.Floats(IArray.from(table.ids.indices.map { i =>
+              val id = table.ids(i)
+              if chosen(i) then value(id) else table.float(attribute, id)
+            }))
+          val static = table.static
+            .updated("p_nom_extendable", Column.Bools(IArray.from(table.ids.indices.map { i =>
+              chosen(i) || table.bool("p_nom_extendable", table.ids(i))
+            })))
+            .updated("p_nom_min", floats("p_nom_min", id => table.float("p_nom", id)))
+            .updated("p_nom_max", floats("p_nom_max", id => maxFactor * table.float("p_nom", id)))
+            .updated("capital_cost", floats("capital_cost", _ => capital))
+          (name, table.copy(static = static))
+      }
+
+      network.copy(tables = ListMap.from(rewritten.map((name, table) => name -> table)))
 
   // ----------------------------------------------------------------------------- the report
 
@@ -402,7 +542,8 @@ object HorizonScaling:
   // ------------------------------------------------------------------------------- the main
 
   private val flags = Set("network", "hours", "copies", "tolerance", "stability", "inertia",
-    "scr-min", "penalty", "jitter", "target", "max-iter", "time-limit", "out")
+    "scr-min", "penalty", "jitter", "expand", "capital", "expand-max", "target", "max-iter",
+    "time-limit", "out", "export")
 
   private def parse(args: Array[String]): Map[String, String] =
     require(args.length % 2 == 0, s"expected --flag value pairs, got ${args.length} arguments")
@@ -443,6 +584,10 @@ object HorizonScaling:
         scrMin = num("scr-min", 0.0),
         penalty = num("penalty", 0.0),
         jitter = num("jitter", 0.0),
+        expand = str("expand", "").split(",").map(_.trim).filter(_.nonEmpty).toSet,
+        capital = num("capital", 60000.0),
+        expandMax = num("expand-max", 3.0),
+        exportTo = options.get("export").filter(_.nonEmpty).map(Path.of(_)),
         target = int("target", 13152),
         maxIter = int("max-iter", 2_000_000),
         timeLimit = num("time-limit", 1800.0),
@@ -460,6 +605,10 @@ object HorizonScaling:
       scrMin: Double,
       penalty: Double,
       jitter: Double,
+      expand: Set[String],
+      capital: Double,
+      expandMax: Double,
+      exportTo: Option[Path],
       target: Int,
       maxIter: Int,
       timeLimit: Double,
@@ -519,11 +668,27 @@ object HorizonScaling:
 
     sink.line(f"network: $networkName%s, ${base.snapshotCount}%d snapshots at " +
       f"${hoursLabel(resolution)}%s h as committed")
-    sink.line(s"ladder: ${rungs.map(_.label).mkString(" ")} " +
-      s"(${rungs.map(_.snapshots).mkString(", ")} snapshots) " +
-      f"at tolerance $tolerance%.1e, capped at $maxIter%d iterations or ${timeLimit}%.0f s")
+    // Named rather than counted, and with the empty case spelled out: a ladder whose only
+    // rung repeats the base is a legitimate thing to ask for -- it is how the base is
+    // measured on its own -- and it printed as "ladder:  ( snapshots)" until this said so.
+    sink.line(
+      if rungs.isEmpty then
+        f"ladder: the base network alone, at tolerance $tolerance%.1e, capped at " +
+          f"$maxIter%d iterations or ${timeLimit}%.0f s. Every rung asked for repeats it."
+      else
+        s"ladder: ${rungs.map(_.label).mkString(" ")} " +
+          s"(${rungs.map(_.snapshots).mkString(", ")} snapshots) " +
+          f"at tolerance $tolerance%.1e, capped at $maxIter%d iterations or ${timeLimit}%.0f s"
+    )
     sink.line(f"stability: $which%s, system inertia $inertia%.1f GWs, scrMin $scrMin%.2f, " +
       f"slack price $penalty%.1f, jitter $jitter%.3f")
+    exportTo.foreach(root =>
+      sink.line(s"export: each rung's network as PyPSA CSVs under $root"))
+    sink.line(
+      if expand.isEmpty then "expansion: off -- dispatch only, no capacity column"
+      else f"expansion: ${expand.toSeq.sorted.mkString(",")}%s at $capital%.0f per MW per " +
+        f"year, capped at $expandMax%.1fx the existing fleet (invented numbers)"
+    )
     sink.line("")
     sink.line(header)
 
@@ -534,9 +699,24 @@ object HorizonScaling:
       timeLimitMillis = Some(math.round(timeLimit * 1000.0)),
     )
 
+    /** Networks already written out, so `--export` writes each one once. */
+    val exported = scala.collection.mutable.Set.empty[String]
+
     // Built, solved and printed one at a time, never collected first: the row of a rung that
     // finished has to survive the kill that stops the next one.
     def measure(label: String, network: Network, stability: Boolean): Row =
+      // Before the solve, and once per network rather than once per setting: an export is
+      // worth having when the solve is what got killed, and the two settings differ in the
+      // callback rather than in the network -- which is exactly what an export cannot
+      // carry, so the second write would write the same bytes again. Keyed on the name
+      // rather than on `!stability`, which would export nothing at all under
+      // `--stability on`.
+      exportTo.filter(_ => exported.add(network.name)).foreach { root =>
+        val into = root.resolve(network.name)
+        Files.createDirectories(into)
+        CsvWriter.write(network, into)
+        System.err.println(s"exported ${network.name} to $into")
+      }
       System.err.println(s"solving $label, stability ${if stability then "on" else "off"}")
       val families = if stability then Lopf.Families(stability = config) else Lopf.Families.none
       val model    = Lopf.build(network, families)
@@ -569,12 +749,18 @@ object HorizonScaling:
 
     // The committed network first, untouched: the cheapest rung, the anchor the published
     // objective is quoted against, and what the subdivision check compares to.
-    val anchors = settings.map(s => s -> measure("base", base, s)).toMap
+    val anchored = expandable(base, expand, capital, expandMax)
+    val anchors  = settings.map(s => s -> measure("base", anchored, s)).toMap
     val solved  = rungs.flatMap(r =>
-      val network = jittered(
-        stretched(base, r.copies, r.hours),
-        jitter,
-        math.round(resolution / r.hours).toInt,
+      val network = expandable(
+        jittered(
+          stretched(base, r.copies, r.hours),
+          jitter,
+          math.round(resolution / r.hours).toInt,
+        ),
+        expand,
+        capital,
+        expandMax,
       )
       settings.map(s => (r, s, measure(r.label, network, s)))
     )
@@ -585,24 +771,39 @@ object HorizonScaling:
     // every number below depends on it, so a reader has to see its verdict even on a run
     // that is otherwise clean.
     if jitter != 0.0 then
-      sink.line("subdivision check: skipped -- a jittered ladder is a different LP by " +
+      sink.line("replication check: skipped -- a jittered ladder is a different LP by " +
         "construction, so the base objective is not the one it should reach")
+    else if expand.nonEmpty then
+      sink.line("replication check: skipped -- with capacity a decision the capital term " +
+        "is charged per horizon rather than per snapshot, so a longer rung is not " +
+        "required to reach a multiple of the base objective")
     else
-      val subdivided = solved.filter((r, _, _) => r.copies == 1)
-      if subdivided.isEmpty then
-        sink.line("subdivision check: skipped -- the ladder has no one-copy rung to compare")
+      if solved.isEmpty then
+        sink.line("replication check: skipped -- the ladder has no rung to compare")
       else
-        subdivided.foreach { (r, s, row) =>
+        solved.foreach { (r, s, row) =>
+          // Every rung should reach `copies` times the base objective. Subdividing is
+          // energy-exact, and repeating the horizon `c` times over the same data multiplies
+          // it: replicating the base's own schedule `c` times is feasible for the longer
+          // problem, so its optimum cannot be dearer.
+          //
+          // Checked both ways round regardless, because that argument is about the two
+          // *exact* optima and neither number here is one. Both sides stop at `tolerance`,
+          // so each carries its own error of that order and the difference can fall either
+          // side of zero -- at 1e-4 on three copies it came out 1.0e-4 dear, which is the
+          // tolerance and not an arbitrage. A gap well past the band is the tiling, not
+          // the solver: the one thing that would produce it is a rung whose data or
+          // weightings do not repeat the base's.
           val anchor   = anchors(s)
-          val relative = math.abs(row.objective - anchor.objective) /
-            math.max(1.0, math.abs(anchor.objective))
+          val expected = r.copies * anchor.objective
+          val relative = math.abs(row.objective - expected) / math.max(1.0, math.abs(expected))
           val verdict =
             if !row.optimal || !anchor.optimal then "INCONCLUSIVE -- one side is not Optimal"
             else if relative <= 10.0 * tolerance then "OK"
             else "FAIL -- the stretched network is not the same problem"
-          sink.line(f"subdivision check ${r.label}%s, stability " +
-            f"${if s then "on" else "off"}%-3s: ${anchor.objective}%.2f vs " +
-            f"${row.objective}%.2f, relative $relative%.2e -- $verdict%s")
+          sink.line(f"replication check ${r.label}%s, stability " +
+            f"${if s then "on" else "off"}%-3s: ${r.copies}%d x ${anchor.objective}%.2f = " +
+            f"$expected%.2f vs ${row.objective}%.2f, relative $relative%.2e -- $verdict%s")
         }
 
     // What the requirements cost, per rung, where both halves solved. The one figure here

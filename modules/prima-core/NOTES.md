@@ -3302,8 +3302,9 @@ the harder problem:
 | threads | 16 | 1 |
 
 So 17.2 h against the measured 1 h 30 min is not a solver comparison, and nobody
-should read it as one: the Prima figure is a looser answer to an easier question on one core. What
-the pair does bracket is the cost of the two things the ladder leaves out, and
+should read it as one: the Prima figure is a looser answer to an easier question
+on one core. What the pair does bracket is the cost of the two things the ladder
+leaves out, and
 the configuration says which of them to suspect first. `zones.yaml` carries
 `ipm_optimality_tolerance` back at 1e-6 with a comment that 1e-4 gave crossover a
 sloppy starting point — "imprecise crossover", then a single-threaded simplex
@@ -3376,8 +3377,9 @@ ratio falls by 2.8 across a 36-fold horizon, which is slower than those exponent
 imply on their own — they are not constants, and HiGHS's rises — so the crossing
 point is not worth computing from them. What the two measured ends support is
 narrower and enough: the gap closes with the horizon and is still ninefold at the
-longest one anybody here has run. The full-horizon HiGHS solve builds 2,010,816 variables and 4,099,680
-constraints and peaks at 9.2 GiB resident, against the 3.3 GiB the one-year rung
+longest one anybody here has run. The full-horizon HiGHS solve builds 2,010,816
+variables and 4,099,680 constraints and peaks at 9.2 GiB resident, against the
+3.3 GiB the one-year rung
 needed — close to linear, and well inside a laptop.
 
 The formulations are worth reading too. linopy builds 55,856 variables and
@@ -3474,6 +3476,46 @@ horizon — ten minutes of HiGHS, ninety of Prima. Expansion, which moves Prima'
 growth from `columns^1.36` to something near `columns^2.4` all told, and which
 `run630` carries along with a candidate set, a grid-strength row and three
 sectors this network has none of.
+
+### What the whole measurement answers
+
+The question this section opened with was how long three years of the Nordic
+model at two-hourly resolution takes, and especially what the stability
+requirements add. Every row below is measured on one host, one thread, at the
+tolerance stated; `run630`'s is NordPSA's own figure for the same horizon.
+
+| 13,140 snapshots, 2.06 M columns | |
+| --- | --: |
+| dispatch, Prima at 1e-4 | **1 h 30 min** |
+| dispatch and the stability requirements, Prima at 1e-4 | **2 h 09 min** |
+| dispatch, HiGHS at 1e-6 with a vertex | **10 min** |
+| with capacity a decision, Prima at 1e-4 | **days** (fit over two rungs) |
+| `run630`: expansion, candidates, DK SCR, heat, EVs, hydrogen | **17.2 h** |
+
+Three conclusions, in the order they displaced an assumption.
+
+**The horizon is cheap.** The iteration count grows as `columns^0.36` over the
+36-fold span, so the cost goes roughly as `columns^1.4` and a horizon ten times
+longer costs about thirty times as much rather than a hundred. That is the
+opposite of what a first-order method's reputation and this file's own dense
+random instances predict, and the reason is structural: a longer dispatch horizon
+is the same sparse block repeated, coupled only through storage.
+
+**The stability requirements are not the expensive part either.** +44% in wall
+clock at the full horizon, +3.8% on the objective at every horizon measured, 3%
+more columns and 79% more rows. And not MILP — the online variable is continuous,
+which is what put the whole family in this layer.
+
+**Expansion is the term that changes the order.** It moves the iteration exponent
+from `^0.36` to `^1.32`, sublinear to superlinear, because a capacity column sits
+in a row at every snapshot and ties the horizon together instead of repeating it.
+Which is where `run630`'s seventeen hours live — not in its length, and not in
+its requirement rows, but in what it decides.
+
+What none of this measures is a solver verdict. HiGHS is 25x faster than Prima at
+365 snapshots and 9x at 13,140, at a tighter tolerance and finishing at a vertex,
+and the gap narrows with the horizon without closing at any horizon anyone would
+run. The measurements above are about problems, not about which code to prefer.
 
 ### Where the time actually goes: 55% sparse, 45% dense
 

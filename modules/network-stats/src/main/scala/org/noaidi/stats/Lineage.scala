@@ -32,8 +32,9 @@ enum DatasetKind:
   *
   * `expressions` holds the field's defining SQL, recovered by rebuilding a one-column
   * statement around the expression and asking DuckDB to render it back. It is not sliced out
-  * of the view text: DuckDB reports `query_location_length` as zero for every one of the 52
-  * select entries in this schema, so there is no span to slice.
+  * of the view text: through 1.5.6 DuckDB reported `query_location_length` as zero for every
+  * one of the 52 select entries in this schema, so there was no span to slice. 2.0 populates
+  * it, but nobody has measured whether slicing agrees with the rebuild, so the rebuild stays.
   *
   * A sequence, one per contributing branch, because a set operation has an expression per
   * branch and reporting the first alone misdescribes the column. `injection.port` is `0` in
@@ -109,8 +110,14 @@ final case class LineageRun(
   *    serialized to json!", so the prefix comes off first.
   *  - Its argument must be '''typed''' VARCHAR. A bare `?` fails at prepare time, hence the
   *    `CAST(? AS VARCHAR)` -- which is also what keeps view SQL out of string interpolation.
-  *  - `query_location_length` is '''zero everywhere''', all 52 select entries in this schema,
-  *    so an expression cannot be sliced out of the source text. It is rebuilt instead.
+  *  - `query_location_length` was '''zero everywhere''' through DuckDB 1.5.6, all 52 select
+  *    entries in this schema, so an expression could not be sliced out of the source text
+  *    and is rebuilt instead. '''2.0 populates it''', so that door is open again -- and
+  *    nobody has measured whether slicing agrees with the rebuild on all 52, so the rebuild
+  *    stays.
+  *  - A set operation's branches are `children` from 2.0, flat rather than nested, where
+  *    1.5.6 had `left` and `right`. See [[setOperationBranches]]: this is the one change
+  *    DuckDB 2.0 required of this module, and it failed 18 of its tests until it was made.
   *  - `query_location` carries `UINT64_MAX` as its "unknown" sentinel, and that '''cannot
   *    survive''' a `ujson` round trip: ujson reads every number as a `Double`, 2^64-1 is not
   *    one, and writing it back produces `1.8446744073709552E19`, which the deserialiser
@@ -329,6 +336,28 @@ object Lineage:
 
       case _ => Scope.empty
 
+  /** The branches of a set operation, which DuckDB 2.0 reports as a flat list.
+    *
+    * Through 1.5.6 a `SET_OPERATION_NODE` carried `left` and `right`, so a three-branch
+    * `UNION ALL` arrived as nested pairs and this module recursed through them. 2.0 sets
+    * both to `null` and puts every branch in `children` instead -- flattened, measured: the
+    * three-branch union comes back as one node with three `SELECT_NODE` children rather
+    * than as a tree. That is why 18 tests in this module failed on 2.0 with a select list
+    * of zero: `left` was there to read and held nothing.
+    *
+    * Only 2.0's shape is read. The pin is a version, and carrying both shapes against a
+    * driver nobody runs is the speculative branch this repository argues against elsewhere
+    * -- but a 1.x driver must not land in `NoSuchElementException` on a key name, so the
+    * absence is refused by name.
+    */
+  private def setOperationBranches(node: ujson.Value): Seq[ujson.Value] =
+    node.obj.get("children").map(_.arr.toSeq).getOrElse(
+      throw new IllegalStateException(
+        "a SET_OPERATION_NODE in this view's parsed SQL has no 'children', which is how " +
+          "DuckDB reports a set operation's branches from 2.0 onwards. Through 1.5.6 they " +
+          "were 'left' and 'right', and this module reads 2.0's shape only -- check that " +
+          "`duckdbVersion` in build.sbt is 2.0.0.1 or later."))
+
   /** Every `SELECT` that contributes a column at each output position.
     *
     * A set operation contributes one per branch, and they are matched by position because
@@ -342,12 +371,9 @@ object Lineage:
         node.obj("select_list").arr.toSeq.map(expr => Seq((expr, scope)))
 
       case "SET_OPERATION_NODE" =>
-        val left  = projections(node.obj("left"))
-        val right = projections(node.obj("right"))
-        val width = math.max(left.length, right.length)
-        (0 until width).map { i =>
-          left.lift(i).getOrElse(Seq.empty) ++ right.lift(i).getOrElse(Seq.empty)
-        }
+        val branches = setOperationBranches(node).map(projections)
+        val width    = branches.map(_.length).maxOption.getOrElse(0)
+        (0 until width).map(i => branches.flatMap(_.lift(i).getOrElse(Seq.empty)))
 
       case _ => Seq.empty
 
@@ -611,9 +637,17 @@ object Lineage:
     nodeType(node) match
       case "SELECT_NODE" => node
       case "SET_OPERATION_NODE" =>
-        val left = node.obj("left")
-        val here = projections(left).lift(position).exists(_.exists((e, _) => e eq expr))
-        if here then branchFor(left, position, expr) else branchFor(node.obj("right"), position, expr)
+        // Identity, not equality: `expr` came out of `projections(node)`, which returns the
+        // very values the branches hold, so exactly one branch contains it. The old
+        // two-branch form could fall through to `right` without looking; over a flat list
+        // there is no "the other one" to fall through to, and a miss would rebuild the
+        // expression against the wrong FROM -- a wrong lineage rather than a failure.
+        setOperationBranches(node)
+          .find(b => projections(b).lift(position).exists(_.exists((e, _) => e eq expr)))
+          .map(branchFor(_, position, expr))
+          .getOrElse(throw new IllegalStateException(
+            s"no branch of this set operation holds the expression at position $position, " +
+              "so the FROM its text would be rebuilt against cannot be identified"))
       case _ => node
 
   private def allTables(node: ujson.Value): Seq[String] =

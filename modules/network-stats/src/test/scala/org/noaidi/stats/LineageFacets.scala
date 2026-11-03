@@ -21,8 +21,9 @@ package org.noaidi.stats
   * literal `unknown`, a stub like `duckdb` or a number with no `v` all fail it. What it
   * stops catching is a version this repository never pinned anyway.
   *
-  * The trailing `.*` is deliberate. DuckDB's own `version()` returns `v1.3.2` on the pinned
-  * driver and `v1.5.6` on the bump, both three components with nothing after them -- but a
+  * The trailing `.*` is deliberate. DuckDB's own `version()` returned `v1.3.2` and `v1.5.6`
+  * on earlier pins and returns `v2.0.0` on the current one, all three components with nothing
+  * after them -- but a
   * development build appends a suffix, and refusing one would be the same mistake a minor
   * version lower down.
   */

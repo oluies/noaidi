@@ -59,7 +59,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.15"
 
       # The comparator before the comparison, for the reason the sibling job
       # gives: a green run here is read as "upstream did not change an answer",
@@ -67,6 +67,13 @@ jobs:
       # Stdlib only, so it runs before the venv below can fail.
       - name: Test the results comparator
         run: python3 reference/test_results_drift.py
+
+      # And the version reporter, for the same reason one step up: its failure mode is
+      # printing a plausible table that fails to mark the package that moved, which leaves
+      # a reader exactly where they were before it existed. Stdlib only, so it also runs
+      # before the venv below can fail.
+      - name: Test the version reporter
+        run: python3 .github/scripts/test_drift_versions.py
 
       # `highspy` because the optimise results need a solver; `tables` left out
       # because it buys only the HDF5 exports, which this job does not read --
@@ -84,6 +91,12 @@ jobs:
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
           echo "pinned $pinned, latest $latest"
+          # Every version in the venv, not only PyPSA's -- see the script's own note for
+          # the run that cost a diagnosis for want of them. Written with the venv's
+          # interpreter, since its packages are the question.
+          "$RUNNER_TEMP/venv/bin/python" .github/scripts/drift_versions.py collect \
+            > "$RUNNER_TEMP/latest-versions.json"
+          cat "$RUNNER_TEMP/latest-versions.json"
 
       # `--into` is a whole generation with the destination moved, so `goldens/`
       # is untouched and the manifest lands beside the results it describes. A
@@ -146,10 +159,11 @@ jobs:
           {
             echo "## PyPSA results drift"
             echo
-            echo "| | version |"
-            echo "| --- | --- |"
-            echo "| pinned | \`${{ steps.install.outputs.pinned }}\` |"
-            echo "| latest | \`${{ steps.install.outputs.latest }}\` |"
+            # The runner's own interpreter, not the venv's: this reads the committed
+            # manifest and must not depend on the packages under test.
+            python3 .github/scripts/drift_versions.py table \
+              --manifest reference/goldens/manifest.json \
+              --latest "$RUNNER_TEMP/latest-versions.json"
             echo
             if [ -f results-drift.md ]; then cat results-drift.md; fi
             if [ "${{ steps.generate.outputs.status }}" != "0" ]; then
@@ -161,10 +175,27 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Fails the run so the schedule surfaces it, after the report is published.
+      #
+      # Two failures, two messages. `drifted` is set when the generation never finished as
+      # well as when an answer changed, and this step called both "an upstream result
+      # moved" -- which is the first line a reader sees, and was wrong in exactly the case
+      # hardest to diagnose. On 2026-11-02 nothing in PyPSA had moved and no answer had
+      # changed: the generator had crashed on a dependency. The summary distinguished the
+      # two; the annotation did not.
       - name: Fail if an answer moved
         if: always() && steps.drift.outputs.drifted == 'true'
         run: |
-          echo "::error::an upstream result moved -- see the job summary"
+          # Three failures, three messages. The install is checked first because when it
+          # fails the generator never runs, its `status` output is empty, and `"" != "0"`
+          # then reported "the generator did not finish (exit )" about a generator that
+          # never started -- while the version table showed every row as "not installed".
+          if [ "${{ steps.install.outcome }}" != "success" ]; then
+            echo "::error::the newest PyPSA could not be installed -- the generator never ran, and the job summary's version table is empty for the same reason"
+          elif [ "${{ steps.generate.outputs.status }}" != "0" ]; then
+            echo "::error::the golden generator did not finish (exit ${{ steps.generate.outputs.status }}) -- no answer to compare; the job summary names the version that moved"
+          else
+            echo "::error::an upstream result moved -- see the job summary"
+          fi
           exit 1
 
   schema-drift:
@@ -176,7 +207,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.15"
 
       - uses: actions/setup-java@v6
         with:

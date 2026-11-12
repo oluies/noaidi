@@ -79,6 +79,9 @@ export can carry, and `hydro.json` holds what the callback did on top of it.
 - `nordpsa_clone.py` — reads the clone's commit, so every file above records the upstream
   revision it was generated from under `versions.nordpsa` rather than leaving it to a
   reader's assumption. See below.
+- `horizon_highs.py` — the one script here that generates nothing: it reads a network
+  *exported by* the Scala side and solves it with HiGHS, so a horizon measurement has a
+  second implementation to stand beside rather than an incomparable timing. See below.
 
 The terminal-value fixture is scarce on purpose, and its first version was not. At 200
 `max_hours` the reservoir held more water than the week could use, so every profile
@@ -239,6 +242,49 @@ other.
 `nordpsa.constraints.hydro_operation_constraints` — the production callback, not a
 copy of it. That import is the point: a reimplementation here could agree with
 itself while disagreeing with NordPSA.
+
+## `horizon_highs.py`, which is not a generator
+
+The one script here that writes no fixture. It reads a network *out* of the Scala side and
+solves it with HiGHS, which is the other half of a measurement rather than a reference
+answer — so it is documented apart from the six above and nothing asserts against it.
+
+`HorizonScaling` in `network-lopf`'s test sources measures what a long horizon costs Prima.
+NOTES carries an external anchor beside it — NordPSA's `run630` solves three years at
+two-hourly resolution in 62,000 s — and those two numbers are not comparable: `run630` is
+`expand` mode at IPM 1e-6 with crossover on sixteen threads, against a dispatch model at
+1e-4 on one. Four differences, every one in the same direction. This script is what makes a
+comparison possible instead:
+
+```bash
+# the Scala side writes each rung as a PyPSA CSV directory
+sbt "networkLopf/Test/runMain org.noaidi.lopf.HorizonScaling --export /tmp/rungs"
+
+# and this side reads one back and solves it, at settings written down
+.venv/bin/python horizon_highs.py /tmp/rungs/nordic-today-3x2h --threads 1
+```
+
+The flags are HiGHS's own names, and deliberately the keys NordPSA's `config/zones.yaml`
+carries under `solver:` — `solver`, `run_crossover`, `ipm_optimality_tolerance`, `threads` —
+so a run can be made at exactly a NordPSA run's settings without translating anything.
+
+Two limits are in the script's own docstring and belong here too. **An export cannot carry
+the stability requirements**, for the reason this whole directory exists: they live in an
+`extra_functionality` callback, PyPSA stores none of it on the network, and a reader gets a
+strictly easier problem. So an exported rung compares the *dispatch* halves honestly and
+says nothing about the requirement rows. And **iterations are not a shared unit** — an
+interior-point iteration and a PDHG iteration have nothing in common — so wall clock is the
+only column reported on both sides, with build and solve timed separately because PyPSA's
+build goes through linopy and the Scala figure times the solve alone.
+
+It earns its place on the first run. On the committed `nordic-today` it reaches
+−2,460,299,248.77, which is what `nordic.json` records and what `BidLadderSuite` asserts
+this port reaches — so the export, the reader and the solver agree end to end — in 0.93 s
+against Prima's 38 s at a looser tolerance. And the two formulations are visible side by
+side: linopy builds 113,880 constraints where the port builds 5,110 rows, and HiGHS's
+presolve reduces its model to exactly 5,110. PyPSA bounds a non-extendable dispatch with
+rows and the port puts that limit in the column's bound; after presolve they are the same
+problem.
 
 ## The revision these answers hold for
 

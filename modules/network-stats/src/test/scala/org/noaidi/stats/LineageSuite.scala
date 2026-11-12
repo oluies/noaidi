@@ -202,7 +202,7 @@ class LineageSuite extends munit.FunSuite:
 
   test("the environment facets name what produced the run") {
     val r = run()
-    assert(r.facets.get("duckdb").exists(_.startsWith("v1.3")), r.facets.toString)
+    assert(r.facets.get("duckdb").exists(LineageFacets.namesDuckDb), r.facets.toString)
     assert(r.facets.contains("java") && r.facets.contains("os"), r.facets.toString)
   }
 

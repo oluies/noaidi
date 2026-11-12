@@ -3172,11 +3172,357 @@ sparse matrix-vector products each is precisely the workload `Kernels` exists to
 move, and it is the first instance in this repository large enough for the
 question to matter.
 
+### A long horizon: iterations grow as the square root of it
+
+The section above was this file's only whole-solve performance figure, and it is
+a figure about **one network** rather than about one size. The ladder below is
+the first measurement that can tell the difference, and the first thing it says
+is that the distinction matters: `nordic-today` has 57,305 columns
+against `scigrid-de`'s 60,552 — the same instance size by any reading — and at
+the same 1e-4 it takes **101,824 iterations where `scigrid-de` takes 14,848**.
+Seven times, at the same column count. Nothing extrapolated from the table above
+transfers to another network.
+
+`HorizonScaling`, in `network-lopf`'s test sources, solves a ladder of horizons
+on one network by subdividing its snapshots and repeating its year. The
+subdivision is energy-exact — every weighting column becomes the new resolution
+and PyPSA multiplies by `eh` wherever energy is meant — so the objective is
+comparable across the ladder, which is what makes an iteration count comparable
+too. Measured on macOS/aarch64, one thread, tolerance 1e-4, `nordic-today` with
+NordPSA's stability requirements off and on:
+
+| horizon | stab | snapshots | columns | rows | iterations | wall clock | ms/iter |
+| --- | --- | --: | --: | --: | --: | --: | --: |
+| base | off | 365 | 57,305 | 5,110 | 101,824 | 47.6 s | 0.47 |
+| base | on | 365 | 59,130 | 9,125 | 114,560 | 47.4 s | 0.41 |
+| 12 h | off | 730 | 114,610 | 10,220 | 180,224 | 153.1 s | 0.85 |
+| 12 h | on | 730 | 118,260 | 18,250 | 143,360 | 158.8 s | 1.11 |
+| 6 h | off | 1,460 | 229,220 | 20,440 | 224,000 | 390.2 s | 1.74 |
+| 6 h | on | 1,460 | 236,520 | 36,500 | 211,520 | 371.5 s | 1.76 |
+
+**The iteration count grows sublinearly in the horizon.** `iterations ~
+columns^0.57` with the requirements off and `^0.44` with them on, while the cost
+of an iteration grows as `columns^0.95` and `^1.04` — linear, as a sparse method
+should. Total work therefore goes as roughly `columns^1.5`, which is the headline:
+a horizon ten times longer costs about thirty times as much, not a hundred.
+
+That is the opposite of what "iteration count grows steeply with size" above
+predicts, and the two are both right. Dense random LPs are close to the worst
+case for a first-order method; a dispatch model over a longer horizon is the same
+sparse block repeated, coupled only through storage, and a method whose per
+iteration cost is a sparse product takes that in its stride.
+
+**What the stability requirements cost.** The one-sided guess — that
+rotational-energy and grid-strength rows mix MW, MWs and MVA and so must wreck
+the conditioning — is not what the measurement shows, but neither is "nothing",
+which is what the short rungs said on their own. The iteration delta is +12.5%,
+−20.5% and −5.6% across the three rungs above: noise about zero, no trend. At the
+full horizon it is **+29.5%**, and +44% in wall clock, which is larger than any
+swing the short rungs produced. So the honest reading is that the requirements
+are free at a horizon short enough not to matter and cost something real at the
+one the question is about — and that rests on a single pair, so it wants a second
+point before it is a trend.
+
+What they cost in the model does not drift at all: **+3.8% on the objective**,
+stable to two figures on every rung measured, from 365 snapshots to 13,140
+(3.85%, 3.78%, 3.85%, 3.84%). In size they are about **3%** more columns and 79%
+more rows — 3.19% on every rung from 365 snapshots to 13,140, since the online
+columns are five per snapshot against 157.
+The columns are few because `nordic-today` carries `p_min_pu == p_max_pu` on
+every thermal, run-of-river and nuclear unit, so `Stability` reads them as fixed
+and they enter the requirement rows as constants; the only online columns are its
+five hydro reservoirs, which at 13,140 snapshots is 65,700 of 2.13 M.
+
+The requirement is 150 GWs of system inertia, which is read off the fleet rather
+than chosen: the fixed units carry 67.1 to 110.9 GWs across the year and the five
+reservoirs can add 146.7 GWs more, so 150 binds at every snapshot and is feasible
+at every snapshot. The premium is the measurement that it binds.
+
+**What the ladder does not say.** It is one network, one host and one thread. The
+rungs repeat one year of data, so a multi-copy horizon has interchangeable years
+and an optimal face rather than a point, which can cost a first-order method
+iterations a real profile would not — `--jitter` exists to bracket that effect
+and the figures above do not use it. The fit spans a factor of four in columns,
+and the horizon the question is about is nine times past the last rung. And it is
+all at 1e-4: on `scigrid-de` the step from 1e-4 to 1e-6 cost a factor of 19 in
+iterations, and a study that reads the shadow price of an inertia row needs the
+tighter end rather than this one.
+
+**Three years at two-hourly resolution, measured.** 13,140 snapshots, 2,062,980
+columns and 183,960 rows without the requirements, 2,128,680 and 328,500 with
+them. Both reach `Optimal` at 1e-4:
+
+| | iterations | ms/iter | wall clock |
+| --- | --: | --: | --: |
+| stability off | 372,224 | 14.44 | **1 h 30 min** |
+| stability on | 481,856 | 16.02 | **2 h 09 min** |
+
+Hours rather than days, and the reason is the exponent rather than the hardware.
+Over the full 36-fold span the exponent is lower still than the short ladder
+said: `iterations ~ columns^0.36` off and `^0.40` on.
+
+The objective is its own check. Three copies of one year should cost three times
+one copy, because replicating the base schedule is feasible for the longer
+horizon; 3 × −2,460,298,964.99 is −7,380,896,894.97 against a measured
+−7,380,159,710.59, which is 1.0e-4 apart — the tolerance, not an arbitrage
+between the repeated years. `HorizonScaling` makes that comparison itself now,
+for every rung rather than only a subdivided one.
+
+**How the extrapolation fared, since the point of a prediction is to be checked.**
+The fit over 57k–229k columns, extrapolated nine times past its last rung, called
+8.3e5 iterations at 13.7 ms with the requirements off. The per-iteration cost
+came in at 14.44 ms — **5% out**, which is what a measured exponent of 0.95 to
+1.04 on a sparse method should give. The iteration count came in at 3.72e5, so
+the prediction was **2.2 times too pessimistic**: the growth is more sublinear at
+scale than a four-fold span can see. With the requirements on, 5.4e5 predicted
+against 4.8e5 measured, 13% out, and 19.0 ms against 16.0. So the shape
+extrapolated and the constant did not, in the safe direction both times.
+
+**What the Python side takes on the same horizon, and why it is not a
+comparison.** NordPSA's `run630` solves that horizon — `--resolution 2` with no
+`--year`, which `make_snapshots` reads as the whole config period, 2023-01-01 to
+2026-01-01 exclusive, so 13,152 two-hour snapshots including the 2024 leap day —
+and it takes **62,000 s, 17.2 hours**:
+
+```
+expand --resolution 2 --experiment stab_batt12 --experiment nuc_vom12
+       --experiment nuclear_nordic --experiment dk_scr_own
+       --output run630_nuknord_dkscr_2h
+```
+
+Four things differ from the ladder above, and every one of them makes `run630`
+the harder problem:
+
+| | `run630` | the ladder |
+| --- | --- | --- |
+| mode | `expand` — capacity is a decision | dispatch only, nothing extendable |
+| tolerance | IPM 1e-6 **and crossover to a vertex** | PDHG 1e-4, no vertex at all |
+| candidates | nuclear in every zone, `stab_batt12`, 2 GVA syncon | the network as committed |
+| grid strength | DK's own SCR, 12 GVA external | `scrMin 0`, off |
+| threads | 16 | 1 |
+
+So 17.2 h against the measured 1 h 30 min is not a solver comparison, and nobody
+should read it as one: the Prima figure is a looser answer to an easier question
+on one core. What the pair does bracket is the cost of the two things the ladder
+leaves out, and
+the configuration says which of them to suspect first. `zones.yaml` carries
+`ipm_optimality_tolerance` back at 1e-6 with a comment that 1e-4 gave crossover a
+sloppy starting point — "imprecise crossover", then a single-threaded simplex
+cleanup, about 3 h of it on `run145`. That is the same lesson this file's
+tolerance caveat reaches from the other side: the expensive part is not the
+objective's fourth digit, it is an exact dual and a vertex. A first-order method
+lands in the interior of the optimal face by construction — see *Degenerate
+problems: compare objectives, not solution vectors* — which is precisely what
+`run_crossover: on` exists to avoid.
+
+`HorizonScaling --expand` exists to close the first half of that gap, because a
+capacity column is not a dispatch column repeated: it appears in a row at every
+snapshot, so one of them carries 13,152 nonzeros and ties the whole horizon
+together. The sublinear exponent above rests on the horizon being the same sparse
+block repeated, and expansion is the one modelling choice that breaks that
+structure rather than merely enlarging it.
+
+Two things about this anchor are worth stating rather than leaving to be
+assumed. The timing is `run630` on NordPSA `47cb4b4`, which is **not** the
+revision the fixtures in `reference/nordpsa` are pinned against (`beccc3f`) and
+is not in the clone here, so this is a recorded external timing and not a
+reproduction. And the solver block quoted above is read from that clone at
+`beccc3f`: it is the pinned revision's configuration, which `47cb4b4` may have
+moved.
+
+**The matched comparison, which is less flattering and more useful.**
+`reference/nordpsa/horizon_highs.py` reads an exported network back with
+`pypsa.Network` and solves it with HiGHS, so the same LP can be put to both
+implementations at written-down settings. On the committed `nordic-today` — 365
+snapshots, HiGHS 1.15.1 `ipm` with crossover on, `ipm_optimality_tolerance`
+1e-6, one thread:
+
+| | Prima, 1e-4 | HiGHS, 1e-6 and a vertex |
+| --- | --: | --: |
+| wall clock | 47.6 s | **1.9 s** |
+| iterations | 101,824 PDHG | 34 IPM, 916 crossover |
+| objective | −2,460,298,964.99 | −2,460,299,248.77 |
+
+Both columns are wall clock around the solve call, which is the only pair that
+compares: HiGHS also reports 0.93 s of its own internal runtime, which excludes
+the handoff through linopy that Prima has no equivalent of. And the base solve's
+wall clock moves between runs on this host — 38.3 s and 47.6 s have both been
+measured, at an iteration count that is identical to the digit — so the figure
+tabulated in the ladder above is the one used here and in every ratio below. A
+ratio is a factor here, not a decimal.
+
+HiGHS is about **twenty-five times faster** on that network, at a tighter tolerance,
+and it finishes at a vertex rather than in the interior of the optimal face. Its
+objective is the figure `nordic.json` records and `BidLadderSuite` asserts this
+port reaches, so the chain from export to Python and back is sound; Prima's
+differs in the tenth digit, which is what 1e-4 buys. Nothing here is a surprise
+about the algorithm — a restarted first-order method against a mature
+interior-point code with presolve and crossover — but it is the number to hold
+beside any claim about horizons.
+
+**And the gap narrows with the horizon, measured on all three.** The same
+comparison at one and at three years of two-hourly snapshots:
+
+| snapshots | Prima, 1e-4 | HiGHS, 1e-6 + vertex | ratio |
+| --: | --: | --: | --: |
+| 365 | 47.6 s | 1.9 s | 25.1x |
+| 4,380 | — | 82.7 s | — |
+| 13,140 | 5,373 s | **597.6 s** | **9.0x** |
+
+Because the two scale differently: Prima's total work goes as `columns^1.36` —
+iterations `^0.36` against a linear per-iteration cost — and HiGHS's as
+`columns^1.5` from 365 to 4,380 and `^1.80` from 4,380 to 13,140, the crossover
+growing faster than the interior-point solve it finishes. Measured end to end the
+ratio falls by 2.8 across a 36-fold horizon, which is slower than those exponents
+imply on their own — they are not constants, and HiGHS's rises — so the crossing
+point is not worth computing from them. What the two measured ends support is
+narrower and enough: the gap closes with the horizon and is still ninefold at the
+longest one anybody here has run. The full-horizon HiGHS solve builds 2,010,816
+variables and 4,099,680 constraints and peaks at 9.2 GiB resident, against the
+3.3 GiB the one-year rung
+needed — close to linear, and well inside a laptop.
+
+The formulations are worth reading too. linopy builds 55,856 variables and
+**113,880** constraints where this port builds 57,305 columns and **5,110** rows;
+HiGHS's presolve then reduces its model to 47,078 columns and 5,110 rows. The
+agreement on 5,110 is not a coincidence: PyPSA bounds a non-extendable dispatch
+with rows, this port puts the same limit in the column's bound, and after
+presolve the two are the same problem. One of them hands the solver the reduction
+to find and the other never poses it.
+
+**Two things the export settles that nothing here could settle alone.** The
+replication check above is this port comparing itself against itself; the export
+hands the same question to another implementation. A rung subdivided from daily
+to twelve-hourly, read back by `pypsa.Network` and solved by HiGHS, reaches
+−2,460,299,248.77 — the same objective to the cent as the unsubdivided network
+through the same solver. So `stretched` is energy-exact by an independent
+measurement and not only by its own assertion.
+
+The replication identity is settled to twelve digits by the same route. Three
+copies of a year should cost three times one copy; the port's own check agreed to
+1.0e-4, which is its tolerance and therefore the most it could say. HiGHS at a
+vertex reaches **−7,380,897,746.32** on the three-year horizon against three
+times its own one-year **−2,460,299,248.77**, which is −7,380,897,746.31:
+**1.35e-12 apart**. So the tiling is exact, by an implementation that shares no
+code with it, and the arithmetic the whole ladder rests on is no longer an
+assumption.
+
+And capacity expansion is now checked on this network, which has no golden for
+it. With `wind_onshore` extendable at an invented 60,000 per MW per year, this
+port reaches −4,067,103,384.10 against PyPSA's −4,067,083,156.57: **5.0e-6
+apart** at a 1e-4 tolerance. Reading that comparison took getting two things
+right that are easy to get wrong in the same direction. PyPSA keeps the existing
+fleet's capital — 37,236 MW times 60,000, so 2,234,160,000 — in
+`objective_constant` and outside `objective` on a single-period network at the
+1.3.0 pin, so comparing against the system cost puts the two 2.2e9 apart and
+reads as a port that has lost the expansion. And the first carrier tried was
+`gas`, whose fleet on this network is 0 MW: a cap of three times zero is zero, so
+the capacity columns existed, decided nothing, and both sides returned the
+unexpanded answer. `expandable` refuses a carrier with no fleet now, by name and
+before the solve, for the reason every refusal in this port exists.
+
+**That settles the `run630` question, and the answer is that the horizon was
+never the problem.** The dispatch core of exactly that horizon — three years,
+two-hourly, 13,140 snapshots — solves in **ten minutes** through the same solver
+family at a tighter tolerance than the run used. `run630` took 62,000 s, which is
+**104 times** that. Whatever those seventeen hours are, they are not the length
+of the horizon.
+
+What is left to account for them is everything the ladder leaves out: capacity as
+a decision, the nuclear candidates in every zone, `stab_batt12`, DK's own SCR,
+and the heat, EV and hydrogen sectors that `nordic-today` has none of, so that
+`run630`'s snapshot is a bigger snapshot than this one. The horizon can be struck
+off the list, which is where this started.
+
+**And the first of those is measured now, which changes the shape of the
+answer.** The same three rungs with `wind_onshore`, `wind_offshore`, `solar` and
+`battery` extendable at an invented 60,000 per MW per year, capped at three times
+the existing fleet:
+
+| snapshots | dispatch | expanding | |
+| --: | --: | --: | --- |
+| 365 | 101,824 | 710,528 | 7.0x |
+| 730 | 180,224 | 1,768,832 | 9.8x |
+| 1,460 | 224,000 | hit the 2,000,000 cap | >8.9x |
+
+Seven to ten times the iterations at the same horizon — and, which matters more,
+**the exponent changes sign of curvature**. Dispatch is `iterations ~
+columns^0.57` over these three rungs and `^0.36` over the full 36-fold span.
+Expanding is `^1.32`. Sublinear becomes superlinear, which is exactly what the
+structure predicts: a capacity column appears in a row at *every* snapshot, so it
+carries 13,140 nonzeros at the target horizon and ties the whole thing together,
+and the sublinear exponent rested on the horizon being the same sparse block
+repeated.
+
+Read with the care it deserves, that fit is two Optimal rungs extrapolated
+eighteen-fold, and it says **days rather than hours** for three years at
+two-hourly resolution with capacity a decision. The printed 20 days is a
+two-parameter fit through two points and should be read as the order, not the
+number. Four of the six rungs stopped at the iteration cap rather than at 1e-4,
+at relative gaps of 1e-3 to 8e-3, so their iteration counts are censored from
+below and the thin Optimal set is the honest limit here.
+
+Two things that cap also costs. The stability premium cannot be read at all on
+this ladder: it comes out near 0.5% against the 3.8% the dispatch rungs give, and
+0.5% is the same order as the 5e-3 gap the stability rungs stopped at, so the
+figure is not resolved rather than reduced. And the replication check is skipped
+by design, because capital is charged per horizon rather than per snapshot — the
+objective nevertheless comes out within 2e-8 across all three expanding rungs
+(−4,456,056,027, −4,456,056,009, −4,456,056,025), which is the capacity decision
+being horizon-invariant on a repeated year, as it should be.
+
+So the account of `run630`'s seventeen hours now has a named first term. Not the
+horizon — ten minutes of HiGHS, ninety of Prima. Expansion, which moves Prima's
+growth from `columns^1.36` to something near `columns^2.4` all told, and which
+`run630` carries along with a candidate set, a grid-strength row and three
+sectors this network has none of.
+
+### What the whole measurement answers
+
+The question this section opened with was how long three years of the Nordic
+model at two-hourly resolution takes, and especially what the stability
+requirements add. Every row below is measured on one host, one thread, at the
+tolerance stated; `run630`'s is NordPSA's own figure for the same horizon.
+
+| 13,140 snapshots, 2.06 M columns | |
+| --- | --: |
+| dispatch, Prima at 1e-4 | **1 h 30 min** |
+| dispatch and the stability requirements, Prima at 1e-4 | **2 h 09 min** |
+| dispatch, HiGHS at 1e-6 with a vertex | **10 min** |
+| with capacity a decision, Prima at 1e-4 | **days** (fit over two rungs) |
+| `run630`: expansion, candidates, DK SCR, heat, EVs, hydrogen | **17.2 h** |
+
+Three conclusions, in the order they displaced an assumption.
+
+**The horizon is cheap.** The iteration count grows as `columns^0.36` over the
+36-fold span, so the cost goes roughly as `columns^1.4` and a horizon ten times
+longer costs about thirty times as much rather than a hundred. That is the
+opposite of what a first-order method's reputation and this file's own dense
+random instances predict, and the reason is structural: a longer dispatch horizon
+is the same sparse block repeated, coupled only through storage.
+
+**The stability requirements are not the expensive part either.** +44% in wall
+clock at the full horizon, +3.8% on the objective at every horizon measured, 3%
+more columns and 79% more rows. And not MILP — the online variable is continuous,
+which is what put the whole family in this layer.
+
+**Expansion is the term that changes the order.** It moves the iteration exponent
+from `^0.36` to `^1.32`, sublinear to superlinear, because a capacity column sits
+in a row at every snapshot and ties the horizon together instead of repeating it.
+Which is where `run630`'s seventeen hours live — not in its length, and not in
+its requirement rows, but in what it decides.
+
+What none of this measures is a solver verdict. HiGHS is 25x faster than Prima at
+365 snapshots and 9x at 13,140, at a tighter tolerance and finishing at a vertex,
+and the gap narrows with the horizon without closing at any horizon anyone would
+run. The measurements above are about problems, not about which code to prefer.
+
 ### Where the time actually goes: 55% sparse, 45% dense
 
-The paragraph above reasons from a whole-solve number that SpMV "is precisely the
-workload `Kernels` exists to move". That is the standard expectation for a
-first-order method, and it is half right in a way that changes what to do first.
+The 60,000-variable section above reasons from a whole-solve number that SpMV
+"is precisely the workload `Kernels` exists to move". That is the standard
+expectation for a first-order method, and it is half right in a way that changes
+what to do first.
 
 `KernelSplit` runs the real solve with a `Kernels` decorator that attributes wall
 clock to each of the eight operations. On `scigrid-de` at 1e-4 — 60,552 variables,

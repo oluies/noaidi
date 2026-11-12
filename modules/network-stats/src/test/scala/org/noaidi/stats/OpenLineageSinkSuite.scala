@@ -52,7 +52,9 @@ class OpenLineageSinkSuite extends munit.FunSuite:
     // The environment went under one key, so a consumer that does not know it can skip it
     // whole rather than per value.
     val env = event("run")("facets")("noaidi_environment")
-    assert(env("duckdb").str.startsWith("v1.3"), env.render())
+    // The shape rather than the version -- see `LineageFacets` for the bump that made
+    // pinning the minor a build failure with no cause in the diff.
+    assert(LineageFacets.namesDuckDb(env("duckdb").str), env.render())
   }
 
   test("the tables arrive as inputs with their schema") {

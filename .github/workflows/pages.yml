@@ -64,7 +64,7 @@ jobs:
         id: demo-link
         uses: actions/cache@v6
         with:
-          path: target/out/sjs1/scala-3.9.0/demo-js/demo-js-opt/main.js
+          path: target/out/sjs1/scala-3.10.1/demo-js/demo-js-opt/main.js
           key: demo-fulllink-${{ hashFiles('build.sbt', 'project/**', 'modules/**') }}
 
       - name: Link the demo
@@ -78,7 +78,7 @@ jobs:
           mkdir -p "$out"
           cp modules/demo-js/public/index.html "$out/"
           cp modules/demo-js/public/screenshot.png "$out/"
-          cp target/out/sjs1/scala-3.9.0/demo-js/demo-js-opt/main.js "$out/"
+          cp target/out/sjs1/scala-3.10.1/demo-js/demo-js-opt/main.js "$out/"
           # The page fetches this at run time; it is the same file network-model's own tests
           # read, so the demo cannot drift from the schema the JVM build is tested against.
           cp reference/goldens/schema.json "$out/"

@@ -161,7 +161,7 @@ at run time, which is why every number in this file comes from it.
 
 ```bash
 sbt demoJs/fullLinkJS
-cp target/out/sjs1/scala-3.9.0/demo-js/demo-js-opt/main.js modules/demo-js/public/
+cp target/out/sjs1/scala-3.10.1/demo-js/demo-js-opt/main.js modules/demo-js/public/
 cp reference/goldens/schema.json modules/demo-js/public/
 cd modules/demo-js/public && python3 -m http.server 8731
 ```

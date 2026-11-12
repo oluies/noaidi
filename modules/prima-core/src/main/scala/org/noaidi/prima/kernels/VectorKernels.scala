@@ -340,10 +340,14 @@ object VectorKernels:
     * raise the `NoClassDefFoundError` this exists to predict.
     */
   def isAvailable: Boolean =
+    // The two things `forName` throws when the class cannot be had: not found,
+    // which is the module left unresolved, and a `LinkageError` from loading or
+    // initialising it. Named rather than `Throwable`, which also swallowed an
+    // `OutOfMemoryError` and reported it as "no SIMD here".
     try
       Class.forName("jdk.incubator.vector.DoubleVector")
       true
-    catch case _: Throwable => false
+    catch case _: ClassNotFoundException | _: LinkageError => false
 
   def apply(): VectorKernels = new VectorKernels(alsoWidenAutoVectorised = false)
 

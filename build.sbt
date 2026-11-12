@@ -4,11 +4,11 @@
 // ZIO facade at the edge, and solver backends kept behind one interface so the
 // modeling layer never names a solver.
 
-ThisBuild / scalaVersion := "3.9.0"
+ThisBuild / scalaVersion := "3.10.1"
 ThisBuild / organization := "org.noaidi"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
 
-// Cyfra is published for Scala 3.6.4; 3.9.0 reads that TASTy fine -- a later
+// Cyfra is published for Scala 3.6.4; 3.10.1 reads that TASTy fine -- a later
 // compiler reading older TASTy is the supported direction -- and keeps the rest
 // of the ecosystem (ZIO, MUnit) on well-supported ground. The `primaCyfra` CI
 // step is what pins this: it is the only thing that compiles against those
@@ -395,13 +395,19 @@ lazy val primaCyfra = project
     Test / envVars ++= (
       if moltenVkIcd.exists then Map("VK_ICD_FILENAMES" -> moltenVkIcd.getAbsolutePath) else Map.empty
     ),
-    // Prepended, not overwritten, so an inherited value survives.
+    // The fallback path, not DYLD_LIBRARY_PATH. The latter is searched by leaf name
+    // ahead of every install path, so Homebrew's `libzip` (an unrelated library that
+    // happens to share the name) replaced the JDK's own `lib/libzip.dylib` and the
+    // forked test JVM died before running anything: `UnsatisfiedLinkError:
+    // java.util.zip.Inflater.initIDs()`. The fallback is consulted only for a
+    // library not found otherwise, which is the Vulkan loader's case and not the
+    // JDK's. Setting it replaces dyld's default, so that default is kept behind it,
+    // and an inherited value survives.
     Test / envVars ++= (
       if isMacArm && file(homebrewLib).isDirectory then
-        Map(
-          "DYLD_LIBRARY_PATH" ->
-            (homebrewLib +: sys.env.get("DYLD_LIBRARY_PATH").filter(_.nonEmpty).toSeq).mkString(":")
-        )
+        val inherited = sys.env.get("DYLD_FALLBACK_LIBRARY_PATH").filter(_.nonEmpty)
+          .getOrElse(s"${sys.props("user.home")}/lib:/usr/local/lib:/usr/lib")
+        Map("DYLD_FALLBACK_LIBRARY_PATH" -> s"$homebrewLib:$inherited")
       else Map.empty
     ),
     // Deliberately no -Dorg.lwjgl.librarypath: LWJGL ships its own natives and

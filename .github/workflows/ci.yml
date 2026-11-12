@@ -150,19 +150,31 @@ jobs:
   test:
     name: Test (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
+    # The early-access leg reports and does not gate: a red 28-ea means the next
+    # release breaks something, which is worth seeing early, but an EA build
+    # changes weekly and no user runs it. The job shows red; the run does not.
+    continue-on-error: ${{ matrix.early-access == true }}
     strategy:
       fail-fast: false
       matrix:
         # 21 is the current LTS floor; 25 is what the module is developed against;
         # 27 is the newest release, so a break there shows before the next LTS.
         java: ["21", "25", "27"]
+        # And the next one, ahead of its release. From Oracle's OpenJDK builds
+        # because setup-java offers early access from that distribution and not
+        # from Temurin. When 28 ships it replaces 27 above, on Temurin, and this
+        # moves to 29-ea.
+        include:
+          - java: "28-ea"
+            distribution: oracle-openjdk
+            early-access: true
 
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: ${{ matrix.distribution || 'temurin' }}
           java-version: ${{ matrix.java }}
           cache: sbt
 

@@ -57,7 +57,8 @@
       // deliberately: the Python interpreter is pinned exactly so a job whose whole subject is
       // pinning discipline does not float, and the JDK matrix is `["21", "25", "27"]` because 21
       // is the current LTS floor, 25 is what the modules are developed against and 27 is the
-      // newest release, moved by hand when the next one ships. A bot
+      // newest release, moved by hand when the next one ships -- as is the `28-ea` leg
+      // beside them, which reports without gating. A bot
       // proposing 3.15 and 26 is proposing to delete those decisions.
       //
       // Renovate's onboarding run proposed exactly those two, which is how they are named

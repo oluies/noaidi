@@ -153,8 +153,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 21 is the current LTS floor; 25 is what the module is developed against.
-        java: ["21", "25"]
+        # 21 is the current LTS floor; 25 is what the module is developed against;
+        # 27 is the newest release, so a break there shows before the next LTS.
+        java: ["21", "25", "27"]
 
     steps:
       - uses: actions/checkout@v7
@@ -706,7 +707,7 @@ jobs:
         # and Linux configurations and the natural explanation is summation
         # order, but the two configurations differ in JDK as well as
         # architecture — this at least separates those.
-        java: ["21", "25"]
+        java: ["21", "25", "27"]
 
     steps:
       - uses: actions/checkout@v7

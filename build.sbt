@@ -4,11 +4,11 @@
 // ZIO facade at the edge, and solver backends kept behind one interface so the
 // modeling layer never names a solver.
 
-ThisBuild / scalaVersion := "3.9.0"
+ThisBuild / scalaVersion := "3.10.1"
 ThisBuild / organization := "org.noaidi"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
 
-// Cyfra is published for Scala 3.6.4; 3.9.0 reads that TASTy fine -- a later
+// Cyfra is published for Scala 3.6.4; 3.10.1 reads that TASTy fine -- a later
 // compiler reading older TASTy is the supported direction -- and keeps the rest
 // of the ecosystem (ZIO, MUnit) on well-supported ground. The `primaCyfra` CI
 // step is what pins this: it is the only thing that compiles against those

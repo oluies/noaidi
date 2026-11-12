@@ -6,6 +6,8 @@ import io.computenode.cyfra.runtime.VkCyfraRuntime
 
 import java.util.concurrent.{CompletableFuture, LinkedBlockingQueue}
 
+import scala.annotation.nowarn
+
 /** A Vulkan runtime and one open allocation, held for as long as the caller
   * wants them, on the single thread that is allowed to touch them.
   *
@@ -42,6 +44,10 @@ private[cyfra] final class DeviceLoop extends AutoCloseable:
     */
   @volatile private var dead = false
 
+  // Both catches below take `Throwable` on purpose, for the reasons they give, so
+  // Scala 3.10's E235 ("Catching Throwable can lead to unexpected behavior") is
+  // silenced by id here and nowhere else.
+  @nowarn("id=E235")
   private val body: Runnable = () =>
     try
       val runtime = VkCyfraRuntime()

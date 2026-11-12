@@ -1039,6 +1039,10 @@ object Stats:
     */
   def of(result: LopfResult): Stats =
     val conn = DriverManager.getConnection("jdbc:duckdb:")
+    // Closed on every way out but success, without catching anything: a `finally` keyed
+    // on a flag covers what `catch case _: Throwable` did -- fatal errors included -- and
+    // leaves the throw itself untouched.
+    var built = false
     try
       val st = conn.createStatement()
       try StatsSchema.ddl.foreach(st.execute)
@@ -1060,12 +1064,11 @@ object Stats:
             .map(id => s"$component '$id'")
         }
       }
-      new Stats(conn, n.isMultiPeriod,
-                n.table("Bus").exists(_.static.contains("country")), unpriceable)
-    catch
-      case e: Throwable =>
-        conn.close()
-        throw e
+      val stats = new Stats(conn, n.isMultiPeriod,
+                            n.table("Bus").exists(_.static.contains("country")), unpriceable)
+      built = true
+      stats
+    finally if !built then conn.close()
 
   /** Everything the schema holds.
     *

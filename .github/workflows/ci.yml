@@ -154,6 +154,17 @@ jobs:
     # release breaks something, which is worth seeing early, but an EA build
     # changes weekly and no user runs it. The job shows red; the run does not.
     continue-on-error: ${{ matrix.early-access == true }}
+    # Without this the limit is GitHub's default of six hours, and on #145 the
+    # JDK 21 leg used all of it: every suite had reported "0 failed" by its
+    # sixth minute, then sbt never exited and the job sat until it was
+    # cancelled. Not reproduced since, in two runs. A leg takes five minutes,
+    # so thirty is room for a slow runner and a hang costs half an hour.
+    #
+    # A timeout cancels rather than fails, and a cancelled job takes the run to
+    # `cancelled` whatever `continue-on-error` says -- see `kernel-split` -- so
+    # a hung 28-ea leg still reads as a red run. It did under the default too;
+    # this only makes it arrive sooner.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

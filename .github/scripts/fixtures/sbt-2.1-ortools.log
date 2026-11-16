@@ -1,0 +1,5 @@
+Test run org.noaidi.prima.ortools.SolverAgreementSuite finished: 0 failed, 0 ignored, 2 total 6.238s
+Test run org.noaidi.prima.ortools.OrToolsSolverSuite finished: 0 failed, 0 ignored, 8 total 6.242s
+E0000 00:00:1794839491.448961 71699581 linear_solver.cc:1891] No solution exists. MPSolverInterface::result_status_ = MPSOLVER_NOT_SOLVEDTest run org.noaidi.prima.ortools.PdlpComparisonSuite finished: 0 failed, 0 ignored, 7 total 9.404s
+E0000 00:00:1794839491.489289 71699581 linear_solver.cc:1891] No solution exists. MPSolverInterface::result_status_ = MPSOLVER_NOT_SOLVED[info] passed: total 3, failed 0, errors 0, passed 3, cached 0
+[info] passed: total 3, failed 0, errors 0, passed 3, cached 0

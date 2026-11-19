@@ -444,7 +444,7 @@ lazy val primaNetlib = project
 val upickleVersion = "4.4.3"
 val duckdbVersion  = "2.0.0.1"
 val openlineageVersion = "1.55.0"
-val jhdfVersion    = "0.13.0"
+val jhdfVersion    = "0.15.0"
 
 // Where the network modules find the goldens and the port's own sources.
 //

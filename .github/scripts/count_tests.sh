@@ -42,6 +42,19 @@
 #     leaning on the matrix.
 
 #
+# ==sbt 2.1==
+#
+# sbt 2.1.0 no longer prints `Passed: Total`, so on it `summary` is always 0 and
+# `total` is the per-suite count alone. Its replacement, `passed: total N, ...,
+# cached M`, is deliberately *not* read: N counts test classes, not tests --
+# measured, `primaOrtools/testFull` printed `passed: total 3` over 3 suites and
+# 17 tests -- so summing it would put a suite count beside a test count. That
+# leaves a full replay uncountable, and on 2.1 `testFull`, which is what every
+# CI step runs, was not replayed: three repeat runs over a warm cache all ran
+# the frameworks and reported `cached 0`. Plain `test` does replay (`cached 3`,
+# no framework lines), and reads 0 here, which fails the floor rather than
+# passing it.
+#
 # Usage: count_tests.sh <log-file>
 set -euo pipefail
 

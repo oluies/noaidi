@@ -76,6 +76,18 @@ CASES = (
         "all in this one, which is the pypsa-drift outage exactly",
     ),
     (
+        "sbt-2.1-ortools.log",
+        17,
+        0,
+        17,
+        False,
+        "an ordinary run on sbt 2.1.0, extracted from `primaOrtools/testFull`. Two traps in one "
+        "log: OR-Tools' native stderr is glued onto the front of sbt's lines, so an anchored "
+        "pattern loses PdlpComparisonSuite's 4 tests; and 2.1's `passed: total 3` counts test "
+        "classes, not tests, so a case-insensitive summary pattern would report 3 or 6 here "
+        "instead of 0",
+    ),
+    (
         "sbt-nothing.log",
         0,
         0,

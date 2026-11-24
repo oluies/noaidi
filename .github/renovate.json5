@@ -43,7 +43,11 @@
   // Worth having precisely because of the `enabled: false` rules below: the dashboard is
   // where a suppressed update is still visible. Dependabot had no equivalent, which is why
   // its own comment had to reason at length about what its `ignore` list hid.
-  dependencyDashboard: true,
+  // Migrated from `dependencyDashboard: true`: Renovate now takes an object here, and the
+  // boolean is deprecated. Done by hand rather than by its own config-migration PR, which
+  // reformatted the whole file and deleted every comment in it -- i.e. everything below that
+  // explains why this configuration looks the way it does.
+  dependencyDashboard: { enabled: true },
 
   packageRules: [
     {
